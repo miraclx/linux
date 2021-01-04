@@ -56,12 +56,6 @@ static inline bool nfs_lookup_is_soft_revalidate(const struct dentry *dentry)
 #define NFS_UNSPEC_RETRANS	(UINT_MAX)
 #define NFS_UNSPEC_TIMEO	(UINT_MAX)
 
-/*
- * Maximum number of pages that readdir can use for creating
- * a vmapped array of pages.
- */
-#define NFS_MAX_READDIR_PAGES 8
-
 struct nfs_client_initdata {
 	unsigned long init_flags;
 	const char *hostname;			/* Hostname of the server */
@@ -668,7 +662,8 @@ void nfs_super_set_maxbytes(struct super_block *sb, __u64 maxfilesize)
 }
 
 /*
- * Record the page as unstable and mark its inode as dirty.
+ * Record the page as unstable (an extra writeback period) and mark its
+ * inode as dirty.
  */
 static inline
 void nfs_mark_page_unstable(struct page *page, struct nfs_commit_info *cinfo)
@@ -676,8 +671,11 @@ void nfs_mark_page_unstable(struct page *page, struct nfs_commit_info *cinfo)
 	if (!cinfo->dreq) {
 		struct inode *inode = page_file_mapping(page)->host;
 
-		inc_node_page_state(page, NR_UNSTABLE_NFS);
-		inc_wb_stat(&inode_to_bdi(inode)->wb, WB_RECLAIMABLE);
+		/* This page is really still in write-back - just that the
+		 * writeback is happening on the server now.
+		 */
+		inc_node_page_state(page, NR_WRITEBACK);
+		inc_wb_stat(&inode_to_bdi(inode)->wb, WB_WRITEBACK);
 		__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
 	}
 }

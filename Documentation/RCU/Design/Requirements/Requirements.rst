@@ -463,7 +463,7 @@ again without disrupting RCU readers.
 This guarantee was only partially premeditated. DYNIX/ptx used an
 explicit memory barrier for publication, but had nothing resembling
 ``rcu_dereference()`` for subscription, nor did it have anything
-resembling the ``smp_read_barrier_depends()`` that was later subsumed
+resembling the dependency-ordering barrier that was later subsumed
 into ``rcu_dereference()`` and later still into ``READ_ONCE()``. The
 need for these operations made itself known quite suddenly at a
 late-1990s meeting with the DEC Alpha architects, back in the days when
@@ -1929,70 +1929,71 @@ The Linux-kernel CPU-hotplug implementation has notifiers that are used
 to allow the various kernel subsystems (including RCU) to respond
 appropriately to a given CPU-hotplug operation. Most RCU operations may
 be invoked from CPU-hotplug notifiers, including even synchronous
-grace-period operations such as ``synchronize_rcu()`` and
-``synchronize_rcu_expedited()``.
+grace-period operations such as (``synchronize_rcu()`` and
+``synchronize_rcu_expedited()``).  However, these synchronous operations
+do block and therefore cannot be invoked from notifiers that execute via
+``stop_machine()``, specifically those between the ``CPUHP_AP_OFFLINE``
+and ``CPUHP_AP_ONLINE`` states.
 
-However, all-callback-wait operations such as ``rcu_barrier()`` are also
-not supported, due to the fact that there are phases of CPU-hotplug
-operations where the outgoing CPU's callbacks will not be invoked until
-after the CPU-hotplug operation ends, which could also result in
-deadlock. Furthermore, ``rcu_barrier()`` blocks CPU-hotplug operations
-during its execution, which results in another type of deadlock when
-invoked from a CPU-hotplug notifier.
+In addition, all-callback-wait operations such as ``rcu_barrier()`` may
+not be invoked from any CPU-hotplug notifier.  This restriction is due
+to the fact that there are phases of CPU-hotplug operations where the
+outgoing CPU's callbacks will not be invoked until after the CPU-hotplug
+operation ends, which could also result in deadlock. Furthermore,
+``rcu_barrier()`` blocks CPU-hotplug operations during its execution,
+which results in another type of deadlock when invoked from a CPU-hotplug
+notifier.
+
+Finally, RCU must avoid deadlocks due to interaction between hotplug,
+timers and grace period processing. It does so by maintaining its own set
+of books that duplicate the centrally maintained ``cpu_online_mask``,
+and also by reporting quiescent states explicitly when a CPU goes
+offline.  This explicit reporting of quiescent states avoids any need
+for the force-quiescent-state loop (FQS) to report quiescent states for
+offline CPUs.  However, as a debugging measure, the FQS loop does splat
+if offline CPUs block an RCU grace period for too long.
+
+An offline CPU's quiescent state will be reported either:
+
+1.  As the CPU goes offline using RCU's hotplug notifier (``rcu_report_dead()``).
+2.  When grace period initialization (``rcu_gp_init()``) detects a
+    race either with CPU offlining or with a task unblocking on a leaf
+    ``rcu_node`` structure whose CPUs are all offline.
+
+The CPU-online path (``rcu_cpu_starting()``) should never need to report
+a quiescent state for an offline CPU.  However, as a debugging measure,
+it does emit a warning if a quiescent state was not already reported
+for that CPU.
+
+During the checking/modification of RCU's hotplug bookkeeping, the
+corresponding CPU's leaf node lock is held. This avoids race conditions
+between RCU's hotplug notifier hooks, the grace period initialization
+code, and the FQS loop, all of which refer to or modify this bookkeeping.
 
 Scheduler and RCU
 ~~~~~~~~~~~~~~~~~
 
-RCU depends on the scheduler, and the scheduler uses RCU to protect some
-of its data structures. The preemptible-RCU ``rcu_read_unlock()``
-implementation must therefore be written carefully to avoid deadlocks
-involving the scheduler's runqueue and priority-inheritance locks. In
-particular, ``rcu_read_unlock()`` must tolerate an interrupt where the
-interrupt handler invokes both ``rcu_read_lock()`` and
-``rcu_read_unlock()``. This possibility requires ``rcu_read_unlock()``
-to use negative nesting levels to avoid destructive recursion via
-interrupt handler's use of RCU.
-
-This scheduler-RCU requirement came as a `complete
-surprise <https://lwn.net/Articles/453002/>`__.
-
-As noted above, RCU makes use of kthreads, and it is necessary to avoid
-excessive CPU-time accumulation by these kthreads. This requirement was
-no surprise, but RCU's violation of it when running context-switch-heavy
-workloads when built with ``CONFIG_NO_HZ_FULL=y`` `did come as a
-surprise
+RCU makes use of kthreads, and it is necessary to avoid excessive CPU-time
+accumulation by these kthreads. This requirement was no surprise, but
+RCU's violation of it when running context-switch-heavy workloads when
+built with ``CONFIG_NO_HZ_FULL=y`` `did come as a surprise
 [PDF] <http://www.rdrop.com/users/paulmck/scalability/paper/BareMetal.2015.01.15b.pdf>`__.
 RCU has made good progress towards meeting this requirement, even for
 context-switch-heavy ``CONFIG_NO_HZ_FULL=y`` workloads, but there is
 room for further improvement.
 
-It is forbidden to hold any of scheduler's runqueue or
-priority-inheritance spinlocks across an ``rcu_read_unlock()`` unless
-interrupts have been disabled across the entire RCU read-side critical
-section, that is, up to and including the matching ``rcu_read_lock()``.
-Violating this restriction can result in deadlocks involving these
-scheduler spinlocks. There was hope that this restriction might be
-lifted when interrupt-disabled calls to ``rcu_read_unlock()`` started
-deferring the reporting of the resulting RCU-preempt quiescent state
-until the end of the corresponding interrupts-disabled region.
-Unfortunately, timely reporting of the corresponding quiescent state to
-expedited grace periods requires a call to ``raise_softirq()``, which
-can acquire these scheduler spinlocks. In addition, real-time systems
-using RCU priority boosting need this restriction to remain in effect
-because deferred quiescent-state reporting would also defer deboosting,
-which in turn would degrade real-time latencies.
+There is no longer any prohibition against holding any of
+scheduler's runqueue or priority-inheritance spinlocks across an
+``rcu_read_unlock()``, even if interrupts and preemption were enabled
+somewhere within the corresponding RCU read-side critical section.
+Therefore, it is now perfectly legal to execute ``rcu_read_lock()``
+with preemption enabled, acquire one of the scheduler locks, and hold
+that lock across the matching ``rcu_read_unlock()``.
 
-In theory, if a given RCU read-side critical section could be guaranteed
-to be less than one second in duration, holding a scheduler spinlock
-across that critical section's ``rcu_read_unlock()`` would require only
-that preemption be disabled across the entire RCU read-side critical
-section, not interrupts. Unfortunately, given the possibility of vCPU
-preemption, long-running interrupts, and so on, it is not possible in
-practice to guarantee that a given RCU read-side critical section will
-complete in less than one second. Therefore, as noted above, if
-scheduler spinlocks are held across a given call to
-``rcu_read_unlock()``, interrupts must be disabled across the entire RCU
-read-side critical section.
+Similarly, the RCU flavor consolidation has removed the need for negative
+nesting.  The fact that interrupt-disabled regions of code act as RCU
+read-side critical sections implicitly avoids earlier issues that used
+to result in destructive recursion via interrupt handler's use of RCU.
 
 Tracing and RCU
 ~~~~~~~~~~~~~~~
@@ -2191,7 +2192,7 @@ scheduling-clock interrupt be enabled when RCU needs it to be:
    this sort of thing.
 #. If a CPU is in a portion of the kernel that is absolutely positively
    no-joking guaranteed to never execute any RCU read-side critical
-   sections, and RCU believes this CPU to to be idle, no problem. This
+   sections, and RCU believes this CPU to be idle, no problem. This
    sort of thing is used by some architectures for light-weight
    exception handlers, which can then avoid the overhead of
    ``rcu_irq_enter()`` and ``rcu_irq_exit()`` at exception entry and
@@ -2460,7 +2461,7 @@ However, there are legitimate preemptible-RCU implementations that do
 not have this property, given that any point in the code outside of an
 RCU read-side critical section can be a quiescent state. Therefore,
 *RCU-sched* was created, which follows “classic” RCU in that an
-RCU-sched grace period waits for for pre-existing interrupt and NMI
+RCU-sched grace period waits for pre-existing interrupt and NMI
 handlers. In kernels built with ``CONFIG_PREEMPT=n``, the RCU and
 RCU-sched APIs have identical implementations, while kernels built with
 ``CONFIG_PREEMPT=y`` provide a separate implementation for each.
@@ -2612,7 +2613,12 @@ not work to have these markers in the trampoline itself, because there
 would need to be instructions following ``rcu_read_unlock()``. Although
 ``synchronize_rcu()`` would guarantee that execution reached the
 ``rcu_read_unlock()``, it would not be able to guarantee that execution
-had completely left the trampoline.
+had completely left the trampoline. Worse yet, in some situations
+the trampoline's protection must extend a few instructions *prior* to
+execution reaching the trampoline.  For example, these few instructions
+might calculate the address of the trampoline, so that entering the
+trampoline would be pre-ordained a surprisingly long time before execution
+actually reached the trampoline itself.
 
 The solution, in the form of `Tasks
 RCU <https://lwn.net/Articles/607117/>`__, is to have implicit read-side
