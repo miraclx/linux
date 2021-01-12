@@ -7,7 +7,6 @@
  */
 
 #include <linux/clk.h>
-#include <linux/dma-mapping.h>
 #include <linux/dmaengine.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -19,8 +18,7 @@
 
 #include <crypto/internal/hash.h>
 #include <crypto/md5.h>
-#include <crypto/sha1.h>
-#include <crypto/sha2.h>
+#include <crypto/sha.h>
 
 #define CR_RESET			0
 #define CR_RESET_SET			1
@@ -332,7 +330,7 @@ static int img_hash_write_via_dma(struct img_hash_dev *hdev)
 static int img_hash_dma_init(struct img_hash_dev *hdev)
 {
 	struct dma_slave_config dma_conf;
-	int err;
+	int err = -EINVAL;
 
 	hdev->dma_lch = dma_request_chan(hdev->dev, "tx");
 	if (IS_ERR(hdev->dma_lch)) {

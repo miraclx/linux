@@ -90,6 +90,8 @@ static int var_to_pixfmt(struct fb_var_screeninfo *var)
 			else
 				return PIXFMT_BGR888UNPACK;
 		}
+
+		/* fall through */
 	}
 
 	return -EINVAL;

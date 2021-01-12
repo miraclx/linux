@@ -22,7 +22,7 @@
 	gpio-leds {
 		compatible = "gpio-leds";
 
-		blue_led: led-0 {
+		blue {
 			label = "mk808:blue:power";
 			gpios = <&gpio0 RK_PA3 GPIO_ACTIVE_HIGH>;
 			default-state = "off";

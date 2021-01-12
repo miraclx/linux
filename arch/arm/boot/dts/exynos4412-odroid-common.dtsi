@@ -22,12 +22,12 @@
 		reg = <0x0204F000 0x1000>;
 	};
 
-	gpio_keys: gpio-keys {
+	gpio_keys {
 		compatible = "gpio-keys";
 		pinctrl-names = "default";
 		pinctrl-0 = <&gpio_power_key>;
 
-		power-key {
+		power_key {
 			gpios = <&gpx1 3 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_POWER>;
 			label = "power key";
@@ -64,6 +64,25 @@
 		xusbxti {
 			compatible = "samsung,clock-xusbxti";
 			clock-frequency = <24000000>;
+		};
+	};
+
+	thermal-zones {
+		cpu_thermal: cpu-thermal {
+			cooling-maps {
+				cooling_map0: map0 {
+				     /* Corresponds to 800MHz at freq_table */
+				     cooling-device = <&cpu0 7 7>, <&cpu1 7 7>,
+						      <&cpu2 7 7>, <&cpu3 7 7>;
+				};
+				cooling_map1: map1 {
+				     /* Corresponds to 200MHz at freq_table */
+				     cooling-device = <&cpu0 13 13>,
+						      <&cpu1 13 13>,
+						      <&cpu2 13 13>,
+						      <&cpu3 13 13>;
+			       };
+		       };
 		};
 	};
 };
@@ -155,23 +174,8 @@
 	};
 };
 
-&cpu_thermal {
-	cooling-maps {
-		cooling_map0: map0 {
-			/* Corresponds to 800MHz at freq_table */
-			cooling-device = <&cpu0 7 7>, <&cpu1 7 7>,
-					 <&cpu2 7 7>, <&cpu3 7 7>;
-		};
-		cooling_map1: map1 {
-			/* Corresponds to 200MHz at freq_table */
-			cooling-device = <&cpu0 13 13>, <&cpu1 13 13>,
-					 <&cpu2 13 13>, <&cpu3 13 13>;
-		};
-	};
-};
-
 &pinctrl_1 {
-	gpio_power_key: power-key {
+	gpio_power_key: power_key {
 		samsung,pins = "gpx1-3";
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
@@ -255,6 +259,7 @@
 };
 
 &hsotg {
+	dr_mode = "peripheral";
 	status = "okay";
 	vusb_d-supply = <&ldo15_reg>;
 	vusb_a-supply = <&ldo12_reg>;
@@ -265,7 +270,7 @@
 	samsung,i2c-max-bus-freq = <400000>;
 	status = "okay";
 
-	usb3503: usb-hub@8 {
+	usb3503: usb3503@8 {
 		compatible = "smsc,usb3503";
 		reg = <0x08>;
 
@@ -425,7 +430,7 @@
 			};
 
 			buck1_reg: BUCK1 {
-				regulator-name = "VDD_MIF";
+				regulator-name = "vdd_mif";
 				regulator-min-microvolt = <900000>;
 				regulator-max-microvolt = <1100000>;
 				regulator-always-on;
@@ -433,7 +438,7 @@
 			};
 
 			buck2_reg: BUCK2 {
-				regulator-name = "VDD_ARM";
+				regulator-name = "vdd_arm";
 				regulator-min-microvolt = <900000>;
 				regulator-max-microvolt = <1350000>;
 				regulator-always-on;
@@ -441,7 +446,7 @@
 			};
 
 			buck3_reg: BUCK3 {
-				regulator-name = "VDD_INT";
+				regulator-name = "vdd_int";
 				regulator-min-microvolt = <900000>;
 				regulator-max-microvolt = <1050000>;
 				regulator-always-on;
@@ -449,7 +454,7 @@
 			};
 
 			buck4_reg: BUCK4 {
-				regulator-name = "VDD_G3D";
+				regulator-name = "vdd_g3d";
 				regulator-min-microvolt = <900000>;
 				regulator-max-microvolt = <1100000>;
 				regulator-microvolt-offset = <50000>;
@@ -491,7 +496,7 @@
 
 &i2c_1 {
 	status = "okay";
-	max98090: audio-codec@10 {
+	max98090: max98090@10 {
 		compatible = "maxim,max98090";
 		reg = <0x10>;
 		interrupt-parent = <&gpx0>;

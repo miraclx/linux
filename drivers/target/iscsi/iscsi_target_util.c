@@ -1228,20 +1228,18 @@ void iscsit_print_session_params(struct iscsi_session *sess)
 	iscsi_dump_sess_ops(sess->sess_ops);
 }
 
-int rx_data(
+static int iscsit_do_rx_data(
 	struct iscsi_conn *conn,
-	struct kvec *iov,
-	int iov_count,
-	int data)
+	struct iscsi_data_count *count)
 {
-	int rx_loop = 0, total_rx = 0;
+	int data = count->data_length, rx_loop = 0, total_rx = 0;
 	struct msghdr msg;
 
 	if (!conn || !conn->sock || !conn->conn_ops)
 		return -1;
 
 	memset(&msg, 0, sizeof(struct msghdr));
-	iov_iter_kvec(&msg.msg_iter, READ, iov, iov_count, data);
+	iov_iter_kvec(&msg.msg_iter, READ, count->iov, count->iov_count, data);
 
 	while (msg_data_left(&msg)) {
 		rx_loop = sock_recvmsg(conn->sock, &msg, MSG_WAITALL);
@@ -1256,6 +1254,26 @@ int rx_data(
 	}
 
 	return total_rx;
+}
+
+int rx_data(
+	struct iscsi_conn *conn,
+	struct kvec *iov,
+	int iov_count,
+	int data)
+{
+	struct iscsi_data_count c;
+
+	if (!conn || !conn->sock || !conn->conn_ops)
+		return -1;
+
+	memset(&c, 0, sizeof(struct iscsi_data_count));
+	c.iov = iov;
+	c.iov_count = iov_count;
+	c.data_length = data;
+	c.type = ISCSI_RX_DATA;
+
+	return iscsit_do_rx_data(conn, &c);
 }
 
 int tx_data(

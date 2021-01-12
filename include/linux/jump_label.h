@@ -68,7 +68,7 @@
  * Lacking toolchain and or architecture support, static keys fall back to a
  * simple conditional branch.
  *
- * Additional babbling in: Documentation/staging/static-keys.rst
+ * Additional babbling in: Documentation/static-keys.txt
  */
 
 #ifndef __ASSEMBLY__

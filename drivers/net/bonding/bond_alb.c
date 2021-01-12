@@ -942,10 +942,9 @@ struct alb_walk_data {
 	bool strict_match;
 };
 
-static int alb_upper_dev_walk(struct net_device *upper,
-			      struct netdev_nested_priv *priv)
+static int alb_upper_dev_walk(struct net_device *upper, void *_data)
 {
-	struct alb_walk_data *data = (struct alb_walk_data *)priv->data;
+	struct alb_walk_data *data = _data;
 	bool strict_match = data->strict_match;
 	struct bonding *bond = data->bond;
 	struct slave *slave = data->slave;
@@ -984,7 +983,6 @@ static void alb_send_learning_packets(struct slave *slave, u8 mac_addr[],
 				      bool strict_match)
 {
 	struct bonding *bond = bond_get_bond_by_slave(slave);
-	struct netdev_nested_priv priv;
 	struct alb_walk_data data = {
 		.strict_match = strict_match,
 		.mac_addr = mac_addr,
@@ -992,7 +990,6 @@ static void alb_send_learning_packets(struct slave *slave, u8 mac_addr[],
 		.bond = bond,
 	};
 
-	priv.data = (void *)&data;
 	/* send untagged */
 	alb_send_lp_vid(slave, mac_addr, 0, 0);
 
@@ -1000,7 +997,7 @@ static void alb_send_learning_packets(struct slave *slave, u8 mac_addr[],
 	 * for that device.
 	 */
 	rcu_read_lock();
-	netdev_walk_all_upper_dev_rcu(bond->dev, alb_upper_dev_walk, &priv);
+	netdev_walk_all_upper_dev_rcu(bond->dev, alb_upper_dev_walk, &data);
 	rcu_read_unlock();
 }
 
@@ -1209,8 +1206,8 @@ static int alb_handle_addr_collision_on_attach(struct bonding *bond, struct slav
 
 /**
  * alb_set_mac_address
- * @bond: bonding we're working on
- * @addr: MAC address to set
+ * @bond:
+ * @addr:
  *
  * In TLB mode all slaves are configured to the bond's hw address, but set
  * their dev_addr field to different addresses (based on their permanent hw
@@ -1321,7 +1318,8 @@ static netdev_tx_t bond_do_alb_xmit(struct sk_buff *skb, struct bonding *bond,
 					tx_slave->dev->dev_addr);
 		}
 
-		return bond_dev_queue_xmit(bond, skb, tx_slave->dev);
+		bond_dev_queue_xmit(bond, skb, tx_slave->dev);
+		goto out;
 	}
 
 	if (tx_slave && bond->params.tlb_dynamic_lb) {
@@ -1331,14 +1329,16 @@ static netdev_tx_t bond_do_alb_xmit(struct sk_buff *skb, struct bonding *bond,
 	}
 
 	/* no suitable interface, frame not sent */
-	return bond_tx_drop(bond->dev, skb);
+	bond_tx_drop(bond->dev, skb);
+out:
+	return NETDEV_TX_OK;
 }
 
-struct slave *bond_xmit_tlb_slave_get(struct bonding *bond,
-				      struct sk_buff *skb)
+netdev_tx_t bond_tlb_xmit(struct sk_buff *skb, struct net_device *bond_dev)
 {
-	struct slave *tx_slave = NULL;
+	struct bonding *bond = netdev_priv(bond_dev);
 	struct ethhdr *eth_data;
+	struct slave *tx_slave = NULL;
 	u32 hash_index;
 
 	skb_reset_mac_header(skb);
@@ -1360,7 +1360,7 @@ struct slave *bond_xmit_tlb_slave_get(struct bonding *bond,
 				struct bond_up_slave *slaves;
 				unsigned int count;
 
-				slaves = rcu_dereference(bond->usable_slaves);
+				slaves = rcu_dereference(bond->slave_arr);
 				count = slaves ? READ_ONCE(slaves->count) : 0;
 				if (likely(count))
 					tx_slave = slaves->arr[hash_index %
@@ -1369,29 +1369,20 @@ struct slave *bond_xmit_tlb_slave_get(struct bonding *bond,
 			break;
 		}
 	}
-	return tx_slave;
-}
-
-netdev_tx_t bond_tlb_xmit(struct sk_buff *skb, struct net_device *bond_dev)
-{
-	struct bonding *bond = netdev_priv(bond_dev);
-	struct slave *tx_slave;
-
-	tx_slave = bond_xmit_tlb_slave_get(bond, skb);
 	return bond_do_alb_xmit(skb, bond, tx_slave);
 }
 
-struct slave *bond_xmit_alb_slave_get(struct bonding *bond,
-				      struct sk_buff *skb)
+netdev_tx_t bond_alb_xmit(struct sk_buff *skb, struct net_device *bond_dev)
 {
-	struct alb_bond_info *bond_info = &(BOND_ALB_INFO(bond));
-	static const __be32 ip_bcast = htonl(0xffffffff);
-	struct slave *tx_slave = NULL;
-	const u8 *hash_start = NULL;
-	bool do_tx_balance = true;
+	struct bonding *bond = netdev_priv(bond_dev);
 	struct ethhdr *eth_data;
-	u32 hash_index = 0;
+	struct alb_bond_info *bond_info = &(BOND_ALB_INFO(bond));
+	struct slave *tx_slave = NULL;
+	static const __be32 ip_bcast = htonl(0xffffffff);
 	int hash_size = 0;
+	bool do_tx_balance = true;
+	u32 hash_index = 0;
+	const u8 *hash_start = NULL;
 
 	skb_reset_mac_header(skb);
 	eth_data = eth_hdr(skb);
@@ -1503,22 +1494,14 @@ struct slave *bond_xmit_alb_slave_get(struct bonding *bond,
 			struct bond_up_slave *slaves;
 			unsigned int count;
 
-			slaves = rcu_dereference(bond->usable_slaves);
+			slaves = rcu_dereference(bond->slave_arr);
 			count = slaves ? READ_ONCE(slaves->count) : 0;
 			if (likely(count))
 				tx_slave = slaves->arr[bond_xmit_hash(bond, skb) %
 						       count];
 		}
 	}
-	return tx_slave;
-}
 
-netdev_tx_t bond_alb_xmit(struct sk_buff *skb, struct net_device *bond_dev)
-{
-	struct bonding *bond = netdev_priv(bond_dev);
-	struct slave *tx_slave = NULL;
-
-	tx_slave = bond_xmit_alb_slave_get(bond, skb);
 	return bond_do_alb_xmit(skb, bond, tx_slave);
 }
 

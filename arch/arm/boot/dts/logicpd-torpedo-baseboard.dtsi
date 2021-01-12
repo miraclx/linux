@@ -65,7 +65,6 @@
 		pinctrl-0 = <&pwm_pins>;
 		ti,timers = <&timer10>;
 		#pwm-cells = <3>;
-		ti,clock-source = <0x01>;
 	};
 
 };
@@ -81,8 +80,6 @@
 };
 
 &mcbsp2 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&mcbsp2_pins>;
 	status = "okay";
 };
 
@@ -115,7 +112,7 @@
 };
 
 &dss {
-	status = "okay";
+	status = "ok";
 	vdds_dsi-supply = <&vpll2>;
 	vdda_video-supply = <&vpll2>;
 	pinctrl-names = "default";

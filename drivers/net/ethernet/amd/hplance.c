@@ -15,7 +15,6 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/errno.h>
-#include <linux/pgtable.h>
 /* Used for the temporal inet entries and routing */
 #include <linux/socket.h>
 #include <linux/route.h>
@@ -25,6 +24,7 @@
 #include <linux/skbuff.h>
 
 #include <asm/io.h>
+#include <asm/pgtable.h>
 
 #include "hplance.h"
 

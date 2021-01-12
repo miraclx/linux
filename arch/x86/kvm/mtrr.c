@@ -84,8 +84,12 @@ bool kvm_mtrr_valid(struct kvm_vcpu *vcpu, u32 msr, u64 data)
 	} else
 		/* MTRR mask */
 		mask |= 0x7ff;
+	if (data & mask) {
+		kvm_inject_gp(vcpu, 0);
+		return false;
+	}
 
-	return (data & mask) == 0;
+	return true;
 }
 EXPORT_SYMBOL_GPL(kvm_mtrr_valid);
 

@@ -42,14 +42,11 @@ static int uverbs_free_counters(struct ib_uobject *uobject,
 	struct ib_counters *counters = uobject->object;
 	int ret;
 
-	if (atomic_read(&counters->usecnt))
-		return -EBUSY;
-
-	ret = counters->device->ops.destroy_counters(counters);
+	ret = ib_destroy_usecnt(&counters->usecnt, why, uobject);
 	if (ret)
 		return ret;
-	kfree(counters);
-	return 0;
+
+	return counters->device->ops.destroy_counters(counters);
 }
 
 static int UVERBS_HANDLER(UVERBS_METHOD_COUNTERS_CREATE)(
@@ -69,19 +66,20 @@ static int UVERBS_HANDLER(UVERBS_METHOD_COUNTERS_CREATE)(
 	if (!ib_dev->ops.create_counters)
 		return -EOPNOTSUPP;
 
-	counters = rdma_zalloc_drv_obj(ib_dev, ib_counters);
-	if (!counters)
-		return -ENOMEM;
+	counters = ib_dev->ops.create_counters(ib_dev, attrs);
+	if (IS_ERR(counters)) {
+		ret = PTR_ERR(counters);
+		goto err_create_counters;
+	}
 
 	counters->device = ib_dev;
 	counters->uobject = uobj;
 	uobj->object = counters;
 	atomic_set(&counters->usecnt, 0);
 
-	ret = ib_dev->ops.create_counters(counters, attrs);
-	if (ret)
-		kfree(counters);
+	return 0;
 
+err_create_counters:
 	return ret;
 }
 

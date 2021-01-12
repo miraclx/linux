@@ -36,7 +36,6 @@
 
 struct iqs621_als_private {
 	struct iqs62x_core *iqs62x;
-	struct iio_dev *indio_dev;
 	struct notifier_block notifier;
 	struct mutex lock;
 	bool light_en;
@@ -104,7 +103,7 @@ static int iqs621_als_notifier(struct notifier_block *notifier,
 
 	iqs621_als = container_of(notifier, struct iqs621_als_private,
 				  notifier);
-	indio_dev = iqs621_als->indio_dev;
+	indio_dev = iio_priv_to_dev(iqs621_als);
 	timestamp = iio_get_time_ns(indio_dev);
 
 	mutex_lock(&iqs621_als->lock);
@@ -192,7 +191,7 @@ err_mutex:
 static void iqs621_als_notifier_unregister(void *context)
 {
 	struct iqs621_als_private *iqs621_als = context;
-	struct iio_dev *indio_dev = iqs621_als->indio_dev;
+	struct iio_dev *indio_dev = iio_priv_to_dev(iqs621_als);
 	int ret;
 
 	ret = blocking_notifier_chain_unregister(&iqs621_als->iqs62x->nh,
@@ -552,7 +551,6 @@ static int iqs621_als_probe(struct platform_device *pdev)
 
 	iqs621_als = iio_priv(indio_dev);
 	iqs621_als->iqs62x = iqs62x;
-	iqs621_als->indio_dev = indio_dev;
 
 	if (iqs62x->dev_desc->prod_num == IQS622_PROD_NUM) {
 		ret = regmap_read(iqs62x->regmap, IQS622_IR_THRESH_TOUCH,
@@ -582,6 +580,7 @@ static int iqs621_als_probe(struct platform_device *pdev)
 	}
 
 	indio_dev->modes = INDIO_DIRECT_MODE;
+	indio_dev->dev.parent = &pdev->dev;
 	indio_dev->name = iqs62x->dev_desc->dev_name;
 	indio_dev->info = &iqs621_als_info;
 

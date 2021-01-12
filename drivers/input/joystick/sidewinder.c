@@ -656,19 +656,16 @@ static int sw_connect(struct gameport *gameport, struct gameport_driver *drv)
 
 			switch (i * m) {
 				case 60:
-					sw->number++;
-					fallthrough;
+					sw->number++;			/* fall through */
 				case 45:				/* Ambiguous packet length */
 					if (j <= 40) {			/* ID length less or eq 40 -> FSP */
 				case 43:
 						sw->type = SW_ID_FSP;
 						break;
 					}
-					sw->number++;
-					fallthrough;
+					sw->number++;			/* fall through */
 				case 30:
-					sw->number++;
-					fallthrough;
+					sw->number++;			/* fall through */
 				case 15:
 					sw->type = SW_ID_GP;
 					break;
@@ -684,11 +681,9 @@ static int sw_connect(struct gameport *gameport, struct gameport_driver *drv)
 						sw->type = SW_ID_PP;
 					break;
 				case 66:
-					sw->bits = 3;
-					fallthrough;
+					sw->bits = 3;			/* fall through */
 				case 198:
-					sw->length = 22;
-					fallthrough;
+					sw->length = 22;		/* fall through */
 				case 64:
 					sw->type = SW_ID_3DP;
 					if (j == 160)

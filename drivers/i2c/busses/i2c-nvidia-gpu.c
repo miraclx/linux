@@ -125,7 +125,8 @@ static int gpu_i2c_read(struct gpu_i2c_dev *i2cd, u8 *data, u16 len)
 		put_unaligned_be16(val, data);
 		break;
 	case 3:
-		put_unaligned_be24(val, data);
+		put_unaligned_be16(val >> 8, data);
+		data[2] = val;
 		break;
 	case 4:
 		put_unaligned_be32(val, data);
@@ -276,7 +277,10 @@ static int gpu_populate_client(struct gpu_i2c_dev *i2cd, int irq)
 	i2cd->gpu_ccgx_ucsi->irq = irq;
 	i2cd->gpu_ccgx_ucsi->properties = ccgx_props;
 	i2cd->ccgx_client = i2c_new_client_device(&i2cd->adapter, i2cd->gpu_ccgx_ucsi);
-	return PTR_ERR_OR_ZERO(i2cd->ccgx_client);
+	if (IS_ERR(i2cd->ccgx_client))
+		return PTR_ERR(i2cd->ccgx_client);
+
+	return 0;
 }
 
 static int gpu_i2c_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -353,7 +357,15 @@ static void gpu_i2c_remove(struct pci_dev *pdev)
 	pci_free_irq_vectors(pdev);
 }
 
-#define gpu_i2c_suspend NULL
+/*
+ * We need gpu_i2c_suspend() even if it is stub, for runtime pm to work
+ * correctly. Without it, lspci shows runtime pm status as "D0" for the card.
+ * Documentation/power/pci.rst also insists for driver to provide this.
+ */
+static __maybe_unused int gpu_i2c_suspend(struct device *dev)
+{
+	return 0;
+}
 
 static __maybe_unused int gpu_i2c_resume(struct device *dev)
 {

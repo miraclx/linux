@@ -195,7 +195,9 @@ int alt_pr_register(struct device *dev, void __iomem *reg_base)
 	if (!mgr)
 		return -ENOMEM;
 
-	return devm_fpga_mgr_register(dev, mgr);
+	dev_set_drvdata(dev, mgr);
+
+	return fpga_mgr_register(mgr);
 }
 EXPORT_SYMBOL_GPL(alt_pr_register);
 

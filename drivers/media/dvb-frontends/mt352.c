@@ -201,7 +201,7 @@ static int mt352_set_parameters(struct dvb_frontend *fe)
 			if (op->hierarchy == HIERARCHY_AUTO ||
 			    op->hierarchy == HIERARCHY_NONE)
 				break;
-			fallthrough;
+			/* fall through */
 		default:
 			return -EINVAL;
 	}

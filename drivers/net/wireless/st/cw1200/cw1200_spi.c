@@ -268,11 +268,15 @@ exit:
 	return ret;
 }
 
-static void cw1200_spi_irq_unsubscribe(struct hwbus_priv *self)
+static int cw1200_spi_irq_unsubscribe(struct hwbus_priv *self)
 {
+	int ret = 0;
+
 	pr_debug("SW IRQ unsubscribe\n");
 	disable_irq_wake(self->func->irq);
 	free_irq(self->func->irq, self);
+
+	return ret;
 }
 
 static int cw1200_spi_off(const struct cw1200_platform_data_spi *pdata)

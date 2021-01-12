@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2018 HUAWEI, Inc.
- *             https://www.huawei.com/
+ *             http://www.huawei.com/
  * Created by Gao Xiang <gaoxiang25@huawei.com>
  */
 #ifndef __EROFS_FS_ZDATA_H
@@ -144,22 +144,22 @@ static inline void z_erofs_onlinepage_init(struct page *page)
 static inline void z_erofs_onlinepage_fixup(struct page *page,
 	uintptr_t index, bool down)
 {
-	union z_erofs_onlinepage_converter u = { .v = &page_private(page) };
-	int orig, orig_index, val;
-
+	unsigned long *p, o, v, id;
 repeat:
-	orig = atomic_read(u.o);
-	orig_index = orig >> Z_EROFS_ONLINEPAGE_INDEX_SHIFT;
-	if (orig_index) {
+	p = &page_private(page);
+	o = READ_ONCE(*p);
+
+	id = o >> Z_EROFS_ONLINEPAGE_INDEX_SHIFT;
+	if (id) {
 		if (!index)
 			return;
 
-		DBG_BUGON(orig_index != index);
+		DBG_BUGON(id != index);
 	}
 
-	val = (index << Z_EROFS_ONLINEPAGE_INDEX_SHIFT) |
-		((orig & Z_EROFS_ONLINEPAGE_COUNT_MASK) + (unsigned int)down);
-	if (atomic_cmpxchg(u.o, orig, val) != orig)
+	v = (index << Z_EROFS_ONLINEPAGE_INDEX_SHIFT) |
+		((o & Z_EROFS_ONLINEPAGE_COUNT_MASK) + (unsigned int)down);
+	if (cmpxchg(p, o, v) != o)
 		goto repeat;
 }
 
@@ -173,7 +173,6 @@ static inline void z_erofs_onlinepage_endio(struct page *page)
 
 	v = atomic_dec_return(u.o);
 	if (!(v & Z_EROFS_ONLINEPAGE_COUNT_MASK)) {
-		set_page_private(page, 0);
 		ClearPagePrivate(page);
 		if (!PageError(page))
 			SetPageUptodate(page);

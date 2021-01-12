@@ -1631,7 +1631,7 @@ default_monarch_init_process(struct notifier_block *self, unsigned long val, voi
 	if (read_trylock(&tasklist_lock)) {
 		do_each_thread (g, t) {
 			printk("\nBacktrace of pid %d (%s)\n", t->pid, t->comm);
-			show_stack(t, NULL, KERN_DEFAULT);
+			show_stack(t, NULL);
 		} while_each_thread (g, t);
 		read_unlock(&tasklist_lock);
 	}

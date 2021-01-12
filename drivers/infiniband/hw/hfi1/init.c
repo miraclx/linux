@@ -1,5 +1,5 @@
 /*
- * Copyright(c) 2015 - 2020 Intel Corporation.
+ * Copyright(c) 2015 - 2018 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
@@ -69,7 +69,6 @@
 #include "affinity.h"
 #include "vnic.h"
 #include "exp_rcv.h"
-#include "netdev.h"
 
 #undef pr_fmt
 #define pr_fmt(fmt) DRIVER_NAME ": " fmt
@@ -375,7 +374,6 @@ int hfi1_create_ctxtdata(struct hfi1_pportdata *ppd, int numa,
 		rcd->numa_id = numa;
 		rcd->rcv_array_groups = dd->rcv_entries.ngroups;
 		rcd->rhf_rcv_function_map = normal_rhf_rcv_functions;
-		rcd->msix_intr = CCE_NUM_MSIX_VECTORS;
 
 		mutex_init(&rcd->exp_mutex);
 		spin_lock_init(&rcd->exp_lock);
@@ -831,29 +829,6 @@ wq_error:
 }
 
 /**
- * destroy_workqueues - destroy per port workqueues
- * @dd: the hfi1_ib device
- */
-static void destroy_workqueues(struct hfi1_devdata *dd)
-{
-	int pidx;
-	struct hfi1_pportdata *ppd;
-
-	for (pidx = 0; pidx < dd->num_pports; ++pidx) {
-		ppd = dd->pport + pidx;
-
-		if (ppd->hfi1_wq) {
-			destroy_workqueue(ppd->hfi1_wq);
-			ppd->hfi1_wq = NULL;
-		}
-		if (ppd->link_wq) {
-			destroy_workqueue(ppd->link_wq);
-			ppd->link_wq = NULL;
-		}
-	}
-}
-
-/**
  * enable_general_intr() - Enable the IRQs that will be handled by the
  * general interrupt handler.
  * @dd: valid devdata
@@ -1126,10 +1101,15 @@ static void shutdown_device(struct hfi1_devdata *dd)
 		 * We can't count on interrupts since we are stopping.
 		 */
 		hfi1_quiet_serdes(ppd);
-		if (ppd->hfi1_wq)
-			flush_workqueue(ppd->hfi1_wq);
-		if (ppd->link_wq)
-			flush_workqueue(ppd->link_wq);
+
+		if (ppd->hfi1_wq) {
+			destroy_workqueue(ppd->hfi1_wq);
+			ppd->hfi1_wq = NULL;
+		}
+		if (ppd->link_wq) {
+			destroy_workqueue(ppd->link_wq);
+			ppd->link_wq = NULL;
+		}
 	}
 	sdma_exit(dd);
 }
@@ -1336,7 +1316,6 @@ static struct hfi1_devdata *hfi1_alloc_devdata(struct pci_dev *pdev,
 		goto bail;
 	}
 
-	atomic_set(&dd->ipoib_rsm_usr_num, 0);
 	return dd;
 
 bail:
@@ -1684,6 +1663,9 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	/* do the generic initialization */
 	initfail = hfi1_init(dd, 0);
 
+	/* setup vnic */
+	hfi1_vnic_setup(dd);
+
 	ret = hfi1_register_ib_device(dd);
 
 	/*
@@ -1722,6 +1704,7 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 			hfi1_device_remove(dd);
 		if (!ret)
 			hfi1_unregister_ib_device(dd);
+		hfi1_vnic_cleanup(dd);
 		postinit_cleanup(dd);
 		if (initfail)
 			ret = initfail;
@@ -1766,15 +1749,14 @@ static void remove_one(struct pci_dev *pdev)
 	/* unregister from IB core */
 	hfi1_unregister_ib_device(dd);
 
-	/* free netdev data */
-	hfi1_netdev_free(dd);
+	/* cleanup vnic */
+	hfi1_vnic_cleanup(dd);
 
 	/*
 	 * Disable the IB link, disable interrupts on the device,
 	 * clear dma engines, etc.
 	 */
 	shutdown_device(dd);
-	destroy_workqueues(dd);
 
 	stop_timers(dd);
 

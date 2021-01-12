@@ -45,6 +45,7 @@ static __always_inline type pfx##_xchg(pfx##_t *v, type n)		\
 	return xchg(&v->counter, n);					\
 }
 
+#define ATOMIC_INIT(i)		{ (i) }
 ATOMIC_OPS(atomic, int)
 
 #ifdef CONFIG_64BIT

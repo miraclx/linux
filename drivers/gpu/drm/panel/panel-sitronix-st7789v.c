@@ -165,6 +165,7 @@ static const struct drm_display_mode default_mode = {
 	.vsync_start = 320 + 8,
 	.vsync_end = 320 + 8 + 4,
 	.vtotal = 320 + 8 + 4 + 4,
+	.vrefresh = 60,
 };
 
 static int st7789v_get_modes(struct drm_panel *panel,
@@ -176,7 +177,7 @@ static int st7789v_get_modes(struct drm_panel *panel,
 	if (!mode) {
 		dev_err(panel->dev, "failed to add mode %ux%ux@%u\n",
 			default_mode.hdisplay, default_mode.vdisplay,
-			drm_mode_vrefresh(&default_mode));
+			default_mode.vrefresh);
 		return -ENOMEM;
 	}
 
@@ -382,7 +383,9 @@ static int st7789v_probe(struct spi_device *spi)
 	if (ret)
 		return ret;
 
-	drm_panel_add(&ctx->panel);
+	ret = drm_panel_add(&ctx->panel);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }

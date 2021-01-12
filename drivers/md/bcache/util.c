@@ -33,27 +33,27 @@ int bch_ ## name ## _h(const char *cp, type *res)		\
 	case 'y':						\
 	case 'z':						\
 		u++;						\
-		fallthrough;					\
+		/* fall through */				\
 	case 'e':						\
 		u++;						\
-		fallthrough;					\
+		/* fall through */				\
 	case 'p':						\
 		u++;						\
-		fallthrough;					\
+		/* fall through */				\
 	case 't':						\
 		u++;						\
-		fallthrough;					\
+		/* fall through */				\
 	case 'g':						\
 		u++;						\
-		fallthrough;					\
+		/* fall through */				\
 	case 'm':						\
 		u++;						\
-		fallthrough;					\
+		/* fall through */				\
 	case 'k':						\
 		u++;						\
 		if (e++ == cp)					\
 			return -EINVAL;				\
-		fallthrough;					\
+		/* fall through */				\
 	case '\n':						\
 	case '\0':						\
 		if (*e == '\n')					\

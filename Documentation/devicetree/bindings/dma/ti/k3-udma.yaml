@@ -69,30 +69,34 @@ properties:
     maxItems: 3
 
   reg-names:
-    items:
-      - const: gcfg
-      - const: rchanrt
-      - const: tchanrt
+   items:
+     - const: gcfg
+     - const: rchanrt
+     - const: tchanrt
 
   msi-parent: true
 
   ti,sci:
     description: phandle to TI-SCI compatible System controller node
-    $ref: /schemas/types.yaml#/definitions/phandle
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/phandle
 
   ti,sci-dev-id:
     description: TI-SCI device id of UDMAP
-    $ref: /schemas/types.yaml#/definitions/uint32
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/uint32
 
   ti,ringacc:
     description: phandle to the ring accelerator node
-    $ref: /schemas/types.yaml#/definitions/phandle
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/phandle
 
   ti,sci-rm-range-tchan:
     description: |
       Array of UDMA tchan resource subtypes for resource allocation for this
       host
-    $ref: /schemas/types.yaml#/definitions/uint32-array
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 1
     # Should be enough
     maxItems: 255
@@ -101,7 +105,8 @@ properties:
     description: |
       Array of UDMA rchan resource subtypes for resource allocation for this
       host
-    $ref: /schemas/types.yaml#/definitions/uint32-array
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 1
     # Should be enough
     maxItems: 255
@@ -110,7 +115,8 @@ properties:
     description: |
       Array of UDMA rflow resource subtypes for resource allocation for this
       host
-    $ref: /schemas/types.yaml#/definitions/uint32-array
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 1
     # Should be enough
     maxItems: 255
@@ -136,12 +142,11 @@ then:
   properties:
     ti,udma-atype:
       description: ATYPE value which should be used by non slave channels
-      $ref: /schemas/types.yaml#/definitions/uint32
+      allOf:
+        - $ref: /schemas/types.yaml#/definitions/uint32
 
   required:
     - ti,udma-atype
-
-unevaluatedProperties: false
 
 examples:
   - |+

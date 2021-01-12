@@ -17,6 +17,7 @@
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_modes.h>
 #include <drm/drm_panel.h>
+#include <drm/drm_print.h>
 
 /*** Manufacturer Command Set ***/
 #define MCS_CMD_MODE_SW		0xFE /* CMD Mode Switch */
@@ -82,15 +83,16 @@ struct rm68200 {
 };
 
 static const struct drm_display_mode default_mode = {
-	.clock = 54000,
+	.clock = 52582,
 	.hdisplay = 720,
-	.hsync_start = 720 + 48,
-	.hsync_end = 720 + 48 + 9,
-	.htotal = 720 + 48 + 9 + 48,
+	.hsync_start = 720 + 38,
+	.hsync_end = 720 + 38 + 8,
+	.htotal = 720 + 38 + 8 + 38,
 	.vdisplay = 1280,
 	.vsync_start = 1280 + 12,
-	.vsync_end = 1280 + 12 + 5,
-	.vtotal = 1280 + 12 + 5 + 12,
+	.vsync_end = 1280 + 12 + 4,
+	.vtotal = 1280 + 12 + 4 + 12,
+	.vrefresh = 50,
 	.flags = 0,
 	.width_mm = 68,
 	.height_mm = 122,
@@ -109,7 +111,8 @@ static void rm68200_dcs_write_buf(struct rm68200 *ctx, const void *data,
 
 	err = mipi_dsi_dcs_write_buffer(dsi, data, len);
 	if (err < 0)
-		dev_err_ratelimited(ctx->dev, "MIPI DSI DCS write buffer failed: %d\n", err);
+		DRM_ERROR_RATELIMITED("MIPI DSI DCS write buffer failed: %d\n",
+				      err);
 }
 
 static void rm68200_dcs_write_cmd(struct rm68200 *ctx, u8 cmd, u8 value)
@@ -119,7 +122,7 @@ static void rm68200_dcs_write_cmd(struct rm68200 *ctx, u8 cmd, u8 value)
 
 	err = mipi_dsi_dcs_write(dsi, cmd, &value, 1);
 	if (err < 0)
-		dev_err_ratelimited(ctx->dev, "MIPI DSI DCS write failed: %d\n", err);
+		DRM_ERROR_RATELIMITED("MIPI DSI DCS write failed: %d\n", err);
 }
 
 #define dcs_write_seq(ctx, seq...)				\
@@ -254,11 +257,11 @@ static int rm68200_unprepare(struct drm_panel *panel)
 
 	ret = mipi_dsi_dcs_set_display_off(dsi);
 	if (ret)
-		dev_warn(panel->dev, "failed to set display off: %d\n", ret);
+		DRM_WARN("failed to set display off: %d\n", ret);
 
 	ret = mipi_dsi_dcs_enter_sleep_mode(dsi);
 	if (ret)
-		dev_warn(panel->dev, "failed to enter sleep mode: %d\n", ret);
+		DRM_WARN("failed to enter sleep mode: %d\n", ret);
 
 	msleep(120);
 
@@ -285,7 +288,7 @@ static int rm68200_prepare(struct drm_panel *panel)
 
 	ret = regulator_enable(ctx->supply);
 	if (ret < 0) {
-		dev_err(ctx->dev, "failed to enable supply: %d\n", ret);
+		DRM_ERROR("failed to enable supply: %d\n", ret);
 		return ret;
 	}
 
@@ -334,9 +337,9 @@ static int rm68200_get_modes(struct drm_panel *panel,
 
 	mode = drm_mode_duplicate(connector->dev, &default_mode);
 	if (!mode) {
-		dev_err(panel->dev, "failed to add mode %ux%u@%u\n",
-			default_mode.hdisplay, default_mode.vdisplay,
-			drm_mode_vrefresh(&default_mode));
+		DRM_ERROR("failed to add mode %ux%ux@%u\n",
+			  default_mode.hdisplay, default_mode.vdisplay,
+			  default_mode.vrefresh);
 		return -ENOMEM;
 	}
 
@@ -391,7 +394,7 @@ static int rm68200_probe(struct mipi_dsi_device *dsi)
 	dsi->lanes = 2;
 	dsi->format = MIPI_DSI_FMT_RGB888;
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
-			  MIPI_DSI_MODE_LPM | MIPI_DSI_CLOCK_NON_CONTINUOUS;
+			  MIPI_DSI_MODE_LPM;
 
 	drm_panel_init(&ctx->panel, dev, &rm68200_drm_funcs,
 		       DRM_MODE_CONNECTOR_DSI);

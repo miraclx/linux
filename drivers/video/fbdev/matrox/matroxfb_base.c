@@ -1970,7 +1970,9 @@ int matroxfb_register_driver(struct matroxfb_driver* drv) {
 	struct matrox_fb_info* minfo;
 
 	list_add(&drv->node, &matroxfb_driver_list);
-	list_for_each_entry(minfo, &matroxfb_list, next_fb) {
+	for (minfo = matroxfb_l(matroxfb_list.next);
+	     minfo != matroxfb_l(&matroxfb_list);
+	     minfo = matroxfb_l(minfo->next_fb.next)) {
 		void* p;
 
 		if (minfo->drivers_count == MATROXFB_MAX_FB_DRIVERS)
@@ -1988,7 +1990,9 @@ void matroxfb_unregister_driver(struct matroxfb_driver* drv) {
 	struct matrox_fb_info* minfo;
 
 	list_del(&drv->node);
-	list_for_each_entry(minfo, &matroxfb_list, next_fb) {
+	for (minfo = matroxfb_l(matroxfb_list.next);
+	     minfo != matroxfb_l(&matroxfb_list);
+	     minfo = matroxfb_l(minfo->next_fb.next)) {
 		int i;
 
 		for (i = 0; i < minfo->drivers_count; ) {

@@ -140,7 +140,7 @@ static int __vlan_vid_del(struct net_device *dev, struct net_bridge *br,
 	return err == -EOPNOTSUPP ? 0 : err;
 }
 
-/* Returns a master vlan, if it didn't exist it gets created. In all cases
+/* Returns a master vlan, if it didn't exist it gets created. In all cases a
  * a reference is taken to the master vlan before returning.
  */
 static struct net_bridge_vlan *
@@ -266,14 +266,11 @@ static int __vlan_add(struct net_bridge_vlan *v, u16 flags,
 		}
 
 		masterv = br_vlan_get_master(br, v->vid, extack);
-		if (!masterv) {
-			err = -ENOMEM;
+		if (!masterv)
 			goto out_filt;
-		}
 		v->brvlan = masterv;
 		if (br_opt_get(br, BROPT_VLAN_STATS_PER_PORT)) {
-			v->stats =
-			     netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
+			v->stats = netdev_alloc_pcpu_stats(struct br_vlan_stats);
 			if (!v->stats) {
 				err = -ENOMEM;
 				goto out_filt;
@@ -424,7 +421,7 @@ struct sk_buff *br_handle_vlan(struct net_bridge *br,
 			       struct net_bridge_vlan_group *vg,
 			       struct sk_buff *skb)
 {
-	struct pcpu_sw_netstats *stats;
+	struct br_vlan_stats *stats;
 	struct net_bridge_vlan *v;
 	u16 vid;
 
@@ -477,7 +474,7 @@ static bool __allowed_ingress(const struct net_bridge *br,
 			      struct sk_buff *skb, u16 *vid,
 			      u8 *state)
 {
-	struct pcpu_sw_netstats *stats;
+	struct br_vlan_stats *stats;
 	struct net_bridge_vlan *v;
 	bool tagged;
 
@@ -711,7 +708,7 @@ int br_vlan_add(struct net_bridge *br, u16 vid, u16 flags, bool *changed,
 	if (!vlan)
 		return -ENOMEM;
 
-	vlan->stats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
+	vlan->stats = netdev_alloc_pcpu_stats(struct br_vlan_stats);
 	if (!vlan->stats) {
 		kfree(vlan);
 		return -ENOMEM;
@@ -856,24 +853,14 @@ EXPORT_SYMBOL_GPL(br_vlan_get_proto);
 
 int __br_vlan_set_proto(struct net_bridge *br, __be16 proto)
 {
-	struct switchdev_attr attr = {
-		.orig_dev = br->dev,
-		.id = SWITCHDEV_ATTR_ID_BRIDGE_VLAN_PROTOCOL,
-		.flags = SWITCHDEV_F_SKIP_EOPNOTSUPP,
-		.u.vlan_protocol = ntohs(proto),
-	};
 	int err = 0;
 	struct net_bridge_port *p;
 	struct net_bridge_vlan *vlan;
 	struct net_bridge_vlan_group *vg;
-	__be16 oldproto = br->vlan_proto;
+	__be16 oldproto;
 
 	if (br->vlan_proto == proto)
 		return 0;
-
-	err = switchdev_port_attr_set(br->dev, &attr);
-	if (err && err != -EOPNOTSUPP)
-		return err;
 
 	/* Add VLANs for the new proto to the device filter. */
 	list_for_each_entry(p, &br->port_list, list) {
@@ -885,6 +872,7 @@ int __br_vlan_set_proto(struct net_bridge *br, __be16 proto)
 		}
 	}
 
+	oldproto = br->vlan_proto;
 	br->vlan_proto = proto;
 
 	recalculate_group_addr(br);
@@ -900,9 +888,6 @@ int __br_vlan_set_proto(struct net_bridge *br, __be16 proto)
 	return 0;
 
 err_filt:
-	attr.u.vlan_protocol = ntohs(oldproto);
-	switchdev_port_attr_set(br->dev, &attr);
-
 	list_for_each_entry_continue_reverse(vlan, &vg->vlan_list, vlist)
 		vlan_vid_del(p->dev, proto, vlan->vid);
 
@@ -1277,14 +1262,14 @@ void nbp_vlan_flush(struct net_bridge_port *port)
 }
 
 void br_vlan_get_stats(const struct net_bridge_vlan *v,
-		       struct pcpu_sw_netstats *stats)
+		       struct br_vlan_stats *stats)
 {
 	int i;
 
 	memset(stats, 0, sizeof(*stats));
 	for_each_possible_cpu(i) {
 		u64 rxpackets, rxbytes, txpackets, txbytes;
-		struct pcpu_sw_netstats *cpu_stats;
+		struct br_vlan_stats *cpu_stats;
 		unsigned int start;
 
 		cpu_stats = per_cpu_ptr(v->stats, i);
@@ -1303,13 +1288,11 @@ void br_vlan_get_stats(const struct net_bridge_vlan *v,
 	}
 }
 
-int br_vlan_get_pvid(const struct net_device *dev, u16 *p_pvid)
+static int __br_vlan_get_pvid(const struct net_device *dev,
+			      struct net_bridge_port *p, u16 *p_pvid)
 {
 	struct net_bridge_vlan_group *vg;
-	struct net_bridge_port *p;
 
-	ASSERT_RTNL();
-	p = br_port_get_check_rtnl(dev);
 	if (p)
 		vg = nbp_vlan_group(p);
 	else if (netif_is_bridge_master(dev))
@@ -1320,23 +1303,18 @@ int br_vlan_get_pvid(const struct net_device *dev, u16 *p_pvid)
 	*p_pvid = br_get_pvid(vg);
 	return 0;
 }
+
+int br_vlan_get_pvid(const struct net_device *dev, u16 *p_pvid)
+{
+	ASSERT_RTNL();
+
+	return __br_vlan_get_pvid(dev, br_port_get_check_rtnl(dev), p_pvid);
+}
 EXPORT_SYMBOL_GPL(br_vlan_get_pvid);
 
 int br_vlan_get_pvid_rcu(const struct net_device *dev, u16 *p_pvid)
 {
-	struct net_bridge_vlan_group *vg;
-	struct net_bridge_port *p;
-
-	p = br_port_get_check_rcu(dev);
-	if (p)
-		vg = nbp_vlan_group_rcu(p);
-	else if (netif_is_bridge_master(dev))
-		vg = br_vlan_group_rcu(netdev_priv(dev));
-	else
-		return -EINVAL;
-
-	*p_pvid = br_get_pvid(vg);
-	return 0;
+	return __br_vlan_get_pvid(dev, br_port_get_check_rcu(dev), p_pvid);
 }
 EXPORT_SYMBOL_GPL(br_vlan_get_pvid_rcu);
 
@@ -1375,7 +1353,7 @@ static int br_vlan_is_bind_vlan_dev(const struct net_device *dev)
 }
 
 static int br_vlan_is_bind_vlan_dev_fn(struct net_device *dev,
-			       __always_unused struct netdev_nested_priv *priv)
+				       __always_unused void *data)
 {
 	return br_vlan_is_bind_vlan_dev(dev);
 }
@@ -1398,9 +1376,9 @@ struct br_vlan_bind_walk_data {
 };
 
 static int br_vlan_match_bind_vlan_dev_fn(struct net_device *dev,
-					  struct netdev_nested_priv *priv)
+					  void *data_in)
 {
-	struct br_vlan_bind_walk_data *data = priv->data;
+	struct br_vlan_bind_walk_data *data = data_in;
 	int found = 0;
 
 	if (br_vlan_is_bind_vlan_dev(dev) &&
@@ -1418,13 +1396,10 @@ br_vlan_get_upper_bind_vlan_dev(struct net_device *dev, u16 vid)
 	struct br_vlan_bind_walk_data data = {
 		.vid = vid,
 	};
-	struct netdev_nested_priv priv = {
-		.data = (void *)&data,
-	};
 
 	rcu_read_lock();
 	netdev_walk_all_upper_dev_rcu(dev, br_vlan_match_bind_vlan_dev_fn,
-				      &priv);
+				      &data);
 	rcu_read_unlock();
 
 	return data.result;
@@ -1505,9 +1480,9 @@ struct br_vlan_link_state_walk_data {
 };
 
 static int br_vlan_link_state_change_fn(struct net_device *vlan_dev,
-					struct netdev_nested_priv *priv)
+					void *data_in)
 {
-	struct br_vlan_link_state_walk_data *data = priv->data;
+	struct br_vlan_link_state_walk_data *data = data_in;
 
 	if (br_vlan_is_bind_vlan_dev(vlan_dev))
 		br_vlan_set_vlan_dev_state(data->br, vlan_dev);
@@ -1521,13 +1496,10 @@ static void br_vlan_link_state_change(struct net_device *dev,
 	struct br_vlan_link_state_walk_data data = {
 		.br = br
 	};
-	struct netdev_nested_priv priv = {
-		.data = (void *)&data,
-	};
 
 	rcu_read_lock();
 	netdev_walk_all_upper_dev_rcu(dev, br_vlan_link_state_change_fn,
-				      &priv);
+				      &data);
 	rcu_read_unlock();
 }
 
@@ -1600,7 +1572,7 @@ void br_vlan_port_event(struct net_bridge_port *p, unsigned long event)
 static bool br_vlan_stats_fill(struct sk_buff *skb,
 			       const struct net_bridge_vlan *v)
 {
-	struct pcpu_sw_netstats stats;
+	struct br_vlan_stats stats;
 	struct nlattr *nest;
 
 	nest = nla_nest_start(skb, BRIDGE_VLANDB_ENTRY_STATS);
@@ -1912,8 +1884,8 @@ out_err:
 }
 
 static const struct nla_policy br_vlan_db_policy[BRIDGE_VLANDB_ENTRY_MAX + 1] = {
-	[BRIDGE_VLANDB_ENTRY_INFO]	=
-		NLA_POLICY_EXACT_LEN(sizeof(struct bridge_vlan_info)),
+	[BRIDGE_VLANDB_ENTRY_INFO]	= { .type = NLA_EXACT_LEN,
+					    .len = sizeof(struct bridge_vlan_info) },
 	[BRIDGE_VLANDB_ENTRY_RANGE]	= { .type = NLA_U16 },
 	[BRIDGE_VLANDB_ENTRY_STATE]	= { .type = NLA_U8 },
 	[BRIDGE_VLANDB_ENTRY_TUNNEL_INFO] = { .type = NLA_NESTED },

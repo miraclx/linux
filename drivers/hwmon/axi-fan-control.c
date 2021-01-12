@@ -15,6 +15,10 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 
+#define ADI_AXI_PCORE_VER_MAJOR(version)	(((version) >> 16) & 0xff)
+#define ADI_AXI_PCORE_VER_MINOR(version)	(((version) >> 8) & 0xff)
+#define ADI_AXI_PCORE_VER_PATCH(version)	((version) & 0xff)
+
 /* register map */
 #define ADI_REG_RSTN		0x0080
 #define ADI_REG_PWM_WIDTH	0x0084

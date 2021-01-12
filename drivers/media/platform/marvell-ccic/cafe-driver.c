@@ -497,7 +497,6 @@ static int cafe_pci_probe(struct pci_dev *pdev,
 	cam = kzalloc(sizeof(struct cafe_camera), GFP_KERNEL);
 	if (cam == NULL)
 		goto out;
-	pci_set_drvdata(pdev, cam);
 	cam->pdev = pdev;
 	mcam = &cam->mcam;
 	mcam->chip_id = MCAM_CAFE;
@@ -557,7 +556,7 @@ static int cafe_pci_probe(struct pci_dev *pdev,
 	clkdev_create(mcam->mclk, "xclk", "%d-%04x",
 		i2c_adapter_id(cam->i2c_adapter), ov7670_info.addr);
 
-	if (!IS_ERR(i2c_new_client_device(cam->i2c_adapter, &ov7670_info))) {
+	if (i2c_new_device(cam->i2c_adapter, &ov7670_info)) {
 		cam->registered = 1;
 		return 0;
 	}
@@ -593,7 +592,8 @@ static void cafe_shutdown(struct cafe_camera *cam)
 
 static void cafe_pci_remove(struct pci_dev *pdev)
 {
-	struct cafe_camera *cam = pci_get_drvdata(pdev);
+	struct v4l2_device *v4l2_dev = dev_get_drvdata(&pdev->dev);
+	struct cafe_camera *cam = to_cam(v4l2_dev);
 
 	if (cam == NULL) {
 		printk(KERN_WARNING "pci_remove on unknown pdev %p\n", pdev);
@@ -604,25 +604,43 @@ static void cafe_pci_remove(struct pci_dev *pdev)
 }
 
 
+#ifdef CONFIG_PM
 /*
  * Basic power management.
  */
-static int __maybe_unused cafe_pci_suspend(struct device *dev)
+static int cafe_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 {
-	struct cafe_camera *cam = dev_get_drvdata(dev);
+	struct v4l2_device *v4l2_dev = dev_get_drvdata(&pdev->dev);
+	struct cafe_camera *cam = to_cam(v4l2_dev);
+	int ret;
 
+	ret = pci_save_state(pdev);
+	if (ret)
+		return ret;
 	mccic_suspend(&cam->mcam);
+	pci_disable_device(pdev);
 	return 0;
 }
 
 
-static int __maybe_unused cafe_pci_resume(struct device *dev)
+static int cafe_pci_resume(struct pci_dev *pdev)
 {
-	struct cafe_camera *cam = dev_get_drvdata(dev);
+	struct v4l2_device *v4l2_dev = dev_get_drvdata(&pdev->dev);
+	struct cafe_camera *cam = to_cam(v4l2_dev);
+	int ret = 0;
 
+	pci_restore_state(pdev);
+	ret = pci_enable_device(pdev);
+
+	if (ret) {
+		cam_warn(cam, "Unable to re-enable device on resume!\n");
+		return ret;
+	}
 	cafe_ctlr_init(&cam->mcam);
 	return mccic_resume(&cam->mcam);
 }
+
+#endif  /* CONFIG_PM */
 
 static const struct pci_device_id cafe_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_MARVELL,
@@ -632,14 +650,15 @@ static const struct pci_device_id cafe_ids[] = {
 
 MODULE_DEVICE_TABLE(pci, cafe_ids);
 
-static SIMPLE_DEV_PM_OPS(cafe_pci_pm_ops, cafe_pci_suspend, cafe_pci_resume);
-
 static struct pci_driver cafe_pci_driver = {
 	.name = "cafe1000-ccic",
 	.id_table = cafe_ids,
 	.probe = cafe_pci_probe,
 	.remove = cafe_pci_remove,
-	.driver.pm = &cafe_pci_pm_ops,
+#ifdef CONFIG_PM
+	.suspend = cafe_pci_suspend,
+	.resume = cafe_pci_resume,
+#endif
 };
 
 

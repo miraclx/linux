@@ -3,7 +3,7 @@
 #include <linux/efi.h>
 #include <linux/module.h>
 #include <linux/seq_file.h>
-#include <linux/pgtable.h>
+#include <asm/pgtable.h>
 
 static int ptdump_show(struct seq_file *m, void *v)
 {

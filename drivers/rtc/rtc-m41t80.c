@@ -740,7 +740,7 @@ static int wdt_ioctl(struct file *file, unsigned int cmd,
 			return -EINVAL;
 		wdt_margin = new_margin;
 		wdt_ping();
-		fallthrough;
+		/* Fall through */
 	case WDIOC_GETTIMEOUT:
 		return put_user(wdt_margin, (int __user *)arg);
 
@@ -977,7 +977,7 @@ static int m41t80_probe(struct i2c_client *client,
 		m41t80_sqw_register_clk(m41t80_data);
 #endif
 
-	rc = devm_rtc_register_device(m41t80_data->rtc);
+	rc = rtc_register_device(m41t80_data->rtc);
 	if (rc)
 		return rc;
 

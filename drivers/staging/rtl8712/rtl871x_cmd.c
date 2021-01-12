@@ -161,16 +161,21 @@ void r8712_free_cmd_obj(struct cmd_obj *pcmd)
 	if ((pcmd->cmdcode != _JoinBss_CMD_) &&
 	    (pcmd->cmdcode != _CreateBss_CMD_))
 		kfree(pcmd->parmbuf);
-	if (pcmd->rsp) {
+	if (pcmd->rsp != NULL) {
 		if (pcmd->rspsz != 0)
 			kfree(pcmd->rsp);
 	}
 	kfree(pcmd);
 }
 
+/*
+ *	r8712_sitesurvey_cmd(~)
+ *		### NOTE:#### (!!!!)
+ *		MUST TAKE CARE THAT BEFORE CALLING THIS FUNC,
+ *		YOU SHOULD HAVE LOCKED pmlmepriv->lock
+ */
 u8 r8712_sitesurvey_cmd(struct _adapter *padapter,
 			struct ndis_802_11_ssid *pssid)
-	__must_hold(&padapter->mlmepriv.lock)
 {
 	struct cmd_obj	*ph2c;
 	struct sitesurvey_parm	*psurveyPara;
@@ -191,7 +196,7 @@ u8 r8712_sitesurvey_cmd(struct _adapter *padapter,
 	psurveyPara->passive_mode = cpu_to_le32(pmlmepriv->passive_mode);
 	psurveyPara->ss_ssidlen = 0;
 	memset(psurveyPara->ss_ssid, 0, IW_ESSID_MAX_SIZE + 1);
-	if (pssid && pssid->SsidLength) {
+	if ((pssid != NULL) && (pssid->SsidLength)) {
 		memcpy(psurveyPara->ss_ssid, pssid->Ssid, pssid->SsidLength);
 		psurveyPara->ss_ssidlen = cpu_to_le32(pssid->SsidLength);
 	}

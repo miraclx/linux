@@ -48,6 +48,7 @@
 #define MAX_SEND_MSG_COUNT	25
 #define MAX_RECV_MSG_COUNT	25
 #define CF_CONNECTED		1
+#define CF_SERVER		2
 
 #define TIPC_SERVER_NAME_LEN	32
 
@@ -496,6 +497,7 @@ static void tipc_topsrv_listener_data_ready(struct sock *sk)
 
 static int tipc_topsrv_create_listener(struct tipc_topsrv *srv)
 {
+	int imp = TIPC_CRITICAL_IMPORTANCE;
 	struct socket *lsock = NULL;
 	struct sockaddr_tipc saddr;
 	struct sock *sk;
@@ -512,20 +514,19 @@ static int tipc_topsrv_create_listener(struct tipc_topsrv *srv)
 	sk->sk_user_data = srv;
 	write_unlock_bh(&sk->sk_callback_lock);
 
-	lock_sock(sk);
-	rc = tsk_set_importance(sk, TIPC_CRITICAL_IMPORTANCE);
-	release_sock(sk);
+	rc = kernel_setsockopt(lsock, SOL_TIPC, TIPC_IMPORTANCE,
+			       (char *)&imp, sizeof(imp));
 	if (rc < 0)
 		goto err;
 
 	saddr.family	                = AF_TIPC;
-	saddr.addrtype		        = TIPC_SERVICE_RANGE;
-	saddr.addr.nameseq.type	= TIPC_TOP_SRV;
+	saddr.addrtype		        = TIPC_ADDR_NAMESEQ;
+	saddr.addr.nameseq.type	        = TIPC_TOP_SRV;
 	saddr.addr.nameseq.lower	= TIPC_TOP_SRV;
 	saddr.addr.nameseq.upper	= TIPC_TOP_SRV;
 	saddr.scope			= TIPC_NODE_SCOPE;
 
-	rc = tipc_sk_bind(lsock, (struct sockaddr *)&saddr, sizeof(saddr));
+	rc = kernel_bind(lsock, (struct sockaddr *)&saddr, sizeof(saddr));
 	if (rc < 0)
 		goto err;
 	rc = kernel_listen(lsock, 0);
@@ -664,18 +665,12 @@ static int tipc_topsrv_start(struct net *net)
 
 	ret = tipc_topsrv_work_start(srv);
 	if (ret < 0)
-		goto err_start;
+		return ret;
 
 	ret = tipc_topsrv_create_listener(srv);
 	if (ret < 0)
-		goto err_create;
+		tipc_topsrv_work_stop(srv);
 
-	return 0;
-
-err_create:
-	tipc_topsrv_work_stop(srv);
-err_start:
-	kfree(srv);
 	return ret;
 }
 

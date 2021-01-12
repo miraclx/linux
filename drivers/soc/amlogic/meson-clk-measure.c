@@ -10,7 +10,6 @@
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
 #include <linux/regmap.h>
-#include <linux/module.h>
 
 static DEFINE_MUTEX(measure_lock);
 
@@ -682,7 +681,6 @@ static const struct of_device_id meson_msr_match_table[] = {
 	},
 	{ /* sentinel */ }
 };
-MODULE_DEVICE_TABLE(of, meson_msr_match_table);
 
 static struct platform_driver meson_msr_driver = {
 	.probe	= meson_msr_probe,
@@ -691,5 +689,4 @@ static struct platform_driver meson_msr_driver = {
 		.of_match_table	= meson_msr_match_table,
 	},
 };
-module_platform_driver(meson_msr_driver);
-MODULE_LICENSE("GPL v2");
+builtin_platform_driver(meson_msr_driver);

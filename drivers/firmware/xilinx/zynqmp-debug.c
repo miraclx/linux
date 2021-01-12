@@ -85,13 +85,14 @@ static int get_pm_api_id(char *pm_api_req, u32 *pm_id)
 
 static int process_api_request(u32 pm_id, u64 *pm_api_arg, u32 *pm_api_ret)
 {
+	const struct zynqmp_eemi_ops *eemi_ops = zynqmp_pm_get_eemi_ops();
 	u32 pm_api_version;
 	int ret;
 	struct zynqmp_pm_query_data qdata = {0};
 
 	switch (pm_id) {
 	case PM_GET_API_VERSION:
-		ret = zynqmp_pm_get_api_version(&pm_api_version);
+		ret = eemi_ops->get_api_version(&pm_api_version);
 		sprintf(debugfs_buf, "PM-API Version = %d.%d\n",
 			pm_api_version >> 16, pm_api_version & 0xffff);
 		break;
@@ -101,7 +102,7 @@ static int process_api_request(u32 pm_id, u64 *pm_api_arg, u32 *pm_api_ret)
 		qdata.arg2 = pm_api_arg[2];
 		qdata.arg3 = pm_api_arg[3];
 
-		ret = zynqmp_pm_query_data(qdata, pm_api_ret);
+		ret = eemi_ops->query_data(qdata, pm_api_ret);
 		if (ret)
 			break;
 

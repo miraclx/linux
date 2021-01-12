@@ -346,7 +346,7 @@ static int wm0010_firmware_load(const char *name, struct snd_soc_component *comp
 	struct list_head xfer_list;
 	struct wm0010_boot_xfer *xfer;
 	int ret;
-	DECLARE_COMPLETION_ONSTACK(done);
+	struct completion done;
 	const struct firmware *fw;
 	const struct dfw_binrec *rec;
 	const struct dfw_inforec *inforec;
@@ -370,6 +370,7 @@ static int wm0010_firmware_load(const char *name, struct snd_soc_component *comp
 	wm0010->boot_failed = false;
 	if (WARN_ON(!list_empty(&xfer_list)))
 		return -EINVAL;
+	init_completion(&done);
 
 	/* First record should be INFO */
 	if (rec->command != DFW_CMD_INFO) {
@@ -514,7 +515,7 @@ static int wm0010_stage2_load(struct snd_soc_component *component)
 	dev_dbg(component->dev, "Downloading %zu byte stage 2 loader\n", fw->size);
 
 	/* Copy to local buffer first as vmalloc causes problems for dma */
-	img = kmemdup(&fw->data[0], fw->size, GFP_KERNEL | GFP_DMA);
+	img = kzalloc(fw->size, GFP_KERNEL | GFP_DMA);
 	if (!img) {
 		ret = -ENOMEM;
 		goto abort2;
@@ -525,6 +526,8 @@ static int wm0010_stage2_load(struct snd_soc_component *component)
 		ret = -ENOMEM;
 		goto abort1;
 	}
+
+	memcpy(img, &fw->data[0], fw->size);
 
 	spi_message_init(&m);
 	memset(&t, 0, sizeof(t));

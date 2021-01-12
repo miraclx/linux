@@ -69,11 +69,13 @@ properties:
 
   method:
     description: The method of calling the PSCI firmware.
-    $ref: /schemas/types.yaml#/definitions/string-array
-    enum:
-      - smc
-      # HVC #0, with the register assignments specified in this binding.
-      - hvc
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/string-array
+      - enum:
+          # SMC #0, with the register assignments specified in this binding.
+          - smc
+          # HVC #0, with the register assignments specified in this binding.
+          - hvc
 
   cpu_suspend:
     $ref: /schemas/types.yaml#/definitions/uint32
@@ -105,8 +107,8 @@ properties:
 
 patternProperties:
   "^power-domain-":
-    $ref: "../power/power-domain.yaml#"
-
+    allOf:
+      - $ref: "../power/power-domain.yaml#"
     type: object
     description: |
       ARM systems can have multiple cores, sometimes in an hierarchical

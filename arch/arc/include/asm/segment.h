@@ -14,7 +14,8 @@ typedef unsigned long mm_segment_t;
 
 #define KERNEL_DS		MAKE_MM_SEG(0)
 #define USER_DS			MAKE_MM_SEG(TASK_SIZE)
-#define uaccess_kernel()	(get_fs() == KERNEL_DS)
+
+#define segment_eq(a, b)	((a) == (b))
 
 #endif /* __ASSEMBLY__ */
 #endif /* __ASMARC_SEGMENT_H */

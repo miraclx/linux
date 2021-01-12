@@ -118,7 +118,6 @@ struct bcm_device {
 	u32			oper_speed;
 	int			irq;
 	bool			irq_active_low;
-	bool			irq_acquired;
 
 #ifdef CONFIG_PM
 	struct hci_uart		*hu;
@@ -334,8 +333,6 @@ static int bcm_request_irq(struct bcm_data *bcm)
 		goto unlock;
 	}
 
-	bdev->irq_acquired = true;
-
 	device_init_wakeup(bdev->dev, true);
 
 	pm_runtime_set_autosuspend_delay(bdev->dev,
@@ -517,7 +514,7 @@ static int bcm_close(struct hci_uart *hu)
 	}
 
 	if (bdev) {
-		if (IS_ENABLED(CONFIG_PM) && bdev->irq_acquired) {
+		if (IS_ENABLED(CONFIG_PM) && bdev->irq > 0) {
 			devm_free_irq(bdev->dev, bdev->irq, bdev);
 			device_init_wakeup(bdev->dev, false);
 			pm_runtime_disable(bdev->dev);
@@ -553,7 +550,8 @@ static int bcm_flush(struct hci_uart *hu)
 static int bcm_setup(struct hci_uart *hu)
 {
 	struct bcm_data *bcm = hu->priv;
-	bool fw_load_done = false;
+	char fw_name[64];
+	const struct firmware *fw;
 	unsigned int speed;
 	int err;
 
@@ -562,12 +560,21 @@ static int bcm_setup(struct hci_uart *hu)
 	hu->hdev->set_diag = bcm_set_diag;
 	hu->hdev->set_bdaddr = btbcm_set_bdaddr;
 
-	err = btbcm_initialize(hu->hdev, &fw_load_done);
+	err = btbcm_initialize(hu->hdev, fw_name, sizeof(fw_name), false);
 	if (err)
 		return err;
 
-	if (!fw_load_done)
+	err = request_firmware(&fw, fw_name, &hu->hdev->dev);
+	if (err < 0) {
+		bt_dev_info(hu->hdev, "BCM: Patch %s not found", fw_name);
 		return 0;
+	}
+
+	err = btbcm_patchram(hu->hdev, fw);
+	if (err) {
+		bt_dev_info(hu->hdev, "BCM: Patch failed (%d)", err);
+		goto finalize;
+	}
 
 	/* Init speed if any */
 	if (hu->init_speed)
@@ -606,15 +613,12 @@ static int bcm_setup(struct hci_uart *hu)
 		btbcm_write_pcm_int_params(hu->hdev, &params);
 	}
 
-	err = btbcm_finalize(hu->hdev, &fw_load_done);
+finalize:
+	release_firmware(fw);
+
+	err = btbcm_finalize(hu->hdev);
 	if (err)
 		return err;
-
-	/* Some devices ship with the controller default address.
-	 * Allow the bootloader to set a valid address through the
-	 * device tree.
-	 */
-	set_bit(HCI_QUIRK_USE_BDADDR_PROPERTY, &hu->hdev->quirks);
 
 	if (!bcm_request_irq(bcm))
 		err = bcm_setup_sleep(hu);
@@ -1149,8 +1153,7 @@ static int bcm_of_probe(struct bcm_device *bdev)
 	device_property_read_u8_array(bdev->dev, "brcm,bt-pcm-int-params",
 				      bdev->pcm_int_params, 5);
 	bdev->irq = of_irq_get_byname(bdev->dev->of_node, "host-wakeup");
-	bdev->irq_active_low = irq_get_trigger_type(bdev->irq)
-			     & (IRQ_TYPE_EDGE_FALLING | IRQ_TYPE_LEVEL_LOW);
+
 	return 0;
 }
 

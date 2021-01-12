@@ -30,6 +30,7 @@
  * SOFTWARE.
  */
 
+#include <linux/prefetch.h>
 #include <linux/ip.h>
 #include <linux/udp.h>
 #include <net/udp.h>
@@ -114,7 +115,7 @@ static struct sk_buff *mlx5e_test_get_udp_skb(struct mlx5e_priv *priv)
 		return NULL;
 	}
 
-	net_prefetchw(skb->data);
+	prefetchw(skb->data);
 	skb_reserve(skb, NET_IP_ALIGN);
 
 	/*  Reserve for ethernet and IP header  */
@@ -233,7 +234,7 @@ static int mlx5e_test_loopback_setup(struct mlx5e_priv *priv,
 			return err;
 	}
 
-	err = mlx5e_refresh_tirs(priv, true, false);
+	err = mlx5e_refresh_tirs(priv, true);
 	if (err)
 		goto out;
 
@@ -262,7 +263,7 @@ static void mlx5e_test_loopback_cleanup(struct mlx5e_priv *priv,
 		mlx5_nic_vport_update_local_lb(priv->mdev, false);
 
 	dev_remove_pack(&lbtp->pt);
-	mlx5e_refresh_tirs(priv, false, false);
+	mlx5e_refresh_tirs(priv, false);
 }
 
 #define MLX5E_LB_VERIFY_TIMEOUT (msecs_to_jiffies(200))

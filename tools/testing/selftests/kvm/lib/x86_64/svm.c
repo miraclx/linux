@@ -148,18 +148,14 @@ void run_guest(struct vmcb *vmcb, uint64_t vmcb_gpa)
 		: "r15", "memory");
 }
 
-bool nested_svm_supported(void)
+void nested_svm_check_supported(void)
 {
 	struct kvm_cpuid_entry2 *entry =
 		kvm_get_supported_cpuid_entry(0x80000001);
 
-	return entry->ecx & CPUID_SVM;
-}
-
-void nested_svm_check_supported(void)
-{
-	if (!nested_svm_supported()) {
+	if (!(entry->ecx & CPUID_SVM)) {
 		print_skip("nested SVM not enabled");
 		exit(KSFT_SKIP);
 	}
 }
+

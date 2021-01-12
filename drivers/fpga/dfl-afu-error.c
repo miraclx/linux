@@ -14,7 +14,6 @@
  *   Mitchel Henry <henry.mitchel@intel.com>
  */
 
-#include <linux/fpga-dfl.h>
 #include <linux/uaccess.h>
 
 #include "dfl-afu.h"
@@ -220,21 +219,6 @@ static void port_err_uinit(struct platform_device *pdev,
 	afu_port_err_mask(&pdev->dev, true);
 }
 
-static long
-port_err_ioctl(struct platform_device *pdev, struct dfl_feature *feature,
-	       unsigned int cmd, unsigned long arg)
-{
-	switch (cmd) {
-	case DFL_FPGA_PORT_ERR_GET_IRQ_NUM:
-		return dfl_feature_ioctl_get_num_irqs(pdev, feature, arg);
-	case DFL_FPGA_PORT_ERR_SET_IRQ:
-		return dfl_feature_ioctl_set_irq(pdev, feature, arg);
-	default:
-		dev_dbg(&pdev->dev, "%x cmd not handled", cmd);
-		return -ENODEV;
-	}
-}
-
 const struct dfl_feature_id port_err_id_table[] = {
 	{.id = PORT_FEATURE_ID_ERROR,},
 	{0,}
@@ -243,5 +227,4 @@ const struct dfl_feature_id port_err_id_table[] = {
 const struct dfl_feature_ops port_err_ops = {
 	.init = port_err_init,
 	.uinit = port_err_uinit,
-	.ioctl = port_err_ioctl,
 };

@@ -84,11 +84,11 @@ static ssize_t notrace sth_stm_packet(struct stm_data *stm_data,
 	/* Global packets (GERR, XSYNC, TRIG) are sent with register writes */
 	case STP_PACKET_GERR:
 		reg += 4;
-		fallthrough;
+		/* fall through */
 
 	case STP_PACKET_XSYNC:
 		reg += 8;
-		fallthrough;
+		/* fall through */
 
 	case STP_PACKET_TRIG:
 		if (flags & STP_PACKET_TIMESTAMPED)
@@ -161,7 +161,9 @@ static int sth_stm_link(struct stm_data *stm_data, unsigned int master,
 {
 	struct sth_device *sth = container_of(stm_data, struct sth_device, stm);
 
-	return intel_th_set_output(to_intel_th_device(sth->dev), master);
+	intel_th_set_output(to_intel_th_device(sth->dev), master);
+
+	return 0;
 }
 
 static int intel_th_sw_init(struct sth_device *sth)

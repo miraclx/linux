@@ -136,8 +136,6 @@
 
 #define USDHI6_MIN_DMA 64
 
-#define USDHI6_REQ_TIMEOUT_MS 4000
-
 enum usdhi6_wait_for {
 	USDHI6_WAIT_FOR_REQUEST,
 	USDHI6_WAIT_FOR_CMD,
@@ -1343,7 +1341,7 @@ static int usdhi6_stop_cmd(struct usdhi6_host *host)
 			host->wait = USDHI6_WAIT_FOR_STOP;
 			return 0;
 		}
-		fallthrough;	/* Unsupported STOP command */
+		/* fall through - Unsupported STOP command. */
 	default:
 		dev_err(mmc_dev(host->mmc),
 			"unsupported stop CMD%d for CMD%d\n",
@@ -1691,7 +1689,7 @@ static void usdhi6_timeout_work(struct work_struct *work)
 	switch (host->wait) {
 	default:
 		dev_err(mmc_dev(host->mmc), "Invalid state %u\n", host->wait);
-		fallthrough;	/* mrq can be NULL, but is impossible */
+		/* fall through - mrq can be NULL, but is impossible. */
 	case USDHI6_WAIT_FOR_CMD:
 		usdhi6_error_code(host);
 		if (mrq)
@@ -1713,7 +1711,7 @@ static void usdhi6_timeout_work(struct work_struct *work)
 			host->offset, data->blocks, data->blksz, data->sg_len,
 			sg_dma_len(sg), sg->offset);
 		usdhi6_sg_unmap(host, true);
-		fallthrough;	/* page unmapped in USDHI6_WAIT_FOR_DATA_END */
+		/* fall through - page unmapped in USDHI6_WAIT_FOR_DATA_END. */
 	case USDHI6_WAIT_FOR_DATA_END:
 		usdhi6_error_code(host);
 		data->error = -ETIMEDOUT;
@@ -1765,12 +1763,7 @@ static int usdhi6_probe(struct platform_device *pdev)
 	host		= mmc_priv(mmc);
 	host->mmc	= mmc;
 	host->wait	= USDHI6_WAIT_FOR_REQUEST;
-	host->timeout	= msecs_to_jiffies(USDHI6_REQ_TIMEOUT_MS);
-	/*
-	 * We use a fixed timeout of 4s, hence inform the core about it. A
-	 * future improvement should instead respect the cmd->busy_timeout.
-	 */
-	mmc->max_busy_timeout = USDHI6_REQ_TIMEOUT_MS;
+	host->timeout	= msecs_to_jiffies(4000);
 
 	host->pinctrl = devm_pinctrl_get(&pdev->dev);
 	if (IS_ERR(host->pinctrl)) {
@@ -1890,7 +1883,6 @@ static struct platform_driver usdhi6_driver = {
 	.remove		= usdhi6_remove,
 	.driver		= {
 		.name	= "usdhi6rol0",
-		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.of_match_table = usdhi6_of_match,
 	},
 };

@@ -57,9 +57,6 @@ properties:
   "#iommu-cells":
     const: 1
 
-  "#interconnect-cells":
-    const: 1
-
 patternProperties:
   "^emc-timings-[0-9]+$":
     type: object
@@ -80,7 +77,8 @@ patternProperties:
             maximum: 900000000
 
           nvidia,emem-configuration:
-            $ref: /schemas/types.yaml#/definitions/uint32-array
+            allOf:
+              - $ref: /schemas/types.yaml#/definitions/uint32-array
             description: |
               Values to be written to the EMEM register block. See section
               "18.13.1 MC Registers" in the TRM.
@@ -123,7 +121,6 @@ required:
   - clock-names
   - "#reset-cells"
   - "#iommu-cells"
-  - "#interconnect-cells"
 
 additionalProperties: false
 
@@ -139,7 +136,6 @@ examples:
 
         #iommu-cells = <1>;
         #reset-cells = <1>;
-        #interconnect-cells = <1>;
 
         emc-timings-1 {
             nvidia,ram-code = <1>;

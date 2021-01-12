@@ -191,4 +191,3 @@ void rtw_rx_fill_rx_status(struct rtw_dev *rtwdev,
 
 	rtw_rx_addr_match(rtwdev, pkt_stat, hdr);
 }
-EXPORT_SYMBOL(rtw_rx_fill_rx_status);

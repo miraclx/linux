@@ -36,6 +36,7 @@ static inline bool __tlb_remove_page_size(struct mmu_gather *tlb,
 #define p4d_free_tlb p4d_free_tlb
 #define pud_free_tlb pud_free_tlb
 
+#include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <asm-generic/tlb.h>
 

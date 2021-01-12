@@ -290,8 +290,9 @@ static int gb_hid_parse(struct hid_device *hid)
 	}
 
 	rdesc = kzalloc(rsize, GFP_KERNEL);
-	if (!rdesc)
+	if (!rdesc) {
 		return -ENOMEM;
+	}
 
 	ret = gb_hid_get_report_desc(ghid, rdesc);
 	if (ret) {

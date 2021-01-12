@@ -138,22 +138,20 @@ static int dust_add_block(struct dust_device *dd, unsigned long long block,
 	return 0;
 }
 
-static int dust_query_block(struct dust_device *dd, unsigned long long block, char *result,
-			    unsigned int maxlen, unsigned int *sz_ptr)
+static int dust_query_block(struct dust_device *dd, unsigned long long block)
 {
 	struct badblock *bblock;
 	unsigned long flags;
-	unsigned int sz = *sz_ptr;
 
 	spin_lock_irqsave(&dd->dust_lock, flags);
 	bblock = dust_rb_search(&dd->badblocklist, block);
 	if (bblock != NULL)
-		DMEMIT("%s: block %llu found in badblocklist", __func__, block);
+		DMINFO("%s: block %llu found in badblocklist", __func__, block);
 	else
-		DMEMIT("%s: block %llu not found in badblocklist", __func__, block);
+		DMINFO("%s: block %llu not found in badblocklist", __func__, block);
 	spin_unlock_irqrestore(&dd->dust_lock, flags);
 
-	return 1;
+	return 0;
 }
 
 static int __dust_map_read(struct dust_device *dd, sector_t thisblock)
@@ -261,13 +259,11 @@ static bool __dust_clear_badblocks(struct rb_root *tree,
 	return true;
 }
 
-static int dust_clear_badblocks(struct dust_device *dd, char *result, unsigned int maxlen,
-				unsigned int *sz_ptr)
+static int dust_clear_badblocks(struct dust_device *dd)
 {
 	unsigned long flags;
 	struct rb_root badblocklist;
 	unsigned long long badblock_count;
-	unsigned int sz = *sz_ptr;
 
 	spin_lock_irqsave(&dd->dust_lock, flags);
 	badblocklist = dd->badblocklist;
@@ -277,36 +273,11 @@ static int dust_clear_badblocks(struct dust_device *dd, char *result, unsigned i
 	spin_unlock_irqrestore(&dd->dust_lock, flags);
 
 	if (!__dust_clear_badblocks(&badblocklist, badblock_count))
-		DMEMIT("%s: no badblocks found", __func__);
+		DMINFO("%s: no badblocks found", __func__);
 	else
-		DMEMIT("%s: badblocks cleared", __func__);
+		DMINFO("%s: badblocks cleared", __func__);
 
-	return 1;
-}
-
-static int dust_list_badblocks(struct dust_device *dd, char *result, unsigned int maxlen,
-				unsigned int *sz_ptr)
-{
-	unsigned long flags;
-	struct rb_root badblocklist;
-	struct rb_node *node;
-	struct badblock *bblk;
-	unsigned int sz = *sz_ptr;
-	unsigned long long num = 0;
-
-	spin_lock_irqsave(&dd->dust_lock, flags);
-	badblocklist = dd->badblocklist;
-	for (node = rb_first(&badblocklist); node; node = rb_next(node)) {
-		bblk = rb_entry(node, struct badblock, node);
-		DMEMIT("%llu\n", bblk->bb);
-		num++;
-	}
-
-	spin_unlock_irqrestore(&dd->dust_lock, flags);
-	if (!num)
-		DMEMIT("No blocks in badblocklist");
-
-	return 1;
+	return 0;
 }
 
 /*
@@ -412,7 +383,7 @@ static void dust_dtr(struct dm_target *ti)
 }
 
 static int dust_message(struct dm_target *ti, unsigned int argc, char **argv,
-			char *result, unsigned int maxlen)
+			char *result_buf, unsigned int maxlen)
 {
 	struct dust_device *dd = ti->private;
 	sector_t size = i_size_read(dd->dev->bdev->bd_inode) >> SECTOR_SHIFT;
@@ -422,7 +393,6 @@ static int dust_message(struct dm_target *ti, unsigned int argc, char **argv,
 	unsigned char wr_fail_cnt;
 	unsigned int tmp_ui;
 	unsigned long flags;
-	unsigned int sz = 0;
 	char dummy;
 
 	if (argc == 1) {
@@ -440,20 +410,18 @@ static int dust_message(struct dm_target *ti, unsigned int argc, char **argv,
 			r = 0;
 		} else if (!strcasecmp(argv[0], "countbadblocks")) {
 			spin_lock_irqsave(&dd->dust_lock, flags);
-			DMEMIT("countbadblocks: %llu badblock(s) found",
+			DMINFO("countbadblocks: %llu badblock(s) found",
 			       dd->badblock_count);
 			spin_unlock_irqrestore(&dd->dust_lock, flags);
-			r = 1;
+			r = 0;
 		} else if (!strcasecmp(argv[0], "clearbadblocks")) {
-			r = dust_clear_badblocks(dd, result, maxlen, &sz);
+			r = dust_clear_badblocks(dd);
 		} else if (!strcasecmp(argv[0], "quiet")) {
 			if (!dd->quiet_mode)
 				dd->quiet_mode = true;
 			else
 				dd->quiet_mode = false;
 			r = 0;
-		} else if (!strcasecmp(argv[0], "listbadblocks")) {
-			r = dust_list_badblocks(dd, result, maxlen, &sz);
 		} else {
 			invalid_msg = true;
 		}
@@ -473,7 +441,7 @@ static int dust_message(struct dm_target *ti, unsigned int argc, char **argv,
 		else if (!strcasecmp(argv[0], "removebadblock"))
 			r = dust_remove_block(dd, block);
 		else if (!strcasecmp(argv[0], "queryblock"))
-			r = dust_query_block(dd, block, result, maxlen, &sz);
+			r = dust_query_block(dd, block);
 		else
 			invalid_msg = true;
 

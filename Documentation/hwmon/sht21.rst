@@ -11,7 +11,7 @@ Supported chips:
 
     Datasheet: Publicly available at the Sensirion website
 
-    https://www.sensirion.com/file/datasheet_sht21
+    http://www.sensirion.com/file/datasheet_sht21
 
 
 
@@ -23,7 +23,7 @@ Supported chips:
 
     Datasheet: Publicly available at the Sensirion website
 
-    https://www.sensirion.com/file/datasheet_sht25
+    http://www.sensirion.com/file/datasheet_sht25
 
 
 

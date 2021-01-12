@@ -518,7 +518,7 @@ static int ds3232_probe(struct device *dev, struct regmap *regmap, int irq,
 	if (IS_ERR(ds3232->rtc))
 		return PTR_ERR(ds3232->rtc);
 
-	ret = devm_rtc_nvmem_register(ds3232->rtc, &nvmem_cfg);
+	ret = rtc_nvmem_register(ds3232->rtc, &nvmem_cfg);
 	if(ret)
 		return ret;
 

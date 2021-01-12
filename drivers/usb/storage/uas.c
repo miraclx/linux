@@ -279,17 +279,17 @@ static bool uas_evaluate_response_iu(struct response_iu *riu, struct scsi_cmnd *
 
 	switch (response_code) {
 	case RC_INCORRECT_LUN:
-		set_host_byte(cmnd, DID_BAD_TARGET);
+		cmnd->result = DID_BAD_TARGET << 16;
 		break;
 	case RC_TMF_SUCCEEDED:
-		set_host_byte(cmnd, DID_OK);
+		cmnd->result = DID_OK << 16;
 		break;
 	case RC_TMF_NOT_SUPPORTED:
-		set_host_byte(cmnd, DID_TARGET_FAILURE);
+		cmnd->result = DID_TARGET_FAILURE << 16;
 		break;
 	default:
 		uas_log_cmd_state(cmnd, "response iu", response_code);
-		set_host_byte(cmnd, DID_ERROR);
+		cmnd->result = DID_ERROR << 16;
 		break;
 	}
 
@@ -660,9 +660,10 @@ static int uas_queuecommand_lck(struct scsi_cmnd *cmnd,
 	spin_lock_irqsave(&devinfo->lock, flags);
 
 	if (devinfo->resetting) {
-		set_host_byte(cmnd, DID_ERROR);
+		cmnd->result = DID_ERROR << 16;
 		cmnd->scsi_done(cmnd);
-		goto zombie;
+		spin_unlock_irqrestore(&devinfo->lock, flags);
+		return 0;
 	}
 
 	/* Find a free uas-tag */
@@ -687,10 +688,9 @@ static int uas_queuecommand_lck(struct scsi_cmnd *cmnd,
 		break;
 	case DMA_BIDIRECTIONAL:
 		cmdinfo->state |= ALLOC_DATA_IN_URB | SUBMIT_DATA_IN_URB;
-		fallthrough;
+		/* fall through */
 	case DMA_TO_DEVICE:
 		cmdinfo->state |= ALLOC_DATA_OUT_URB | SUBMIT_DATA_OUT_URB;
-		break;
 	case DMA_NONE:
 		break;
 	}
@@ -699,16 +699,6 @@ static int uas_queuecommand_lck(struct scsi_cmnd *cmnd,
 		cmdinfo->state &= ~(SUBMIT_DATA_IN_URB | SUBMIT_DATA_OUT_URB);
 
 	err = uas_submit_urbs(cmnd, devinfo);
-	/*
-	 * in case of fatal errors the SCSI layer is peculiar
-	 * a command that has finished is a success for the purpose
-	 * of queueing, no matter how fatal the error
-	 */
-	if (err == -ENODEV) {
-		set_host_byte(cmnd, DID_ERROR);
-		cmnd->scsi_done(cmnd);
-		goto zombie;
-	}
 	if (err) {
 		/* If we did nothing, give up now */
 		if (cmdinfo->state & SUBMIT_STATUS_URB) {
@@ -719,7 +709,6 @@ static int uas_queuecommand_lck(struct scsi_cmnd *cmnd,
 	}
 
 	devinfo->cmnd[idx] = cmnd;
-zombie:
 	spin_unlock_irqrestore(&devinfo->lock, flags);
 	return 0;
 }
@@ -868,9 +857,6 @@ static int uas_slave_configure(struct scsi_device *sdev)
 	if (devinfo->flags & US_FL_NO_READ_CAPACITY_16)
 		sdev->no_read_capacity_16 = 1;
 
-	/* Some disks cannot handle WRITE_SAME */
-	if (devinfo->flags & US_FL_NO_SAME)
-		sdev->no_write_same = 1;
 	/*
 	 * Some disks return the total number of blocks in response
 	 * to READ CAPACITY rather than the highest block number.

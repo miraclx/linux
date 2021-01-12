@@ -440,7 +440,6 @@ static int dln2_gpio_probe(struct platform_device *pdev)
 {
 	struct dln2_gpio *dln2;
 	struct device *dev = &pdev->dev;
-	struct gpio_irq_chip *girq;
 	int pins;
 	int ret;
 
@@ -477,20 +476,18 @@ static int dln2_gpio_probe(struct platform_device *pdev)
 	dln2->gpio.direction_output = dln2_gpio_direction_output;
 	dln2->gpio.set_config = dln2_gpio_set_config;
 
-	girq = &dln2->gpio.irq;
-	girq->chip = &dln2_gpio_irqchip;
-	/* The event comes from the outside so no parent handler */
-	girq->parent_handler = NULL;
-	girq->num_parents = 0;
-	girq->parents = NULL;
-	girq->default_type = IRQ_TYPE_NONE;
-	girq->handler = handle_simple_irq;
-
 	platform_set_drvdata(pdev, dln2);
 
 	ret = devm_gpiochip_add_data(dev, &dln2->gpio, dln2);
 	if (ret < 0) {
 		dev_err(dev, "failed to add gpio chip: %d\n", ret);
+		return ret;
+	}
+
+	ret = gpiochip_irqchip_add(&dln2->gpio, &dln2_gpio_irqchip, 0,
+				   handle_simple_irq, IRQ_TYPE_NONE);
+	if (ret < 0) {
+		dev_err(dev, "failed to add irq chip: %d\n", ret);
 		return ret;
 	}
 

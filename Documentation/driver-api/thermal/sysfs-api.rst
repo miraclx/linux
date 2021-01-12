@@ -654,7 +654,8 @@ stats/time_in_state_ms:
 	The amount of time spent by the cooling device in various cooling
 	states. The output will have "<state> <time>" pair in each line, which
 	will mean this cooling device spent <time> msec of time at <state>.
-	Output will have one line for each of the supported states.
+	Output will have one line for each of the supported states.  usertime
+	units here is 10mS (similar to other time exported in /proc).
 	RO, Required
 
 

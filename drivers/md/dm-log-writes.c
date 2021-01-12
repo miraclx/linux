@@ -127,7 +127,7 @@ struct pending_block {
 	char *data;
 	u32 datalen;
 	struct list_head list;
-	struct bio_vec vecs[];
+	struct bio_vec vecs[0];
 };
 
 struct per_bio_data {

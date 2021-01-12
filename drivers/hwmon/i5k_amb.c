@@ -396,7 +396,7 @@ exit_remove:
 
 static int i5k_amb_add(void)
 {
-	int res;
+	int res = -ENODEV;
 
 	/* only ever going to be one of these */
 	amb_pdev = platform_device_alloc(DRVNAME, 0);
@@ -427,13 +427,11 @@ static int i5k_find_amb_registers(struct i5k_amb_data *data,
 	if (!pcidev)
 		return -ENODEV;
 
-	pci_read_config_dword(pcidev, I5K_REG_AMB_BASE_ADDR, &val32);
-	if (val32 == (u32)~0)
+	if (pci_read_config_dword(pcidev, I5K_REG_AMB_BASE_ADDR, &val32))
 		goto out;
 	data->amb_base = val32;
 
-	pci_read_config_dword(pcidev, I5K_REG_AMB_LEN_ADDR, &val32);
-	if (val32 == (u32)~0)
+	if (pci_read_config_dword(pcidev, I5K_REG_AMB_LEN_ADDR, &val32))
 		goto out;
 	data->amb_len = val32;
 
@@ -460,13 +458,11 @@ static int i5k_channel_probe(u16 *amb_present, unsigned long dev_id)
 	if (!pcidev)
 		return -ENODEV;
 
-	pci_read_config_word(pcidev, I5K_REG_CHAN0_PRESENCE_ADDR, &val16);
-	if (val16 == (u16)~0)
+	if (pci_read_config_word(pcidev, I5K_REG_CHAN0_PRESENCE_ADDR, &val16))
 		goto out;
 	amb_present[0] = val16;
 
-	pci_read_config_word(pcidev, I5K_REG_CHAN1_PRESENCE_ADDR, &val16);
-	if (val16 == (u16)~0)
+	if (pci_read_config_word(pcidev, I5K_REG_CHAN1_PRESENCE_ADDR, &val16))
 		goto out;
 	amb_present[1] = val16;
 

@@ -4,7 +4,7 @@
  *
  * OMAP Dual-Mode Timers
  *
- * Copyright (C) 2010 Texas Instruments Incorporated - https://www.ti.com/
+ * Copyright (C) 2010 Texas Instruments Incorporated - http://www.ti.com/
  * Tarun Kanti DebBarma <tarun.kanti@ti.com>
  * Thara Gopinath <thara@ti.com>
  *
@@ -258,7 +258,9 @@ static int omap_dm_timer_prepare(struct omap_dm_timer *timer)
 	__omap_dm_timer_enable_posted(timer);
 	omap_dm_timer_disable(timer);
 
-	return 0;
+	rc = omap_dm_timer_set_source(timer, OMAP_TIMER_SRC_32_KHZ);
+
+	return rc;
 }
 
 static inline u32 omap_dm_timer_reserved_systimer(int id)

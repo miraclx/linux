@@ -21,6 +21,7 @@
 
 #define STATIC static
 #define INIT
+#define __always_inline inline
 
 /*
  * The build process will copy the required zlib source files and headers

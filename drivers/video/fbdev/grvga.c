@@ -5,7 +5,7 @@
  * 2011 (c) Aeroflex Gaisler AB
  *
  * Full documentation of the core can be found here:
- * https://www.gaisler.com/products/grlib/grip.pdf
+ * http://www.gaisler.com/products/grlib/grip.pdf
  *
  * Contributors: Kristoffer Glembo <kristoffer@gaisler.com>
  */

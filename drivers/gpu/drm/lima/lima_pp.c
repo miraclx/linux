@@ -223,23 +223,6 @@ static void lima_pp_print_version(struct lima_ip *ip)
 		 lima_ip_name(ip), name, major, minor);
 }
 
-static int lima_pp_hw_init(struct lima_ip *ip)
-{
-	ip->data.async_reset = false;
-	lima_pp_soft_reset_async(ip);
-	return lima_pp_soft_reset_async_wait(ip);
-}
-
-int lima_pp_resume(struct lima_ip *ip)
-{
-	return lima_pp_hw_init(ip);
-}
-
-void lima_pp_suspend(struct lima_ip *ip)
-{
-
-}
-
 int lima_pp_init(struct lima_ip *ip)
 {
 	struct lima_device *dev = ip->dev;
@@ -247,7 +230,9 @@ int lima_pp_init(struct lima_ip *ip)
 
 	lima_pp_print_version(ip);
 
-	err = lima_pp_hw_init(ip);
+	ip->data.async_reset = false;
+	lima_pp_soft_reset_async(ip);
+	err = lima_pp_soft_reset_async_wait(ip);
 	if (err)
 		return err;
 
@@ -265,18 +250,6 @@ int lima_pp_init(struct lima_ip *ip)
 }
 
 void lima_pp_fini(struct lima_ip *ip)
-{
-
-}
-
-int lima_pp_bcast_resume(struct lima_ip *ip)
-{
-	/* PP has been reset by individual PP resume */
-	ip->data.async_reset = false;
-	return 0;
-}
-
-void lima_pp_bcast_suspend(struct lima_ip *ip)
 {
 
 }

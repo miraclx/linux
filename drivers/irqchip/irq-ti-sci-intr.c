@@ -2,7 +2,7 @@
 /*
  * Texas Instruments' K3 Interrupt Router irqchip driver
  *
- * Copyright (C) 2018-2019 Texas Instruments Incorporated - https://www.ti.com/
+ * Copyright (C) 2018-2019 Texas Instruments Incorporated - http://www.ti.com/
  *	Lokesh Vutla <lokeshvutla@ti.com>
  */
 
@@ -17,20 +17,29 @@
 #include <linux/of_irq.h>
 #include <linux/soc/ti/ti_sci_protocol.h>
 
+#define TI_SCI_DEV_ID_MASK	0xffff
+#define TI_SCI_DEV_ID_SHIFT	16
+#define TI_SCI_IRQ_ID_MASK	0xffff
+#define TI_SCI_IRQ_ID_SHIFT	0
+#define HWIRQ_TO_DEVID(hwirq)	(((hwirq) >> (TI_SCI_DEV_ID_SHIFT)) & \
+				 (TI_SCI_DEV_ID_MASK))
+#define HWIRQ_TO_IRQID(hwirq)	((hwirq) & (TI_SCI_IRQ_ID_MASK))
+#define TO_HWIRQ(dev, index)	((((dev) & TI_SCI_DEV_ID_MASK) << \
+				 TI_SCI_DEV_ID_SHIFT) | \
+				((index) & TI_SCI_IRQ_ID_MASK))
+
 /**
  * struct ti_sci_intr_irq_domain - Structure representing a TISCI based
  *				   Interrupt Router IRQ domain.
  * @sci:	Pointer to TISCI handle
- * @out_irqs:	TISCI resource pointer representing INTR irqs.
- * @dev:	Struct device pointer.
- * @ti_sci_id:	TI-SCI device identifier
+ * @dst_irq:	TISCI resource pointer representing GIC irq controller.
+ * @dst_id:	TISCI device ID of the GIC irq controller.
  * @type:	Specifies the trigger type supported by this Interrupt Router
  */
 struct ti_sci_intr_irq_domain {
 	const struct ti_sci_handle *sci;
-	struct ti_sci_resource *out_irqs;
-	struct device *dev;
-	u32 ti_sci_id;
+	struct ti_sci_resource *dst_irq;
+	u32 dst_id;
 	u32 type;
 };
 
@@ -61,42 +70,13 @@ static int ti_sci_intr_irq_domain_translate(struct irq_domain *domain,
 {
 	struct ti_sci_intr_irq_domain *intr = domain->host_data;
 
-	if (fwspec->param_count != 1)
+	if (fwspec->param_count != 2)
 		return -EINVAL;
 
-	*hwirq = fwspec->param[0];
+	*hwirq = TO_HWIRQ(fwspec->param[0], fwspec->param[1]);
 	*type = intr->type;
 
 	return 0;
-}
-
-/**
- * ti_sci_intr_xlate_irq() - Translate hwirq to parent's hwirq.
- * @intr:	IRQ domain corresponding to Interrupt Router
- * @irq:	Hardware irq corresponding to the above irq domain
- *
- * Return parent irq number if translation is available else -ENOENT.
- */
-static int ti_sci_intr_xlate_irq(struct ti_sci_intr_irq_domain *intr, u32 irq)
-{
-	struct device_node *np = dev_of_node(intr->dev);
-	u32 base, pbase, size, len;
-	const __be32 *range;
-
-	range = of_get_property(np, "ti,interrupt-ranges", &len);
-	if (!range)
-		return irq;
-
-	for (len /= sizeof(*range); len >= 3; len -= 3) {
-		base = be32_to_cpu(*range++);
-		pbase = be32_to_cpu(*range++);
-		size = be32_to_cpu(*range++);
-
-		if (base <= irq && irq < base + size)
-			return irq - base + pbase;
-	}
-
-	return -ENOENT;
 }
 
 /**
@@ -109,76 +89,66 @@ static void ti_sci_intr_irq_domain_free(struct irq_domain *domain,
 					unsigned int virq, unsigned int nr_irqs)
 {
 	struct ti_sci_intr_irq_domain *intr = domain->host_data;
-	struct irq_data *data;
-	int out_irq;
+	struct irq_data *data, *parent_data;
+	u16 dev_id, irq_index;
 
+	parent_data = irq_domain_get_irq_data(domain->parent, virq);
 	data = irq_domain_get_irq_data(domain, virq);
-	out_irq = (uintptr_t)data->chip_data;
+	irq_index = HWIRQ_TO_IRQID(data->hwirq);
+	dev_id = HWIRQ_TO_DEVID(data->hwirq);
 
-	intr->sci->ops.rm_irq_ops.free_irq(intr->sci,
-					   intr->ti_sci_id, data->hwirq,
-					   intr->ti_sci_id, out_irq);
-	ti_sci_release_resource(intr->out_irqs, out_irq);
+	intr->sci->ops.rm_irq_ops.free_irq(intr->sci, dev_id, irq_index,
+					   intr->dst_id, parent_data->hwirq);
+	ti_sci_release_resource(intr->dst_irq, parent_data->hwirq);
 	irq_domain_free_irqs_parent(domain, virq, 1);
 	irq_domain_reset_irq_data(data);
 }
 
 /**
- * ti_sci_intr_alloc_parent_irq() - Allocate parent IRQ
+ * ti_sci_intr_alloc_gic_irq() - Allocate GIC specific IRQ
  * @domain:	Pointer to the interrupt router IRQ domain
  * @virq:	Corresponding Linux virtual IRQ number
  * @hwirq:	Corresponding hwirq for the IRQ within this IRQ domain
  *
- * Returns intr output irq if all went well else appropriate error pointer.
+ * Returns 0 if all went well else appropriate error pointer.
  */
-static int ti_sci_intr_alloc_parent_irq(struct irq_domain *domain,
-					unsigned int virq, u32 hwirq)
+static int ti_sci_intr_alloc_gic_irq(struct irq_domain *domain,
+				     unsigned int virq, u32 hwirq)
 {
 	struct ti_sci_intr_irq_domain *intr = domain->host_data;
-	struct device_node *parent_node;
 	struct irq_fwspec fwspec;
-	int p_hwirq, err = 0;
-	u16 out_irq;
+	u16 dev_id, irq_index;
+	u16 dst_irq;
+	int err;
 
-	out_irq = ti_sci_get_free_resource(intr->out_irqs);
-	if (out_irq == TI_SCI_RESOURCE_NULL)
+	dev_id = HWIRQ_TO_DEVID(hwirq);
+	irq_index = HWIRQ_TO_IRQID(hwirq);
+
+	dst_irq = ti_sci_get_free_resource(intr->dst_irq);
+	if (dst_irq == TI_SCI_RESOURCE_NULL)
 		return -EINVAL;
 
-	p_hwirq = ti_sci_intr_xlate_irq(intr, out_irq);
-	if (p_hwirq < 0)
-		goto err_irqs;
-
-	parent_node = of_irq_find_parent(dev_of_node(intr->dev));
-	fwspec.fwnode = of_node_to_fwnode(parent_node);
-
-	if (of_device_is_compatible(parent_node, "arm,gic-v3")) {
-		/* Parent is GIC */
-		fwspec.param_count = 3;
-		fwspec.param[0] = 0;	/* SPI */
-		fwspec.param[1] = p_hwirq - 32; /* SPI offset */
-		fwspec.param[2] = intr->type;
-	} else {
-		/* Parent is Interrupt Router */
-		fwspec.param_count = 1;
-		fwspec.param[0] = p_hwirq;
-	}
+	fwspec.fwnode = domain->parent->fwnode;
+	fwspec.param_count = 3;
+	fwspec.param[0] = 0;	/* SPI */
+	fwspec.param[1] = dst_irq - 32; /* SPI offset */
+	fwspec.param[2] = intr->type;
 
 	err = irq_domain_alloc_irqs_parent(domain, virq, 1, &fwspec);
 	if (err)
 		goto err_irqs;
 
-	err = intr->sci->ops.rm_irq_ops.set_irq(intr->sci,
-						intr->ti_sci_id, hwirq,
-						intr->ti_sci_id, out_irq);
+	err = intr->sci->ops.rm_irq_ops.set_irq(intr->sci, dev_id, irq_index,
+						intr->dst_id, dst_irq);
 	if (err)
 		goto err_msg;
 
-	return out_irq;
+	return 0;
 
 err_msg:
 	irq_domain_free_irqs_parent(domain, virq, 1);
 err_irqs:
-	ti_sci_release_resource(intr->out_irqs, out_irq);
+	ti_sci_release_resource(intr->dst_irq, dst_irq);
 	return err;
 }
 
@@ -198,19 +168,18 @@ static int ti_sci_intr_irq_domain_alloc(struct irq_domain *domain,
 	struct irq_fwspec *fwspec = data;
 	unsigned long hwirq;
 	unsigned int flags;
-	int err, out_irq;
+	int err;
 
 	err = ti_sci_intr_irq_domain_translate(domain, fwspec, &hwirq, &flags);
 	if (err)
 		return err;
 
-	out_irq = ti_sci_intr_alloc_parent_irq(domain, virq, hwirq);
-	if (out_irq < 0)
-		return out_irq;
+	err = ti_sci_intr_alloc_gic_irq(domain, virq, hwirq);
+	if (err)
+		return err;
 
 	irq_domain_set_hwirq_and_chip(domain, virq, hwirq,
-				      &ti_sci_intr_irq_chip,
-				      (void *)(uintptr_t)out_irq);
+				      &ti_sci_intr_irq_chip, NULL);
 
 	return 0;
 }
@@ -245,7 +214,6 @@ static int ti_sci_intr_irq_domain_probe(struct platform_device *pdev)
 	if (!intr)
 		return -ENOMEM;
 
-	intr->dev = dev;
 	ret = of_property_read_u32(dev_of_node(dev), "ti,intr-trigger-type",
 				   &intr->type);
 	if (ret) {
@@ -254,23 +222,27 @@ static int ti_sci_intr_irq_domain_probe(struct platform_device *pdev)
 	}
 
 	intr->sci = devm_ti_sci_get_by_phandle(dev, "ti,sci");
-	if (IS_ERR(intr->sci))
-		return dev_err_probe(dev, PTR_ERR(intr->sci),
-				     "ti,sci read fail\n");
+	if (IS_ERR(intr->sci)) {
+		ret = PTR_ERR(intr->sci);
+		if (ret != -EPROBE_DEFER)
+			dev_err(dev, "ti,sci read fail %d\n", ret);
+		intr->sci = NULL;
+		return ret;
+	}
 
-	ret = of_property_read_u32(dev_of_node(dev), "ti,sci-dev-id",
-				   &intr->ti_sci_id);
+	ret = of_property_read_u32(dev_of_node(dev), "ti,sci-dst-id",
+				   &intr->dst_id);
 	if (ret) {
-		dev_err(dev, "missing 'ti,sci-dev-id' property\n");
+		dev_err(dev, "missing 'ti,sci-dst-id' property\n");
 		return -EINVAL;
 	}
 
-	intr->out_irqs = devm_ti_sci_get_resource(intr->sci, dev,
-						  intr->ti_sci_id,
-						  TI_SCI_RESASG_SUBTYPE_IR_OUTPUT);
-	if (IS_ERR(intr->out_irqs)) {
+	intr->dst_irq = devm_ti_sci_get_of_resource(intr->sci, dev,
+						    intr->dst_id,
+						    "ti,sci-rm-range-girq");
+	if (IS_ERR(intr->dst_irq)) {
 		dev_err(dev, "Destination irq resource allocation failed\n");
-		return PTR_ERR(intr->out_irqs);
+		return PTR_ERR(intr->dst_irq);
 	}
 
 	domain = irq_domain_add_hierarchy(parent_domain, 0, 0, dev_of_node(dev),
@@ -279,8 +251,6 @@ static int ti_sci_intr_irq_domain_probe(struct platform_device *pdev)
 		dev_err(dev, "Failed to allocate IRQ domain\n");
 		return -ENOMEM;
 	}
-
-	dev_info(dev, "Interrupt Router %d domain created\n", intr->ti_sci_id);
 
 	return 0;
 }

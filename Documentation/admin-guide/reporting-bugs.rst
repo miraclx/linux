@@ -1,10 +1,5 @@
 .. _reportingbugs:
 
-.. note::
-
-   This document is obsolete, and will be replaced by
-   'Documentation/admin-guide/reporting-issues.rst' in the near future.
-
 Reporting bugs
 ++++++++++++++
 
@@ -80,7 +75,7 @@ Tips for reporting bugs
 
 If you haven't reported a bug before, please read:
 
-	https://www.chiark.greenend.org.uk/~sgtatham/bugs.html
+	http://www.chiark.greenend.org.uk/~sgtatham/bugs.html
 
 	http://www.catb.org/esr/faqs/smart-questions.html
 

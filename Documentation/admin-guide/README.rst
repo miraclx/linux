@@ -209,22 +209,15 @@ Configuring the kernel
                            store the lsmod of that machine into a file
                            and pass it in as a LSMOD parameter.
 
-                           Also, you can preserve modules in certain folders
-                           or kconfig files by specifying their paths in
-                           parameter LMC_KEEP.
-
                    target$ lsmod > /tmp/mylsmod
                    target$ scp /tmp/mylsmod host:/tmp
 
-                   host$ make LSMOD=/tmp/mylsmod \
-                           LMC_KEEP="drivers/usb:drivers/gpu:fs" \
-                           localmodconfig
+                   host$ make LSMOD=/tmp/mylsmod localmodconfig
 
                            The above also works when cross compiling.
 
      "make localyesconfig" Similar to localmodconfig, except it will convert
-                           all module options to built in (=y) options. You can
-                           also preserve modules by LMC_KEEP.
+                           all module options to built in (=y) options.
 
      "make kvmconfig"   Enable additional options for kvm guest kernel support.
 
@@ -258,7 +251,7 @@ Configuring the kernel
 Compiling the kernel
 --------------------
 
- - Make sure you have at least gcc 4.9 available.
+ - Make sure you have at least gcc 4.6 available.
    For more information, refer to :ref:`Documentation/process/changes.rst <changes>`.
 
    Please note that you can still run a.out user programs with this kernel.
@@ -322,9 +315,9 @@ Compiling the kernel
    reboot, and enjoy!
 
    If you ever need to change the default root device, video mode,
-   etc. in the kernel image, use your bootloader's boot options
-   where appropriate.  No need to recompile the kernel to change
-   these parameters.
+   ramdisk size, etc.  in the kernel image, use the ``rdev`` program (or
+   alternatively the LILO boot options when appropriate).  No need to
+   recompile the kernel to change these parameters.
 
  - Reboot with the new kernel and enjoy.
 
@@ -398,8 +391,8 @@ If something goes wrong
 
    If you for some reason cannot do the above (you have a pre-compiled
    kernel image or similar), telling me as much about your setup as
-   possible will help.  Please read
-   'Documentation/admin-guide/reporting-issues.rst' for details.
+   possible will help.  Please read the :ref:`admin-guide/reporting-bugs.rst <reportingbugs>`
+   document for details.
 
  - Alternatively, you can use gdb on a running kernel. (read-only; i.e. you
    cannot change values or set break points.) To do this, first compile the

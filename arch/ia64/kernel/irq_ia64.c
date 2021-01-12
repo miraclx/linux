@@ -16,7 +16,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/pgtable.h>
 
 #include <linux/jiffies.h>
 #include <linux/errno.h>
@@ -38,7 +37,12 @@
 #include <asm/intrinsics.h>
 #include <asm/io.h>
 #include <asm/hw_irq.h>
+#include <asm/pgtable.h>
 #include <asm/tlbflush.h>
+
+#ifdef CONFIG_PERFMON
+# include <asm/perfmon.h>
+#endif
 
 #define IRQ_DEBUG	0
 
@@ -622,6 +626,9 @@ init_IRQ (void)
 				    smp_irq_move_cleanup_interrupt, 0,
 				    "irq_move");
 	}
+#endif
+#ifdef CONFIG_PERFMON
+	pfm_init_percpu();
 #endif
 }
 

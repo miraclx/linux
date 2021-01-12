@@ -13,8 +13,6 @@
 #define LSAVE_A1	28
 #define LSAVE_A2	32
 #define LSAVE_A3	36
-#define LSAVE_A4	40
-#define LSAVE_A5	44
 
 #define KSPTOUSP
 #define USPTOKSP
@@ -65,6 +63,7 @@
 .endm
 
 .macro	RESTORE_ALL
+	psrclr  ie
 	ldw	tls, (sp, 0)
 	ldw	lr, (sp, 4)
 	ldw	a0, (sp, 8)
@@ -136,6 +135,8 @@
 
 .macro	RESTORE_REGS_FTRACE
 	ldw	tls, (sp, 0)
+	ldw	a0, (sp, 16)
+	mtcr	a0, ss0
 
 #ifdef CONFIG_CPU_HAS_HILO
 	ldw	a0, (sp, 140)
@@ -156,6 +157,7 @@
 	addi    sp, 40
 	ldm     r16-r30, (sp)
 	addi    sp, 72
+	mfcr	sp, ss0
 .endm
 
 .macro SAVE_SWITCH_STACK
@@ -298,5 +300,10 @@
 
 	jmpi	3f /* jump to va */
 3:
+.endm
+
+.macro ANDI_R3 rx, imm
+	lsri	\rx, 3
+	andi	\rx, (\imm >> 3)
 .endm
 #endif /* __ASM_CSKY_ENTRY_H */

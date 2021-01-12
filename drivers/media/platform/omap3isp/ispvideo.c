@@ -10,6 +10,7 @@
  *	     Sakari Ailus <sakari.ailus@iki.fi>
  */
 
+#include <asm/cacheflush.h>
 #include <linux/clk.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -703,7 +704,7 @@ isp_video_set_format(struct file *file, void *fh, struct v4l2_format *format)
 		 * requested.
 		 */
 		format->fmt.pix.field = V4L2_FIELD_INTERLACED_TB;
-		fallthrough;
+		/* Fall-through */
 	case V4L2_FIELD_INTERLACED_TB:
 	case V4L2_FIELD_INTERLACED_BT:
 		/* Interlaced orders are only supported at the CCDC output. */

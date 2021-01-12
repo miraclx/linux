@@ -77,28 +77,12 @@ int xenvif_schedulable(struct xenvif *vif)
 		!vif->disabled;
 }
 
-static bool xenvif_handle_tx_interrupt(struct xenvif_queue *queue)
-{
-	bool rc;
-
-	rc = RING_HAS_UNCONSUMED_REQUESTS(&queue->tx);
-	if (rc)
-		napi_schedule(&queue->napi);
-	return rc;
-}
-
 static irqreturn_t xenvif_tx_interrupt(int irq, void *dev_id)
 {
 	struct xenvif_queue *queue = dev_id;
-	int old;
 
-	old = atomic_fetch_or(NETBK_TX_EOI, &queue->eoi_pending);
-	WARN(old & NETBK_TX_EOI, "Interrupt while EOI pending\n");
-
-	if (!xenvif_handle_tx_interrupt(queue)) {
-		atomic_andnot(NETBK_TX_EOI, &queue->eoi_pending);
-		xen_irq_lateeoi(irq, XEN_EOI_FLAG_SPURIOUS);
-	}
+	if (RING_HAS_UNCONSUMED_REQUESTS(&queue->tx))
+		napi_schedule(&queue->napi);
 
 	return IRQ_HANDLED;
 }
@@ -132,46 +116,19 @@ static int xenvif_poll(struct napi_struct *napi, int budget)
 	return work_done;
 }
 
-static bool xenvif_handle_rx_interrupt(struct xenvif_queue *queue)
-{
-	bool rc;
-
-	rc = xenvif_have_rx_work(queue, false);
-	if (rc)
-		xenvif_kick_thread(queue);
-	return rc;
-}
-
 static irqreturn_t xenvif_rx_interrupt(int irq, void *dev_id)
 {
 	struct xenvif_queue *queue = dev_id;
-	int old;
 
-	old = atomic_fetch_or(NETBK_RX_EOI, &queue->eoi_pending);
-	WARN(old & NETBK_RX_EOI, "Interrupt while EOI pending\n");
-
-	if (!xenvif_handle_rx_interrupt(queue)) {
-		atomic_andnot(NETBK_RX_EOI, &queue->eoi_pending);
-		xen_irq_lateeoi(irq, XEN_EOI_FLAG_SPURIOUS);
-	}
+	xenvif_kick_thread(queue);
 
 	return IRQ_HANDLED;
 }
 
 irqreturn_t xenvif_interrupt(int irq, void *dev_id)
 {
-	struct xenvif_queue *queue = dev_id;
-	int old;
-
-	old = atomic_fetch_or(NETBK_COMMON_EOI, &queue->eoi_pending);
-	WARN(old, "Interrupt while EOI pending\n");
-
-	/* Use bitwise or as we need to call both functions. */
-	if ((!xenvif_handle_tx_interrupt(queue) |
-	     !xenvif_handle_rx_interrupt(queue))) {
-		atomic_andnot(NETBK_COMMON_EOI, &queue->eoi_pending);
-		xen_irq_lateeoi(irq, XEN_EOI_FLAG_SPURIOUS);
-	}
+	xenvif_tx_interrupt(irq, dev_id);
+	xenvif_rx_interrupt(irq, dev_id);
 
 	return IRQ_HANDLED;
 }
@@ -526,8 +483,6 @@ struct xenvif *xenvif_alloc(struct device *parent, domid_t domid,
 	vif->queues = NULL;
 	vif->num_queues = 0;
 
-	vif->xdp_headroom = 0;
-
 	spin_lock_init(&vif->lock);
 	INIT_LIST_HEAD(&vif->fe_mcast_addr);
 
@@ -648,7 +603,7 @@ int xenvif_connect_ctrl(struct xenvif *vif, grant_ref_t ring_ref,
 	if (req_prod - rsp_prod > RING_SIZE(&vif->ctrl))
 		goto err_unmap;
 
-	err = bind_interdomain_evtchn_to_irq_lateeoi(vif->domid, evtchn);
+	err = bind_interdomain_evtchn_to_irq(vif->domid, evtchn);
 	if (err < 0)
 		goto err_unmap;
 
@@ -752,7 +707,7 @@ int xenvif_connect_data(struct xenvif_queue *queue,
 
 	if (tx_evtchn == rx_evtchn) {
 		/* feature-split-event-channels == 0 */
-		err = bind_interdomain_evtchn_to_irqhandler_lateeoi(
+		err = bind_interdomain_evtchn_to_irqhandler(
 			queue->vif->domid, tx_evtchn, xenvif_interrupt, 0,
 			queue->name, queue);
 		if (err < 0)
@@ -763,7 +718,7 @@ int xenvif_connect_data(struct xenvif_queue *queue,
 		/* feature-split-event-channels == 1 */
 		snprintf(queue->tx_irq_name, sizeof(queue->tx_irq_name),
 			 "%s-tx", queue->name);
-		err = bind_interdomain_evtchn_to_irqhandler_lateeoi(
+		err = bind_interdomain_evtchn_to_irqhandler(
 			queue->vif->domid, tx_evtchn, xenvif_tx_interrupt, 0,
 			queue->tx_irq_name, queue);
 		if (err < 0)
@@ -773,7 +728,7 @@ int xenvif_connect_data(struct xenvif_queue *queue,
 
 		snprintf(queue->rx_irq_name, sizeof(queue->rx_irq_name),
 			 "%s-rx", queue->name);
-		err = bind_interdomain_evtchn_to_irqhandler_lateeoi(
+		err = bind_interdomain_evtchn_to_irqhandler(
 			queue->vif->domid, rx_evtchn, xenvif_rx_interrupt, 0,
 			queue->rx_irq_name, queue);
 		if (err < 0)

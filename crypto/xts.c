@@ -20,7 +20,7 @@
 #include <crypto/b128ops.h>
 #include <crypto/gf128mul.h>
 
-struct xts_tfm_ctx {
+struct priv {
 	struct crypto_skcipher *child;
 	struct crypto_cipher *tweak;
 };
@@ -30,17 +30,17 @@ struct xts_instance_ctx {
 	char name[CRYPTO_MAX_ALG_NAME];
 };
 
-struct xts_request_ctx {
+struct rctx {
 	le128 t;
 	struct scatterlist *tail;
 	struct scatterlist sg[2];
 	struct skcipher_request subreq;
 };
 
-static int xts_setkey(struct crypto_skcipher *parent, const u8 *key,
-		      unsigned int keylen)
+static int setkey(struct crypto_skcipher *parent, const u8 *key,
+		  unsigned int keylen)
 {
-	struct xts_tfm_ctx *ctx = crypto_skcipher_ctx(parent);
+	struct priv *ctx = crypto_skcipher_ctx(parent);
 	struct crypto_skcipher *child;
 	struct crypto_cipher *tweak;
 	int err;
@@ -78,10 +78,9 @@ static int xts_setkey(struct crypto_skcipher *parent, const u8 *key,
  * mutliple calls to the 'ecb(..)' instance, which usually would be slower than
  * just doing the gf128mul_x_ble() calls again.
  */
-static int xts_xor_tweak(struct skcipher_request *req, bool second_pass,
-			 bool enc)
+static int xor_tweak(struct skcipher_request *req, bool second_pass, bool enc)
 {
-	struct xts_request_ctx *rctx = skcipher_request_ctx(req);
+	struct rctx *rctx = skcipher_request_ctx(req);
 	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
 	const bool cts = (req->cryptlen % XTS_BLOCK_SIZE);
 	const int bs = XTS_BLOCK_SIZE;
@@ -129,23 +128,23 @@ static int xts_xor_tweak(struct skcipher_request *req, bool second_pass,
 	return err;
 }
 
-static int xts_xor_tweak_pre(struct skcipher_request *req, bool enc)
+static int xor_tweak_pre(struct skcipher_request *req, bool enc)
 {
-	return xts_xor_tweak(req, false, enc);
+	return xor_tweak(req, false, enc);
 }
 
-static int xts_xor_tweak_post(struct skcipher_request *req, bool enc)
+static int xor_tweak_post(struct skcipher_request *req, bool enc)
 {
-	return xts_xor_tweak(req, true, enc);
+	return xor_tweak(req, true, enc);
 }
 
-static void xts_cts_done(struct crypto_async_request *areq, int err)
+static void cts_done(struct crypto_async_request *areq, int err)
 {
 	struct skcipher_request *req = areq->data;
 	le128 b;
 
 	if (!err) {
-		struct xts_request_ctx *rctx = skcipher_request_ctx(req);
+		struct rctx *rctx = skcipher_request_ctx(req);
 
 		scatterwalk_map_and_copy(&b, rctx->tail, 0, XTS_BLOCK_SIZE, 0);
 		le128_xor(&b, &rctx->t, &b);
@@ -155,13 +154,12 @@ static void xts_cts_done(struct crypto_async_request *areq, int err)
 	skcipher_request_complete(req, err);
 }
 
-static int xts_cts_final(struct skcipher_request *req,
-			 int (*crypt)(struct skcipher_request *req))
+static int cts_final(struct skcipher_request *req,
+		     int (*crypt)(struct skcipher_request *req))
 {
-	const struct xts_tfm_ctx *ctx =
-		crypto_skcipher_ctx(crypto_skcipher_reqtfm(req));
+	struct priv *ctx = crypto_skcipher_ctx(crypto_skcipher_reqtfm(req));
 	int offset = req->cryptlen & ~(XTS_BLOCK_SIZE - 1);
-	struct xts_request_ctx *rctx = skcipher_request_ctx(req);
+	struct rctx *rctx = skcipher_request_ctx(req);
 	struct skcipher_request *subreq = &rctx->subreq;
 	int tail = req->cryptlen % XTS_BLOCK_SIZE;
 	le128 b[2];
@@ -171,7 +169,7 @@ static int xts_cts_final(struct skcipher_request *req,
 				      offset - XTS_BLOCK_SIZE);
 
 	scatterwalk_map_and_copy(b, rctx->tail, 0, XTS_BLOCK_SIZE, 0);
-	b[1] = b[0];
+	memcpy(b + 1, b, tail);
 	scatterwalk_map_and_copy(b, req->src, offset, tail, 0);
 
 	le128_xor(b, &rctx->t, b);
@@ -179,8 +177,7 @@ static int xts_cts_final(struct skcipher_request *req,
 	scatterwalk_map_and_copy(b, rctx->tail, 0, XTS_BLOCK_SIZE + tail, 1);
 
 	skcipher_request_set_tfm(subreq, ctx->child);
-	skcipher_request_set_callback(subreq, req->base.flags, xts_cts_done,
-				      req);
+	skcipher_request_set_callback(subreq, req->base.flags, cts_done, req);
 	skcipher_request_set_crypt(subreq, rctx->tail, rctx->tail,
 				   XTS_BLOCK_SIZE, NULL);
 
@@ -195,18 +192,18 @@ static int xts_cts_final(struct skcipher_request *req,
 	return 0;
 }
 
-static void xts_encrypt_done(struct crypto_async_request *areq, int err)
+static void encrypt_done(struct crypto_async_request *areq, int err)
 {
 	struct skcipher_request *req = areq->data;
 
 	if (!err) {
-		struct xts_request_ctx *rctx = skcipher_request_ctx(req);
+		struct rctx *rctx = skcipher_request_ctx(req);
 
 		rctx->subreq.base.flags &= ~CRYPTO_TFM_REQ_MAY_SLEEP;
-		err = xts_xor_tweak_post(req, true);
+		err = xor_tweak_post(req, true);
 
 		if (!err && unlikely(req->cryptlen % XTS_BLOCK_SIZE)) {
-			err = xts_cts_final(req, crypto_skcipher_encrypt);
+			err = cts_final(req, crypto_skcipher_encrypt);
 			if (err == -EINPROGRESS)
 				return;
 		}
@@ -215,18 +212,18 @@ static void xts_encrypt_done(struct crypto_async_request *areq, int err)
 	skcipher_request_complete(req, err);
 }
 
-static void xts_decrypt_done(struct crypto_async_request *areq, int err)
+static void decrypt_done(struct crypto_async_request *areq, int err)
 {
 	struct skcipher_request *req = areq->data;
 
 	if (!err) {
-		struct xts_request_ctx *rctx = skcipher_request_ctx(req);
+		struct rctx *rctx = skcipher_request_ctx(req);
 
 		rctx->subreq.base.flags &= ~CRYPTO_TFM_REQ_MAY_SLEEP;
-		err = xts_xor_tweak_post(req, false);
+		err = xor_tweak_post(req, false);
 
 		if (!err && unlikely(req->cryptlen % XTS_BLOCK_SIZE)) {
-			err = xts_cts_final(req, crypto_skcipher_decrypt);
+			err = cts_final(req, crypto_skcipher_decrypt);
 			if (err == -EINPROGRESS)
 				return;
 		}
@@ -235,12 +232,10 @@ static void xts_decrypt_done(struct crypto_async_request *areq, int err)
 	skcipher_request_complete(req, err);
 }
 
-static int xts_init_crypt(struct skcipher_request *req,
-			  crypto_completion_t compl)
+static int init_crypt(struct skcipher_request *req, crypto_completion_t compl)
 {
-	const struct xts_tfm_ctx *ctx =
-		crypto_skcipher_ctx(crypto_skcipher_reqtfm(req));
-	struct xts_request_ctx *rctx = skcipher_request_ctx(req);
+	struct priv *ctx = crypto_skcipher_ctx(crypto_skcipher_reqtfm(req));
+	struct rctx *rctx = skcipher_request_ctx(req);
 	struct skcipher_request *subreq = &rctx->subreq;
 
 	if (req->cryptlen < XTS_BLOCK_SIZE)
@@ -257,45 +252,45 @@ static int xts_init_crypt(struct skcipher_request *req,
 	return 0;
 }
 
-static int xts_encrypt(struct skcipher_request *req)
+static int encrypt(struct skcipher_request *req)
 {
-	struct xts_request_ctx *rctx = skcipher_request_ctx(req);
+	struct rctx *rctx = skcipher_request_ctx(req);
 	struct skcipher_request *subreq = &rctx->subreq;
 	int err;
 
-	err = xts_init_crypt(req, xts_encrypt_done) ?:
-	      xts_xor_tweak_pre(req, true) ?:
+	err = init_crypt(req, encrypt_done) ?:
+	      xor_tweak_pre(req, true) ?:
 	      crypto_skcipher_encrypt(subreq) ?:
-	      xts_xor_tweak_post(req, true);
+	      xor_tweak_post(req, true);
 
 	if (err || likely((req->cryptlen % XTS_BLOCK_SIZE) == 0))
 		return err;
 
-	return xts_cts_final(req, crypto_skcipher_encrypt);
+	return cts_final(req, crypto_skcipher_encrypt);
 }
 
-static int xts_decrypt(struct skcipher_request *req)
+static int decrypt(struct skcipher_request *req)
 {
-	struct xts_request_ctx *rctx = skcipher_request_ctx(req);
+	struct rctx *rctx = skcipher_request_ctx(req);
 	struct skcipher_request *subreq = &rctx->subreq;
 	int err;
 
-	err = xts_init_crypt(req, xts_decrypt_done) ?:
-	      xts_xor_tweak_pre(req, false) ?:
+	err = init_crypt(req, decrypt_done) ?:
+	      xor_tweak_pre(req, false) ?:
 	      crypto_skcipher_decrypt(subreq) ?:
-	      xts_xor_tweak_post(req, false);
+	      xor_tweak_post(req, false);
 
 	if (err || likely((req->cryptlen % XTS_BLOCK_SIZE) == 0))
 		return err;
 
-	return xts_cts_final(req, crypto_skcipher_decrypt);
+	return cts_final(req, crypto_skcipher_decrypt);
 }
 
-static int xts_init_tfm(struct crypto_skcipher *tfm)
+static int init_tfm(struct crypto_skcipher *tfm)
 {
 	struct skcipher_instance *inst = skcipher_alg_instance(tfm);
 	struct xts_instance_ctx *ictx = skcipher_instance_ctx(inst);
-	struct xts_tfm_ctx *ctx = crypto_skcipher_ctx(tfm);
+	struct priv *ctx = crypto_skcipher_ctx(tfm);
 	struct crypto_skcipher *child;
 	struct crypto_cipher *tweak;
 
@@ -314,39 +309,41 @@ static int xts_init_tfm(struct crypto_skcipher *tfm)
 	ctx->tweak = tweak;
 
 	crypto_skcipher_set_reqsize(tfm, crypto_skcipher_reqsize(child) +
-					 sizeof(struct xts_request_ctx));
+					 sizeof(struct rctx));
 
 	return 0;
 }
 
-static void xts_exit_tfm(struct crypto_skcipher *tfm)
+static void exit_tfm(struct crypto_skcipher *tfm)
 {
-	struct xts_tfm_ctx *ctx = crypto_skcipher_ctx(tfm);
+	struct priv *ctx = crypto_skcipher_ctx(tfm);
 
 	crypto_free_skcipher(ctx->child);
 	crypto_free_cipher(ctx->tweak);
 }
 
-static void xts_free_instance(struct skcipher_instance *inst)
+static void free_inst(struct skcipher_instance *inst)
 {
-	struct xts_instance_ctx *ictx = skcipher_instance_ctx(inst);
-
-	crypto_drop_skcipher(&ictx->spawn);
+	crypto_drop_skcipher(skcipher_instance_ctx(inst));
 	kfree(inst);
 }
 
-static int xts_create(struct crypto_template *tmpl, struct rtattr **tb)
+static int create(struct crypto_template *tmpl, struct rtattr **tb)
 {
 	struct skcipher_instance *inst;
+	struct crypto_attr_type *algt;
 	struct xts_instance_ctx *ctx;
 	struct skcipher_alg *alg;
 	const char *cipher_name;
 	u32 mask;
 	int err;
 
-	err = crypto_check_attr_type(tb, CRYPTO_ALG_TYPE_SKCIPHER, &mask);
-	if (err)
-		return err;
+	algt = crypto_get_attr_type(tb);
+	if (IS_ERR(algt))
+		return PTR_ERR(algt);
+
+	if ((algt->type ^ CRYPTO_ALG_TYPE_SKCIPHER) & algt->mask)
+		return -EINVAL;
 
 	cipher_name = crypto_attr_alg_name(tb[1]);
 	if (IS_ERR(cipher_name))
@@ -357,6 +354,10 @@ static int xts_create(struct crypto_template *tmpl, struct rtattr **tb)
 		return -ENOMEM;
 
 	ctx = skcipher_instance_ctx(inst);
+
+	mask = crypto_requires_off(algt->type, algt->mask,
+				   CRYPTO_ALG_NEED_FALLBACK |
+				   CRYPTO_ALG_ASYNC);
 
 	err = crypto_grab_skcipher(&ctx->spawn, skcipher_crypto_instance(inst),
 				   cipher_name, 0, mask);
@@ -414,6 +415,7 @@ static int xts_create(struct crypto_template *tmpl, struct rtattr **tb)
 	} else
 		goto err_free_inst;
 
+	inst->alg.base.cra_flags = alg->base.cra_flags & CRYPTO_ALG_ASYNC;
 	inst->alg.base.cra_priority = alg->base.cra_priority;
 	inst->alg.base.cra_blocksize = XTS_BLOCK_SIZE;
 	inst->alg.base.cra_alignmask = alg->base.cra_alignmask |
@@ -423,43 +425,43 @@ static int xts_create(struct crypto_template *tmpl, struct rtattr **tb)
 	inst->alg.min_keysize = crypto_skcipher_alg_min_keysize(alg) * 2;
 	inst->alg.max_keysize = crypto_skcipher_alg_max_keysize(alg) * 2;
 
-	inst->alg.base.cra_ctxsize = sizeof(struct xts_tfm_ctx);
+	inst->alg.base.cra_ctxsize = sizeof(struct priv);
 
-	inst->alg.init = xts_init_tfm;
-	inst->alg.exit = xts_exit_tfm;
+	inst->alg.init = init_tfm;
+	inst->alg.exit = exit_tfm;
 
-	inst->alg.setkey = xts_setkey;
-	inst->alg.encrypt = xts_encrypt;
-	inst->alg.decrypt = xts_decrypt;
+	inst->alg.setkey = setkey;
+	inst->alg.encrypt = encrypt;
+	inst->alg.decrypt = decrypt;
 
-	inst->free = xts_free_instance;
+	inst->free = free_inst;
 
 	err = skcipher_register_instance(tmpl, inst);
 	if (err) {
 err_free_inst:
-		xts_free_instance(inst);
+		free_inst(inst);
 	}
 	return err;
 }
 
-static struct crypto_template xts_tmpl = {
+static struct crypto_template crypto_tmpl = {
 	.name = "xts",
-	.create = xts_create,
+	.create = create,
 	.module = THIS_MODULE,
 };
 
-static int __init xts_module_init(void)
+static int __init crypto_module_init(void)
 {
-	return crypto_register_template(&xts_tmpl);
+	return crypto_register_template(&crypto_tmpl);
 }
 
-static void __exit xts_module_exit(void)
+static void __exit crypto_module_exit(void)
 {
-	crypto_unregister_template(&xts_tmpl);
+	crypto_unregister_template(&crypto_tmpl);
 }
 
-subsys_initcall(xts_module_init);
-module_exit(xts_module_exit);
+subsys_initcall(crypto_module_init);
+module_exit(crypto_module_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("XTS block cipher mode");

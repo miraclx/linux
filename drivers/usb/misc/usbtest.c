@@ -182,7 +182,7 @@ get_endpoints(struct usbtest_dev *dev, struct usb_interface *intf)
 			case USB_ENDPOINT_XFER_ISOC:
 				if (dev->info->iso)
 					endpoint_update(edi, &iso_in, &iso_out, e);
-				fallthrough;
+				/* FALLTHROUGH */
 			default:
 				continue;
 			}
@@ -364,7 +364,7 @@ static void simple_fill_buf(struct urb *urb)
 
 	switch (pattern) {
 	default:
-		fallthrough;
+		/* FALLTHROUGH */
 	case 0:
 		memset(buf, 0, len);
 		break;
@@ -681,7 +681,7 @@ static int get_altsetting(struct usbtest_dev *dev)
 		return dev->buf[0];
 	case 0:
 		retval = -ERANGE;
-		fallthrough;
+		/* FALLTHROUGH */
 	default:
 		return retval;
 	}
@@ -1951,7 +1951,7 @@ static void complicated_callback(struct urb *urb)
 			dev_err(&ctx->dev->intf->dev,
 					"resubmit err %d\n",
 					status);
-			fallthrough;
+			/* FALLTHROUGH */
 		case -ENODEV:			/* disconnected */
 		case -ESHUTDOWN:		/* endpoint disabled */
 			ctx->submit_error = 1;
@@ -2043,17 +2043,13 @@ test_queue(struct usbtest_dev *dev, struct usbtest_param_32 *param,
 	unsigned		i;
 	unsigned long		packets = 0;
 	int			status = 0;
-	struct urb		**urbs;
+	struct urb		*urbs[MAX_SGLEN];
 
 	if (!param->sglen || param->iterations > UINT_MAX / param->sglen)
 		return -EINVAL;
 
 	if (param->sglen > MAX_SGLEN)
 		return -EINVAL;
-
-	urbs = kcalloc(param->sglen, sizeof(*urbs), GFP_KERNEL);
-	if (!urbs)
-		return -ENOMEM;
 
 	memset(&context, 0, sizeof(context));
 	context.count = param->iterations * param->sglen;
@@ -2141,8 +2137,6 @@ test_queue(struct usbtest_dev *dev, struct usbtest_param_32 *param,
 	else if (context.errors >
 			(context.is_iso ? context.packet_count / 10 : 0))
 		status = -EIO;
-
-	kfree(urbs);
 	return status;
 
 fail:
@@ -2150,8 +2144,6 @@ fail:
 		if (urbs[i])
 			simple_free_urb(urbs[i]);
 	}
-
-	kfree(urbs);
 	return status;
 }
 
@@ -2881,7 +2873,6 @@ static void usbtest_disconnect(struct usb_interface *intf)
 
 	usb_set_intfdata(intf, NULL);
 	dev_dbg(&intf->dev, "disconnect\n");
-	kfree(dev->buf);
 	kfree(dev);
 }
 

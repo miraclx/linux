@@ -13,6 +13,7 @@
 #include <linux/kdebug.h>
 #include <linux/perf_event.h>
 #include <linux/mm_types.h>
+#include <asm/pgalloc.h>
 #include <asm/mmu.h>
 
 /*
@@ -105,9 +106,8 @@ void do_page_fault(unsigned long address, struct pt_regs *regs)
 	if (write)
 		flags |= FAULT_FLAG_WRITE;
 
-	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, address);
 retry:
-	mmap_read_lock(mm);
+	down_read(&mm->mmap_sem);
 
 	vma = find_vma(mm, address);
 	if (!vma)
@@ -131,7 +131,7 @@ retry:
 		goto bad_area;
 	}
 
-	fault = handle_mm_fault(vma, address, flags, regs);
+	fault = handle_mm_fault(vma, address, flags);
 
 	/* Quick path to respond to signals */
 	if (fault_signal_pending(fault, regs)) {
@@ -141,7 +141,7 @@ retry:
 	}
 
 	/*
-	 * Fault retry nuances, mmap_lock already relinquished by core mm
+	 * Fault retry nuances, mmap_sem already relinquished by core mm
 	 */
 	if (unlikely((fault & VM_FAULT_RETRY) &&
 		     (flags & FAULT_FLAG_ALLOW_RETRY))) {
@@ -150,15 +150,28 @@ retry:
 	}
 
 bad_area:
-	mmap_read_unlock(mm);
+	up_read(&mm->mmap_sem);
 
 	/*
 	 * Major/minor page fault accounting
 	 * (in case of retry we only land here once)
 	 */
-	if (likely(!(fault & VM_FAULT_ERROR)))
+	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, address);
+
+	if (likely(!(fault & VM_FAULT_ERROR))) {
+		if (fault & VM_FAULT_MAJOR) {
+			tsk->maj_flt++;
+			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1,
+				      regs, address);
+		} else {
+			tsk->min_flt++;
+			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1,
+				      regs, address);
+		}
+
 		/* Normal return path: fault Handled Gracefully */
 		return;
+	}
 
 	if (!user_mode(regs))
 		goto no_context;

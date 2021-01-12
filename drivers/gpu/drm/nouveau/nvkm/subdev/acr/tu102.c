@@ -219,7 +219,6 @@ tu102_acr_load(struct nvkm_acr *acr, int version,
 static const struct nvkm_acr_fwif
 tu102_acr_fwif[] = {
 	{  0, tu102_acr_load, &tu102_acr },
-	{ -1, gm200_acr_nofw, &gm200_acr },
 	{}
 };
 

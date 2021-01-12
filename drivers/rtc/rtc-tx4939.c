@@ -266,16 +266,17 @@ static int __init tx4939_rtc_probe(struct platform_device *pdev)
 		return PTR_ERR(rtc);
 
 	rtc->ops = &tx4939_rtc_ops;
+	rtc->nvram_old_abi = true;
 	rtc->range_max = U32_MAX;
 
 	pdata->rtc = rtc;
 
 	nvmem_cfg.priv = pdata;
-	ret = devm_rtc_nvmem_register(rtc, &nvmem_cfg);
+	ret = rtc_nvmem_register(rtc, &nvmem_cfg);
 	if (ret)
 		return ret;
 
-	return devm_rtc_register_device(rtc);
+	return rtc_register_device(rtc);
 }
 
 static int __exit tx4939_rtc_remove(struct platform_device *pdev)

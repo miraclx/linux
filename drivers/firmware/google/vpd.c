@@ -32,7 +32,7 @@ struct vpd_cbmem {
 	u32 version;
 	u32 ro_size;
 	u32 rw_size;
-	u8  blob[];
+	u8  blob[0];
 };
 
 struct vpd_section {

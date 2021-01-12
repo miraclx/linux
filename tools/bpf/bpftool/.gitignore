@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
 *.d
-/bootstrap/
+/_bpftool
 /bpftool
 bpftool*.8
 bpf-helpers.*
 FEATURE-DUMP.bpftool
 feature
 libbpf
-/*.skel.h
-/vmlinux.h
+profiler.skel.h

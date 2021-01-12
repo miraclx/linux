@@ -13,7 +13,6 @@
 #define __LINUX_REGULATOR_DRIVER_H_
 
 #include <linux/device.h>
-#include <linux/linear_range.h>
 #include <linux/notifier.h>
 #include <linux/regulator/consumer.h>
 #include <linux/ww_mutex.h>
@@ -40,13 +39,31 @@ enum regulator_status {
 	REGULATOR_STATUS_UNDEFINED,
 };
 
-/* Initialize struct linear_range for regulators */
+/**
+ * struct regulator_linear_range - specify linear voltage ranges
+ *
+ * Specify a range of voltages for regulator_map_linear_range() and
+ * regulator_list_linear_range().
+ *
+ * @min_uV:  Lowest voltage in range
+ * @min_sel: Lowest selector for range
+ * @max_sel: Highest selector for range
+ * @uV_step: Step size
+ */
+struct regulator_linear_range {
+	unsigned int min_uV;
+	unsigned int min_sel;
+	unsigned int max_sel;
+	unsigned int uV_step;
+};
+
+/* Initialize struct regulator_linear_range */
 #define REGULATOR_LINEAR_RANGE(_min_uV, _min_sel, _max_sel, _step_uV)	\
 {									\
-	.min		= _min_uV,					\
+	.min_uV		= _min_uV,					\
 	.min_sel	= _min_sel,					\
 	.max_sel	= _max_sel,					\
-	.step		= _step_uV,					\
+	.uV_step	= _step_uV,					\
 }
 
 /**
@@ -117,7 +134,7 @@ enum regulator_status {
  *                       suspended.
  * @set_suspend_mode: Set the operating mode for the regulator when the
  *                    system is suspended.
- * @resume: Resume operation of suspended regulator.
+ *
  * @set_pull_down: Configure the regulator to pull down when the regulator
  *		   is disabled.
  *
@@ -223,8 +240,6 @@ enum regulator_type {
  * @name: Identifying name for the regulator.
  * @supply_name: Identifying the regulator supply
  * @of_match: Name used to identify regulator in DT.
- * @of_match_full_name: A flag to indicate that the of_match string, if
- *			present, should be matched against the node full_name.
  * @regulators_node: Name of node containing regulator definitions in DT.
  * @of_parse_cb: Optional callback called only if of_match is present.
  *               Will be called for each regulator parsed from DT, during
@@ -307,16 +322,12 @@ enum regulator_type {
  * @enable_time: Time taken for initial enable of regulator (in uS).
  * @off_on_delay: guard time (in uS), before re-enabling a regulator
  *
- * @poll_enabled_time: The polling interval (in uS) to use while checking that
- *                     the regulator was actually enabled. Max upto enable_time.
- *
  * @of_map_mode: Maps a hardware mode defined in a DeviceTree to a standard mode
  */
 struct regulator_desc {
 	const char *name;
 	const char *supply_name;
 	const char *of_match;
-	bool of_match_full_name;
 	const char *regulators_node;
 	int (*of_parse_cb)(struct device_node *,
 			    const struct regulator_desc *,
@@ -337,7 +348,7 @@ struct regulator_desc {
 	unsigned int ramp_delay;
 	int min_dropout_uV;
 
-	const struct linear_range *linear_ranges;
+	const struct regulator_linear_range *linear_ranges;
 	const unsigned int *linear_range_selectors;
 
 	int n_linear_ranges;
@@ -377,8 +388,6 @@ struct regulator_desc {
 	unsigned int enable_time;
 
 	unsigned int off_on_delay;
-
-	unsigned int poll_enabled_time;
 
 	unsigned int (*of_map_mode)(unsigned int mode);
 };
@@ -535,6 +544,9 @@ int regulator_set_current_limit_regmap(struct regulator_dev *rdev,
 				       int min_uA, int max_uA);
 int regulator_get_current_limit_regmap(struct regulator_dev *rdev);
 void *regulator_get_init_drvdata(struct regulator_init_data *reg_init_data);
+
+void regulator_lock(struct regulator_dev *rdev);
+void regulator_unlock(struct regulator_dev *rdev);
 
 /*
  * Helper functions intended to be used by regulator drivers prior registering

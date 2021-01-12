@@ -30,7 +30,8 @@
  * act_mm - get current->active_mm
  */
 	.macro	act_mm, rd
-	get_thread_info \rd
+	bic	\rd, sp, #8128
+	bic	\rd, \rd, #63
 	ldr	\rd, [\rd, #TI_TASK]
 	.if (TSK_ACTIVE_MM > IMM12_MASK)
 	add	\rd, \rd, #TSK_ACTIVE_MM & ~IMM12_MASK

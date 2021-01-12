@@ -1419,7 +1419,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 		abx500_chargalg_stop_charging(di);
 		di->charge_status = POWER_SUPPLY_STATUS_DISCHARGING;
 		abx500_chargalg_state_to(di, STATE_HANDHELD);
-		fallthrough;
+		/* Intentional fallthrough */
 
 	case STATE_HANDHELD:
 		break;
@@ -1435,7 +1435,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 		di->maintenance_chg = false;
 		abx500_chargalg_state_to(di, STATE_SUSPENDED);
 		power_supply_changed(di->chargalg_psy);
-		fallthrough;
+		/* Intentional fallthrough */
 
 	case STATE_SUSPENDED:
 		/* CHARGING is suspended */
@@ -1444,7 +1444,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_BATT_REMOVED_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_BATT_REMOVED);
-		fallthrough;
+		/* Intentional fallthrough */
 
 	case STATE_BATT_REMOVED:
 		if (!di->events.batt_rem)
@@ -1454,7 +1454,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_HW_TEMP_PROTECT_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_HW_TEMP_PROTECT);
-		fallthrough;
+		/* Intentional fallthrough */
 
 	case STATE_HW_TEMP_PROTECT:
 		if (!di->events.main_thermal_prot &&
@@ -1465,7 +1465,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_OVV_PROTECT_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_OVV_PROTECT);
-		fallthrough;
+		/* Intentional fallthrough */
 
 	case STATE_OVV_PROTECT:
 		if (!di->events.vbus_ovv &&
@@ -1479,7 +1479,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_CHG_NOT_OK_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_CHG_NOT_OK);
-		fallthrough;
+		/* Intentional fallthrough */
 
 	case STATE_CHG_NOT_OK:
 		if (!di->events.mainextchnotok &&
@@ -1490,7 +1490,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_SAFETY_TIMER_EXPIRED_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_SAFETY_TIMER_EXPIRED);
-		fallthrough;
+		/* Intentional fallthrough */
 
 	case STATE_SAFETY_TIMER_EXPIRED:
 		/* We exit this state when charger is removed */
@@ -1537,7 +1537,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_WAIT_FOR_RECHARGE_INIT:
 		abx500_chargalg_hold_charging(di);
 		abx500_chargalg_state_to(di, STATE_WAIT_FOR_RECHARGE);
-		fallthrough;
+		/* Intentional fallthrough */
 
 	case STATE_WAIT_FOR_RECHARGE:
 		if (di->batt_data.percent <=
@@ -1558,7 +1558,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 				di->bm->batt_id].maint_a_cur_lvl);
 		abx500_chargalg_state_to(di, STATE_MAINTENANCE_A);
 		power_supply_changed(di->chargalg_psy);
-		fallthrough;
+		/* Intentional fallthrough*/
 
 	case STATE_MAINTENANCE_A:
 		if (di->events.maintenance_timer_expired) {
@@ -1578,7 +1578,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 				di->bm->batt_id].maint_b_cur_lvl);
 		abx500_chargalg_state_to(di, STATE_MAINTENANCE_B);
 		power_supply_changed(di->chargalg_psy);
-		fallthrough;
+		/* Intentional fallthrough*/
 
 	case STATE_MAINTENANCE_B:
 		if (di->events.maintenance_timer_expired) {
@@ -1597,7 +1597,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 		di->charge_status = POWER_SUPPLY_STATUS_CHARGING;
 		abx500_chargalg_state_to(di, STATE_TEMP_LOWHIGH);
 		power_supply_changed(di->chargalg_psy);
-		fallthrough;
+		/* Intentional fallthrough */
 
 	case STATE_TEMP_LOWHIGH:
 		if (!di->events.btemp_lowhigh)
@@ -1607,7 +1607,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_WD_EXPIRED_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_WD_EXPIRED);
-		fallthrough;
+		/* Intentional fallthrough */
 
 	case STATE_WD_EXPIRED:
 		if (!di->events.ac_wd_expired &&
@@ -1618,7 +1618,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_TEMP_UNDEROVER_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_TEMP_UNDEROVER);
-		fallthrough;
+		/* Intentional fallthrough */
 
 	case STATE_TEMP_UNDEROVER:
 		if (!di->events.btemp_underover)
@@ -1913,9 +1913,10 @@ static int abx500_chargalg_sysfs_init(struct abx500_chargalg *di)
 }
 /* Exposure to the sysfs interface <<END>> */
 
-static int __maybe_unused abx500_chargalg_resume(struct device *dev)
+#if defined(CONFIG_PM)
+static int abx500_chargalg_resume(struct platform_device *pdev)
 {
-	struct abx500_chargalg *di = dev_get_drvdata(dev);
+	struct abx500_chargalg *di = platform_get_drvdata(pdev);
 
 	/* Kick charger watchdog if charging (any charger online) */
 	if (di->chg_info.online_chg)
@@ -1930,9 +1931,10 @@ static int __maybe_unused abx500_chargalg_resume(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused abx500_chargalg_suspend(struct device *dev)
+static int abx500_chargalg_suspend(struct platform_device *pdev,
+	pm_message_t state)
 {
-	struct abx500_chargalg *di = dev_get_drvdata(dev);
+	struct abx500_chargalg *di = platform_get_drvdata(pdev);
 
 	if (di->chg_info.online_chg)
 		cancel_delayed_work_sync(&di->chargalg_wd_work);
@@ -1941,6 +1943,10 @@ static int __maybe_unused abx500_chargalg_suspend(struct device *dev)
 
 	return 0;
 }
+#else
+#define abx500_chargalg_suspend      NULL
+#define abx500_chargalg_resume       NULL
+#endif
 
 static int abx500_chargalg_remove(struct platform_device *pdev)
 {
@@ -2074,8 +2080,6 @@ free_chargalg_wq:
 	return ret;
 }
 
-static SIMPLE_DEV_PM_OPS(abx500_chargalg_pm_ops, abx500_chargalg_suspend, abx500_chargalg_resume);
-
 static const struct of_device_id ab8500_chargalg_match[] = {
 	{ .compatible = "stericsson,ab8500-chargalg", },
 	{ },
@@ -2084,10 +2088,11 @@ static const struct of_device_id ab8500_chargalg_match[] = {
 static struct platform_driver abx500_chargalg_driver = {
 	.probe = abx500_chargalg_probe,
 	.remove = abx500_chargalg_remove,
+	.suspend = abx500_chargalg_suspend,
+	.resume = abx500_chargalg_resume,
 	.driver = {
 		.name = "ab8500-chargalg",
 		.of_match_table = ab8500_chargalg_match,
-		.pm = &abx500_chargalg_pm_ops,
 	},
 };
 

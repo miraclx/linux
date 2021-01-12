@@ -228,7 +228,7 @@ EXPORT_SYMBOL_GPL(eeprom_93cx6_multiread);
 /**
  * eeprom_93cx6_readb - Read a byte from eeprom
  * @eeprom: Pointer to eeprom structure
- * @byte: Byte index from where we should start reading
+ * @word: Byte index from where we should start reading
  * @data: target pointer where the information will have to be stored
  *
  * This function will read a byte of the eeprom data
@@ -270,7 +270,7 @@ EXPORT_SYMBOL_GPL(eeprom_93cx6_readb);
  * @eeprom: Pointer to eeprom structure
  * @byte: Index from where we should start reading
  * @data: target pointer where the information will have to be stored
- * @bytes: Number of bytes that should be read.
+ * @words: Number of bytes that should be read.
  *
  * This function will read all requested bytes from the eeprom,
  * this is done by calling eeprom_93cx6_readb() multiple times.

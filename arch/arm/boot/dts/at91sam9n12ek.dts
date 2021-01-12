@@ -17,7 +17,7 @@
 		stdout-path = "serial0:115200n8";
 	};
 
-	memory@20000000 {
+	memory {
 		reg = <0x20000000 0x8000000>;
 	};
 
@@ -59,7 +59,7 @@
 				wm8904: codec@1a {
 					compatible = "wlf,wm8904";
 					reg = <0x1a>;
-					clocks = <&pmc PMC_TYPE_SYSTEM 8>;
+					clocks = <&pck0>;
 					clock-names = "mclk";
 				};
 

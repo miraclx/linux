@@ -66,7 +66,7 @@ struct gbaudio_codec_dai {
 
 struct gbaudio_codec_info {
 	struct device *dev;
-	struct snd_soc_component *component;
+	struct snd_soc_codec *codec;
 	struct list_head module_list;
 	/* to maintain runtime stream params for each DAI */
 	struct list_head dai_list;
@@ -106,11 +106,6 @@ enum gbaudio_module_state {
 	GBAUDIO_MODULE_ON,
 };
 
-struct gbaudio_jack {
-	struct snd_soc_jack jack;
-	struct list_head list;
-};
-
 struct gbaudio_module_info {
 	/* module info */
 	struct device *dev;
@@ -135,8 +130,8 @@ struct gbaudio_module_info {
 	int jack_mask;
 	int button_mask;
 	int button_status;
-	struct gbaudio_jack headset;
-	struct gbaudio_jack button;
+	struct snd_soc_jack headset_jack;
+	struct snd_soc_jack button_jack;
 
 	/* connection info */
 	struct gb_connection *mgmt_connection;
@@ -160,7 +155,6 @@ struct gbaudio_module_info {
 	struct list_head widget_list;
 	struct list_head ctl_list;
 	struct list_head widget_ctl_list;
-	struct list_head jack_list;
 
 	struct gb_audio_topology *topology;
 };

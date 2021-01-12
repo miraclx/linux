@@ -96,6 +96,18 @@ SECTIONS
 
         __init_end = .;
 
+	. = ALIGN(PAGE_SIZE);
+	.initrd			: AT(ADDR(.initrd) - LOAD_OFFSET)
+	{
+		__initrd_start = .;
+		*(.initrd)
+		__initrd_end = .;
+		FILL (0);
+                . = ALIGN (PAGE_SIZE);
+	}
+
+        __vmlinux_end = .;            /* last address of the physical file */
+
 	BSS_SECTION(0, 0, 0x20)
 
         _end = .;
@@ -103,7 +115,6 @@ SECTIONS
 	/* Throw in the debugging sections */
 	STABS_DEBUG
 	DWARF_DEBUG
-	ELF_DETAILS
 
         /* Sections to be discarded -- must be last */
 	DISCARDS

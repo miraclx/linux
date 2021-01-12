@@ -21,29 +21,35 @@ struct msm_gpummu {
 #define GPUMMU_PAGE_SIZE SZ_4K
 #define TABLE_SIZE (sizeof(uint32_t) * GPUMMU_VA_RANGE / GPUMMU_PAGE_SIZE)
 
+static int msm_gpummu_attach(struct msm_mmu *mmu)
+{
+	return 0;
+}
+
 static void msm_gpummu_detach(struct msm_mmu *mmu)
 {
 }
 
 static int msm_gpummu_map(struct msm_mmu *mmu, uint64_t iova,
-		struct sg_table *sgt, size_t len, int prot)
+		struct sg_table *sgt, unsigned len, int prot)
 {
 	struct msm_gpummu *gpummu = to_msm_gpummu(mmu);
 	unsigned idx = (iova - GPUMMU_VA_START) / GPUMMU_PAGE_SIZE;
-	struct sg_dma_page_iter dma_iter;
+	struct scatterlist *sg;
 	unsigned prot_bits = 0;
+	unsigned i, j;
 
 	if (prot & IOMMU_WRITE)
 		prot_bits |= 1;
 	if (prot & IOMMU_READ)
 		prot_bits |= 2;
 
-	for_each_sgtable_dma_page(sgt, &dma_iter, 0) {
-		dma_addr_t addr = sg_page_iter_dma_address(&dma_iter);
-		int i;
-
-		for (i = 0; i < PAGE_SIZE; i += GPUMMU_PAGE_SIZE)
-			gpummu->table[idx++] = (addr + i) | prot_bits;
+	for_each_sg(sgt->sgl, sg, sgt->nents, i) {
+		dma_addr_t addr = sg->dma_address;
+		for (j = 0; j < sg->length / GPUMMU_PAGE_SIZE; j++, idx++) {
+			gpummu->table[idx] = addr | prot_bits;
+			addr += GPUMMU_PAGE_SIZE;
+		}
 	}
 
 	/* we can improve by deferring flush for multiple map() */
@@ -53,7 +59,7 @@ static int msm_gpummu_map(struct msm_mmu *mmu, uint64_t iova,
 	return 0;
 }
 
-static int msm_gpummu_unmap(struct msm_mmu *mmu, uint64_t iova, size_t len)
+static int msm_gpummu_unmap(struct msm_mmu *mmu, uint64_t iova, unsigned len)
 {
 	struct msm_gpummu *gpummu = to_msm_gpummu(mmu);
 	unsigned idx = (iova - GPUMMU_VA_START) / GPUMMU_PAGE_SIZE;
@@ -79,6 +85,7 @@ static void msm_gpummu_destroy(struct msm_mmu *mmu)
 }
 
 static const struct msm_mmu_funcs funcs = {
+		.attach = msm_gpummu_attach,
 		.detach = msm_gpummu_detach,
 		.map = msm_gpummu_map,
 		.unmap = msm_gpummu_unmap,
@@ -101,7 +108,7 @@ struct msm_mmu *msm_gpummu_new(struct device *dev, struct msm_gpu *gpu)
 	}
 
 	gpummu->gpu = gpu;
-	msm_mmu_init(&gpummu->base, dev, &funcs, MSM_MMU_GPUMMU);
+	msm_mmu_init(&gpummu->base, dev, &funcs);
 
 	return &gpummu->base;
 }

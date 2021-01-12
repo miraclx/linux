@@ -19,8 +19,6 @@
 		crypto = &crypto;
 		serial0 = &duart0;
 		serial1 = &duart1;
-		mmc0 = &esdhc;
-		mmc1 = &esdhc1;
 	};
 
 	chosen {
@@ -201,7 +199,6 @@
 &enetc_port0 {
 	phy-handle = <&sgmii_phy0>;
 	phy-connection-type = "sgmii";
-	managed = "in-band-status";
 	status = "okay";
 
 	mdio {

@@ -325,16 +325,13 @@ static void fsnotify_put_mark_wake(struct fsnotify_mark *mark)
 }
 
 bool fsnotify_prepare_user_wait(struct fsnotify_iter_info *iter_info)
-	__releases(&fsnotify_mark_srcu)
 {
 	int type;
 
 	fsnotify_foreach_obj_type(type) {
 		/* This can fail if mark is being removed */
-		if (!fsnotify_get_mark_safe(iter_info->marks[type])) {
-			__release(&fsnotify_mark_srcu);
+		if (!fsnotify_get_mark_safe(iter_info->marks[type]))
 			goto fail;
-		}
 	}
 
 	/*
@@ -353,7 +350,6 @@ fail:
 }
 
 void fsnotify_finish_user_wait(struct fsnotify_iter_info *iter_info)
-	__acquires(&fsnotify_mark_srcu)
 {
 	int type;
 

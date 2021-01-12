@@ -26,7 +26,6 @@
 #define MSM_ISPIF_NAME "msm_ispif"
 
 #define ISPIF_RST_CMD_0			0x008
-#define ISPIF_RST_CMD_1			0x00c
 #define ISPIF_RST_CMD_0_STROBED_RST_EN		(1 << 0)
 #define ISPIF_RST_CMD_0_MISC_LOGIC_RST		(1 << 1)
 #define ISPIF_RST_CMD_0_SW_REG_RST		(1 << 2)
@@ -180,10 +179,7 @@ static irqreturn_t ispif_isr_8x96(int irq, void *dev)
 	writel(0x1, ispif->base + ISPIF_IRQ_GLOBAL_CLEAR_CMD);
 
 	if ((value0 >> 27) & 0x1)
-		complete(&ispif->reset_complete[0]);
-
-	if ((value3 >> 27) & 0x1)
-		complete(&ispif->reset_complete[1]);
+		complete(&ispif->reset_complete);
 
 	if (unlikely(value0 & ISPIF_VFE_m_IRQ_STATUS_0_PIX0_OVERFLOW))
 		dev_err_ratelimited(to_device(ispif), "VFE0 pix0 overflow\n");
@@ -241,7 +237,7 @@ static irqreturn_t ispif_isr_8x16(int irq, void *dev)
 	writel(0x1, ispif->base + ISPIF_IRQ_GLOBAL_CLEAR_CMD);
 
 	if ((value0 >> 27) & 0x1)
-		complete(&ispif->reset_complete[0]);
+		complete(&ispif->reset_complete);
 
 	if (unlikely(value0 & ISPIF_VFE_m_IRQ_STATUS_0_PIX0_OVERFLOW))
 		dev_err_ratelimited(to_device(ispif), "VFE0 pix0 overflow\n");
@@ -261,18 +257,33 @@ static irqreturn_t ispif_isr_8x16(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
-static int ispif_vfe_reset(struct ispif_device *ispif, u8 vfe_id)
+/*
+ * ispif_reset - Trigger reset on ISPIF module and wait to complete
+ * @ispif: ISPIF device
+ *
+ * Return 0 on success or a negative error code otherwise
+ */
+static int ispif_reset(struct ispif_device *ispif)
 {
 	unsigned long time;
 	u32 val;
+	int ret;
 
-	if (vfe_id > (to_camss(ispif)->vfe_num - 1)) {
-		dev_err(to_device(ispif),
-			"Error: asked reset for invalid VFE%d\n", vfe_id);
-		return -ENOENT;
-	}
+	ret = camss_pm_domain_on(to_camss(ispif), PM_DOMAIN_VFE0);
+	if (ret < 0)
+		return ret;
 
-	reinit_completion(&ispif->reset_complete[vfe_id]);
+	ret = camss_pm_domain_on(to_camss(ispif), PM_DOMAIN_VFE1);
+	if (ret < 0)
+		return ret;
+
+	ret = camss_enable_clocks(ispif->nclocks_for_reset,
+				  ispif->clock_for_reset,
+				  to_device(ispif));
+	if (ret < 0)
+		return ret;
+
+	reinit_completion(&ispif->reset_complete);
 
 	val = ISPIF_RST_CMD_0_STROBED_RST_EN |
 		ISPIF_RST_CMD_0_MISC_LOGIC_RST |
@@ -292,49 +303,14 @@ static int ispif_vfe_reset(struct ispif_device *ispif, u8 vfe_id)
 		ISPIF_RST_CMD_0_RDI_OUTPUT_1_MISR_RST |
 		ISPIF_RST_CMD_0_RDI_OUTPUT_2_MISR_RST;
 
-	if (vfe_id == 1)
-		writel_relaxed(val, ispif->base + ISPIF_RST_CMD_1);
-	else
-		writel_relaxed(val, ispif->base + ISPIF_RST_CMD_0);
+	writel_relaxed(val, ispif->base + ISPIF_RST_CMD_0);
 
-	time = wait_for_completion_timeout(&ispif->reset_complete[vfe_id],
+	time = wait_for_completion_timeout(&ispif->reset_complete,
 		msecs_to_jiffies(ISPIF_RESET_TIMEOUT_MS));
 	if (!time) {
-		dev_err(to_device(ispif),
-			"ISPIF for VFE%d reset timeout\n", vfe_id);
-		return -EIO;
+		dev_err(to_device(ispif), "ISPIF reset timeout\n");
+		ret = -EIO;
 	}
-
-	return 0;
-}
-
-/*
- * ispif_reset - Trigger reset on ISPIF module and wait to complete
- * @ispif: ISPIF device
- *
- * Return 0 on success or a negative error code otherwise
- */
-static int ispif_reset(struct ispif_device *ispif, u8 vfe_id)
-{
-	int ret;
-
-	ret = camss_pm_domain_on(to_camss(ispif), PM_DOMAIN_VFE0);
-	if (ret < 0)
-		return ret;
-
-	ret = camss_pm_domain_on(to_camss(ispif), PM_DOMAIN_VFE1);
-	if (ret < 0)
-		return ret;
-
-	ret = camss_enable_clocks(ispif->nclocks_for_reset,
-				  ispif->clock_for_reset,
-				  to_device(ispif));
-	if (ret < 0)
-		return ret;
-
-	ret = ispif_vfe_reset(ispif, vfe_id);
-	if (ret)
-		dev_dbg(to_device(ispif), "ISPIF Reset failed\n");
 
 	camss_disable_clocks(ispif->nclocks_for_reset, ispif->clock_for_reset);
 
@@ -368,10 +344,8 @@ static int ispif_set_power(struct v4l2_subdev *sd, int on)
 		}
 
 		ret = pm_runtime_get_sync(dev);
-		if (ret < 0) {
-			pm_runtime_put_sync(dev);
+		if (ret < 0)
 			goto exit;
-		}
 
 		ret = camss_enable_clocks(ispif->nclocks, ispif->clock, dev);
 		if (ret < 0) {
@@ -379,7 +353,7 @@ static int ispif_set_power(struct v4l2_subdev *sd, int on)
 			goto exit;
 		}
 
-		ret = ispif_reset(ispif, line->vfe_id);
+		ret = ispif_reset(ispif);
 		if (ret < 0) {
 			pm_runtime_put_sync(dev);
 			camss_disable_clocks(ispif->nclocks, ispif->clock);
@@ -825,8 +799,7 @@ static int ispif_set_stream(struct v4l2_subdev *sd, int enable)
 		ispif_select_csid(ispif, intf, csid, vfe, 1);
 		ispif_select_cid(ispif, intf, cid, vfe, 1);
 		ispif_config_irq(ispif, intf, vfe, 1);
-		if (to_camss(ispif)->version == CAMSS_8x96 ||
-		    to_camss(ispif)->version == CAMSS_660)
+		if (to_camss(ispif)->version == CAMSS_8x96)
 			ispif_config_pack(ispif,
 					  line->fmt[MSM_ISPIF_PAD_SINK].code,
 					  intf, cid, vfe, 1);
@@ -843,8 +816,7 @@ static int ispif_set_stream(struct v4l2_subdev *sd, int enable)
 			return ret;
 
 		mutex_lock(&ispif->config_lock);
-		if (to_camss(ispif)->version == CAMSS_8x96 ||
-		    to_camss(ispif)->version == CAMSS_660)
+		if (to_camss(ispif)->version == CAMSS_8x96)
 			ispif_config_pack(ispif,
 					  line->fmt[MSM_ISPIF_PAD_SINK].code,
 					  intf, cid, vfe, 0);
@@ -1100,8 +1072,7 @@ int msm_ispif_subdev_init(struct ispif_device *ispif,
 	/* Number of ISPIF lines - same as number of CSID hardware modules */
 	if (to_camss(ispif)->version == CAMSS_8x16)
 		ispif->line_num = 2;
-	else if (to_camss(ispif)->version == CAMSS_8x96 ||
-		 to_camss(ispif)->version == CAMSS_660)
+	else if (to_camss(ispif)->version == CAMSS_8x96)
 		ispif->line_num = 4;
 	else
 		return -EINVAL;
@@ -1119,8 +1090,7 @@ int msm_ispif_subdev_init(struct ispif_device *ispif,
 			ispif->line[i].formats = ispif_formats_8x16;
 			ispif->line[i].nformats =
 					ARRAY_SIZE(ispif_formats_8x16);
-		} else if (to_camss(ispif)->version == CAMSS_8x96 ||
-			   to_camss(ispif)->version == CAMSS_660) {
+		} else if (to_camss(ispif)->version == CAMSS_8x96) {
 			ispif->line[i].formats = ispif_formats_8x96;
 			ispif->line[i].nformats =
 					ARRAY_SIZE(ispif_formats_8x96);
@@ -1160,8 +1130,7 @@ int msm_ispif_subdev_init(struct ispif_device *ispif,
 	if (to_camss(ispif)->version == CAMSS_8x16)
 		ret = devm_request_irq(dev, ispif->irq, ispif_isr_8x16,
 			       IRQF_TRIGGER_RISING, ispif->irq_name, ispif);
-	else if (to_camss(ispif)->version == CAMSS_8x96 ||
-		 to_camss(ispif)->version == CAMSS_660)
+	else if (to_camss(ispif)->version == CAMSS_8x96)
 		ret = devm_request_irq(dev, ispif->irq, ispif_isr_8x96,
 			       IRQF_TRIGGER_RISING, ispif->irq_name, ispif);
 	else
@@ -1221,8 +1190,7 @@ int msm_ispif_subdev_init(struct ispif_device *ispif,
 
 	mutex_init(&ispif->config_lock);
 
-	for (i = 0; i < MSM_ISPIF_VFE_NUM; i++)
-		init_completion(&ispif->reset_complete[i]);
+	init_completion(&ispif->reset_complete);
 
 	return 0;
 }
@@ -1355,7 +1323,7 @@ int msm_ispif_register_entities(struct ispif_device *ispif,
 		pads[MSM_ISPIF_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 		pads[MSM_ISPIF_PAD_SRC].flags = MEDIA_PAD_FL_SOURCE;
 
-		sd->entity.function = MEDIA_ENT_F_PROC_VIDEO_PIXEL_FORMATTER;
+		sd->entity.function = MEDIA_ENT_F_IO_V4L;
 		sd->entity.ops = &ispif_media_ops;
 		ret = media_entity_pads_init(&sd->entity, MSM_ISPIF_PADS_NUM,
 					     pads);

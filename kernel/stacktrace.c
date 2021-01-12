@@ -78,7 +78,8 @@ struct stacktrace_cookie {
 	unsigned int	len;
 };
 
-static bool stack_trace_consume_entry(void *cookie, unsigned long addr)
+static bool stack_trace_consume_entry(void *cookie, unsigned long addr,
+				      bool reliable)
 {
 	struct stacktrace_cookie *c = cookie;
 
@@ -93,11 +94,12 @@ static bool stack_trace_consume_entry(void *cookie, unsigned long addr)
 	return c->len < c->size;
 }
 
-static bool stack_trace_consume_entry_nosched(void *cookie, unsigned long addr)
+static bool stack_trace_consume_entry_nosched(void *cookie, unsigned long addr,
+					      bool reliable)
 {
 	if (in_sched_functions(addr))
 		return true;
-	return stack_trace_consume_entry(cookie, addr);
+	return stack_trace_consume_entry(cookie, addr, reliable);
 }
 
 /**
@@ -231,9 +233,10 @@ unsigned int stack_trace_save_user(unsigned long *store, unsigned int size)
 	if (current->flags & PF_KTHREAD)
 		return 0;
 
-	fs = force_uaccess_begin();
+	fs = get_fs();
+	set_fs(USER_DS);
 	arch_stack_walk_user(consume_entry, &c, task_pt_regs(current));
-	force_uaccess_end(fs);
+	set_fs(fs);
 
 	return c.len;
 }

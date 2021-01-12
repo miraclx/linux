@@ -7,8 +7,6 @@
 
 #include "pmc.h"
 
-static DEFINE_SPINLOCK(at91sam9g45_mck_lock);
-
 static const struct clk_master_characteristics mck_characteristics = {
 	.output = { .min = 0, .max = 133333333 },
 	.divisors = { 1, 2, 4, 3 },
@@ -42,10 +40,17 @@ static const struct {
 	char *p;
 	u8 id;
 } at91sam9g45_systemck[] = {
-	{ .n = "ddrck", .p = "masterck_div", .id = 2 },
-	{ .n = "uhpck", .p = "usbck",        .id = 6 },
-	{ .n = "pck0",  .p = "prog0",        .id = 8 },
-	{ .n = "pck1",  .p = "prog1",        .id = 9 },
+	{ .n = "ddrck", .p = "masterck", .id = 2 },
+	{ .n = "uhpck", .p = "usbck",    .id = 6 },
+	{ .n = "pck0",  .p = "prog0",    .id = 8 },
+	{ .n = "pck1",  .p = "prog1",    .id = 9 },
+};
+
+static const struct clk_pcr_layout at91sam9g45_pcr_layout = {
+	.offset = 0x10c,
+	.cmd = BIT(12),
+	.pid_mask = GENMASK(5, 0),
+	.div_mask = GENMASK(17, 16),
 };
 
 struct pck {
@@ -106,13 +111,13 @@ static void __init at91sam9g45_pmc_setup(struct device_node *np)
 		return;
 	mainxtal_name = of_clk_get_parent_name(np, i);
 
-	regmap = device_node_to_regmap(np);
+	regmap = syscon_node_to_regmap(np);
 	if (IS_ERR(regmap))
 		return;
 
-	at91sam9g45_pmc = pmc_data_allocate(PMC_PLLACK + 1,
+	at91sam9g45_pmc = pmc_data_allocate(PMC_MAIN + 1,
 					    nck(at91sam9g45_systemck),
-					    nck(at91sam9g45_periphck), 0, 2);
+					    nck(at91sam9g45_periphck), 0);
 	if (!at91sam9g45_pmc)
 		return;
 
@@ -138,8 +143,6 @@ static void __init at91sam9g45_pmc_setup(struct device_node *np)
 	if (IS_ERR(hw))
 		goto err_free;
 
-	at91sam9g45_pmc->chws[PMC_PLLACK] = hw;
-
 	hw = at91_clk_register_utmi(regmap, NULL, "utmick", "mainck");
 	if (IS_ERR(hw))
 		goto err_free;
@@ -150,21 +153,9 @@ static void __init at91sam9g45_pmc_setup(struct device_node *np)
 	parent_names[1] = "mainck";
 	parent_names[2] = "plladivck";
 	parent_names[3] = "utmick";
-	hw = at91_clk_register_master_pres(regmap, "masterck_pres", 4,
-					   parent_names,
-					   &at91rm9200_master_layout,
-					   &mck_characteristics,
-					   &at91sam9g45_mck_lock,
-					   CLK_SET_RATE_GATE, INT_MIN);
-	if (IS_ERR(hw))
-		goto err_free;
-
-	hw = at91_clk_register_master_div(regmap, "masterck_div",
-					  "masterck_pres",
-					  &at91rm9200_master_layout,
-					  &mck_characteristics,
-					  &at91sam9g45_mck_lock,
-					  CLK_SET_RATE_GATE);
+	hw = at91_clk_register_master(regmap, "masterck", 4, parent_names,
+				      &at91rm9200_master_layout,
+				      &mck_characteristics);
 	if (IS_ERR(hw))
 		goto err_free;
 
@@ -180,7 +171,7 @@ static void __init at91sam9g45_pmc_setup(struct device_node *np)
 	parent_names[1] = "mainck";
 	parent_names[2] = "plladivck";
 	parent_names[3] = "utmick";
-	parent_names[4] = "masterck_div";
+	parent_names[4] = "masterck";
 	for (i = 0; i < 2; i++) {
 		char name[6];
 
@@ -188,12 +179,9 @@ static void __init at91sam9g45_pmc_setup(struct device_node *np)
 
 		hw = at91_clk_register_programmable(regmap, name,
 						    parent_names, 5, i,
-						    &at91sam9g45_programmable_layout,
-						    NULL);
+						    &at91sam9g45_programmable_layout);
 		if (IS_ERR(hw))
 			goto err_free;
-
-		at91sam9g45_pmc->pchws[i] = hw;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(at91sam9g45_systemck); i++) {
@@ -209,7 +197,7 @@ static void __init at91sam9g45_pmc_setup(struct device_node *np)
 	for (i = 0; i < ARRAY_SIZE(at91sam9g45_periphck); i++) {
 		hw = at91_clk_register_peripheral(regmap,
 						  at91sam9g45_periphck[i].n,
-						  "masterck_div",
+						  "masterck",
 						  at91sam9g45_periphck[i].id);
 		if (IS_ERR(hw))
 			goto err_free;
@@ -222,7 +210,7 @@ static void __init at91sam9g45_pmc_setup(struct device_node *np)
 	return;
 
 err_free:
-	kfree(at91sam9g45_pmc);
+	pmc_data_free(at91sam9g45_pmc);
 }
 /*
  * The TCB is used as the clocksource so its clock is needed early. This means

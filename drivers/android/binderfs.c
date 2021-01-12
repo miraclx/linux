@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 
 #include <linux/compiler_types.h>
 #include <linux/errno.h>
@@ -63,7 +63,7 @@ static const struct constant_table binderfs_param_stats[] = {
 	{}
 };
 
-static const struct fs_parameter_spec binderfs_fs_parameters[] = {
+const struct fs_parameter_spec binderfs_fs_parameters[] = {
 	fsparam_u32("max",	Opt_max),
 	fsparam_enum("stats",	Opt_stats_mode, binderfs_param_stats),
 	{}
@@ -351,7 +351,6 @@ static const struct super_operations binderfs_super_ops = {
 static inline bool is_binderfs_control_device(const struct dentry *dentry)
 {
 	struct binderfs_info *info = dentry->d_sb->s_fs_info;
-
 	return info->control_dentry == dentry;
 }
 
@@ -651,7 +650,7 @@ static int binderfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	struct binderfs_info *info;
 	struct binderfs_mount_opts *ctx = fc->fs_private;
 	struct inode *inode = NULL;
-	struct binderfs_device device_info = {};
+	struct binderfs_device device_info = { 0 };
 	const char *name;
 	size_t len;
 
@@ -748,7 +747,7 @@ static const struct fs_context_operations binderfs_fs_context_ops = {
 
 static int binderfs_init_fs_context(struct fs_context *fc)
 {
-	struct binderfs_mount_opts *ctx;
+	struct binderfs_mount_opts *ctx = fc->fs_private;
 
 	ctx = kzalloc(sizeof(struct binderfs_mount_opts), GFP_KERNEL);
 	if (!ctx)

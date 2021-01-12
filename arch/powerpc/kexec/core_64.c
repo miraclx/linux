@@ -152,8 +152,6 @@ static void kexec_smp_down(void *arg)
 	if (ppc_md.kexec_cpu_down)
 		ppc_md.kexec_cpu_down(0, 1);
 
-	reset_sprs();
-
 	kexec_smp_wait();
 	/* NOTREACHED */
 }

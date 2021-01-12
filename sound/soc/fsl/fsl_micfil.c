@@ -217,7 +217,8 @@ static int fsl_micfil_startup(struct snd_pcm_substream *substream,
 	struct fsl_micfil *micfil = snd_soc_dai_get_drvdata(dai);
 
 	if (!micfil) {
-		dev_err(dai->dev, "micfil dai priv_data not set\n");
+		dev_err(dai->dev,
+			"micfil dai priv_data not set\n");
 		return -EINVAL;
 	}
 
@@ -295,7 +296,7 @@ static int fsl_set_clock_params(struct device *dev, unsigned int rate)
 {
 	struct fsl_micfil *micfil = dev_get_drvdata(dev);
 	int clk_div;
-	int ret;
+	int ret = 0;
 
 	ret = fsl_micfil_set_mclk_rate(micfil, rate);
 	if (ret < 0)
@@ -701,14 +702,16 @@ static int fsl_micfil_probe(struct platform_device *pdev)
 	for (i = 0; i < MICFIL_IRQ_LINES; i++) {
 		micfil->irq[i] = platform_get_irq(pdev, i);
 		dev_err(&pdev->dev, "GET IRQ: %d\n", micfil->irq[i]);
-		if (micfil->irq[i] < 0)
+		if (micfil->irq[i] < 0) {
+			dev_err(&pdev->dev, "no irq for node %s\n", pdev->name);
 			return micfil->irq[i];
+		}
 	}
 
 	if (of_property_read_bool(np, "fsl,shared-interrupt"))
 		irqflag = IRQF_SHARED;
 
-	/* Digital Microphone interface interrupt */
+	/* Digital Microphone interface interrupt - IRQ 109 */
 	ret = devm_request_irq(&pdev->dev, micfil->irq[0],
 			       micfil_isr, irqflag,
 			       micfil->name, micfil);
@@ -718,7 +721,7 @@ static int fsl_micfil_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	/* Digital Microphone interface error interrupt */
+	/* Digital Microphone interface error interrupt - IRQ 110 */
 	ret = devm_request_irq(&pdev->dev, micfil->irq[1],
 			       micfil_err_isr, irqflag,
 			       micfil->name, micfil);
@@ -752,6 +755,7 @@ static int fsl_micfil_probe(struct platform_device *pdev)
 	return ret;
 }
 
+#ifdef CONFIG_PM
 static int __maybe_unused fsl_micfil_runtime_suspend(struct device *dev)
 {
 	struct fsl_micfil *micfil = dev_get_drvdata(dev);
@@ -778,7 +782,9 @@ static int __maybe_unused fsl_micfil_runtime_resume(struct device *dev)
 
 	return 0;
 }
+#endif /* CONFIG_PM*/
 
+#ifdef CONFIG_PM_SLEEP
 static int __maybe_unused fsl_micfil_suspend(struct device *dev)
 {
 	pm_runtime_force_suspend(dev);
@@ -792,6 +798,7 @@ static int __maybe_unused fsl_micfil_resume(struct device *dev)
 
 	return 0;
 }
+#endif /* CONFIG_PM_SLEEP */
 
 static const struct dev_pm_ops fsl_micfil_pm_ops = {
 	SET_RUNTIME_PM_OPS(fsl_micfil_runtime_suspend,

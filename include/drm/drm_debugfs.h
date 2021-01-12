@@ -80,16 +80,18 @@ struct drm_info_node {
 };
 
 #if defined(CONFIG_DEBUG_FS)
-void drm_debugfs_create_files(const struct drm_info_list *files,
-			      int count, struct dentry *root,
-			      struct drm_minor *minor);
+int drm_debugfs_create_files(const struct drm_info_list *files,
+			     int count, struct dentry *root,
+			     struct drm_minor *minor);
 int drm_debugfs_remove_files(const struct drm_info_list *files,
 			     int count, struct drm_minor *minor);
 #else
-static inline void drm_debugfs_create_files(const struct drm_info_list *files,
-					    int count, struct dentry *root,
-					    struct drm_minor *minor)
-{}
+static inline int drm_debugfs_create_files(const struct drm_info_list *files,
+					   int count, struct dentry *root,
+					   struct drm_minor *minor)
+{
+	return 0;
+}
 
 static inline int drm_debugfs_remove_files(const struct drm_info_list *files,
 					   int count, struct drm_minor *minor)

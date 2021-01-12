@@ -334,7 +334,7 @@ static int lpc32xx_ts_suspend(struct device *dev)
 	 */
 	mutex_lock(&input->mutex);
 
-	if (input_device_enabled(input)) {
+	if (input->users) {
 		if (device_may_wakeup(dev))
 			enable_irq_wake(tsc->irq);
 		else
@@ -353,7 +353,7 @@ static int lpc32xx_ts_resume(struct device *dev)
 
 	mutex_lock(&input->mutex);
 
-	if (input_device_enabled(input)) {
+	if (input->users) {
 		if (device_may_wakeup(dev))
 			disable_irq_wake(tsc->irq);
 		else

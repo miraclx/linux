@@ -99,7 +99,7 @@ int nmi_alloc_per_cpu(struct lowcore *lc);
 void nmi_free_per_cpu(struct lowcore *lc);
 
 void s390_handle_mcck(void);
-int s390_do_machine_check(struct pt_regs *regs);
+void s390_do_machine_check(struct pt_regs *regs);
 
 #endif /* __ASSEMBLY__ */
 #endif /* _ASM_S390_NMI_H */

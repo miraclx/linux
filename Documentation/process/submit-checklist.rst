@@ -24,10 +24,6 @@ and elsewhere regarding submitting Linux kernel patches.
 
   c) Builds successfully when using ``O=builddir``
 
-  d) Any Documentation/ changes build successfully without new warnings/errors.
-     Use ``make htmldocs`` or ``make pdfdocs`` to check the build and
-     fix any issues.
-
 3) Builds on multiple CPU architectures by using local cross-compile tools
    or some other build farm.
 
@@ -53,7 +49,8 @@ and elsewhere regarding submitting Linux kernel patches.
 
 9) Check cleanly with sparse.
 
-10) Use ``make checkstack`` and fix any problems that it finds.
+10) Use ``make checkstack`` and ``make namespacecheck`` and fix any problems
+    that they find.
 
     .. note::
 
@@ -75,44 +72,44 @@ and elsewhere regarding submitting Linux kernel patches.
 13) Has been build- and runtime tested with and without ``CONFIG_SMP`` and
     ``CONFIG_PREEMPT.``
 
-14) All codepaths have been exercised with all lockdep features enabled.
+16) All codepaths have been exercised with all lockdep features enabled.
 
-15) All new ``/proc`` entries are documented under ``Documentation/``
+17) All new ``/proc`` entries are documented under ``Documentation/``
 
-16) All new kernel boot parameters are documented in
+18) All new kernel boot parameters are documented in
     ``Documentation/admin-guide/kernel-parameters.rst``.
 
-17) All new module parameters are documented with ``MODULE_PARM_DESC()``
+19) All new module parameters are documented with ``MODULE_PARM_DESC()``
 
-18) All new userspace interfaces are documented in ``Documentation/ABI/``.
+20) All new userspace interfaces are documented in ``Documentation/ABI/``.
     See ``Documentation/ABI/README`` for more information.
     Patches that change userspace interfaces should be CCed to
     linux-api@vger.kernel.org.
 
-19) Check that it all passes ``make headers_check``.
+21) Check that it all passes ``make headers_check``.
 
-20) Has been checked with injection of at least slab and page-allocation
+22) Has been checked with injection of at least slab and page-allocation
     failures.  See ``Documentation/fault-injection/``.
 
     If the new code is substantial, addition of subsystem-specific fault
     injection might be appropriate.
 
-21) Newly-added code has been compiled with ``gcc -W`` (use
+23) Newly-added code has been compiled with ``gcc -W`` (use
     ``make EXTRA_CFLAGS=-W``).  This will generate lots of noise, but is good
     for finding bugs like "warning: comparison between signed and unsigned".
 
-22) Tested after it has been merged into the -mm patchset to make sure
+24) Tested after it has been merged into the -mm patchset to make sure
     that it still works with all of the other queued patches and various
     changes in the VM, VFS, and other subsystems.
 
-23) All memory barriers {e.g., ``barrier()``, ``rmb()``, ``wmb()``} need a
+25) All memory barriers {e.g., ``barrier()``, ``rmb()``, ``wmb()``} need a
     comment in the source code that explains the logic of what they are doing
     and why.
 
-24) If any ioctl's are added by the patch, then also update
-    ``Documentation/userspace-api/ioctl/ioctl-number.rst``.
+26) If any ioctl's are added by the patch, then also update
+    ``Documentation/ioctl/ioctl-number.rst``.
 
-25) If your modified source code depends on or uses any of the kernel
+27) If your modified source code depends on or uses any of the kernel
     APIs or features that are related to the following ``Kconfig`` symbols,
     then test multiple builds with the related ``Kconfig`` symbols disabled
     and/or ``=m`` (if that option is available) [not all of these at the

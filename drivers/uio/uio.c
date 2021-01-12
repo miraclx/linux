@@ -398,7 +398,7 @@ static void uio_dev_del_attributes(struct uio_device *idev)
 
 static int uio_get_minor(struct uio_device *idev)
 {
-	int retval;
+	int retval = -ENOMEM;
 
 	mutex_lock(&minor_lock);
 	retval = idr_alloc(&uio_idr, idev, 0, UIO_MAX_DEVICES, GFP_KERNEL);
@@ -413,10 +413,10 @@ static int uio_get_minor(struct uio_device *idev)
 	return retval;
 }
 
-static void uio_free_minor(unsigned long minor)
+static void uio_free_minor(struct uio_device *idev)
 {
 	mutex_lock(&minor_lock);
-	idr_remove(&uio_idr, minor);
+	idr_remove(&uio_idr, idev->minor);
 	mutex_unlock(&minor_lock);
 }
 
@@ -906,7 +906,7 @@ static void uio_device_release(struct device *dev)
 }
 
 /**
- * __uio_register_device - register a new userspace IO device
+ * uio_register_device - register a new userspace IO device
  * @owner:	module that creates the new device
  * @parent:	parent device
  * @info:	UIO device capabilities
@@ -990,7 +990,7 @@ err_request_irq:
 err_uio_dev_add_attributes:
 	device_del(&idev->dev);
 err_device_create:
-	uio_free_minor(idev->minor);
+	uio_free_minor(idev);
 	put_device(&idev->dev);
 	return ret;
 }
@@ -1002,7 +1002,7 @@ static void devm_uio_unregister_device(struct device *dev, void *res)
 }
 
 /**
- * __devm_uio_register_device - Resource managed uio_register_device()
+ * devm_uio_register_device - Resource managed uio_register_device()
  * @owner:	module that creates the new device
  * @parent:	parent device
  * @info:	UIO device capabilities
@@ -1042,13 +1042,13 @@ EXPORT_SYMBOL_GPL(__devm_uio_register_device);
 void uio_unregister_device(struct uio_info *info)
 {
 	struct uio_device *idev;
-	unsigned long minor;
 
 	if (!info || !info->uio_dev)
 		return;
 
 	idev = info->uio_dev;
-	minor = idev->minor;
+
+	uio_free_minor(idev);
 
 	mutex_lock(&idev->info_lock);
 	uio_dev_del_attributes(idev);
@@ -1063,8 +1063,6 @@ void uio_unregister_device(struct uio_info *info)
 	kill_fasync(&idev->async_queue, SIGIO, POLL_HUP);
 
 	device_unregister(&idev->dev);
-
-	uio_free_minor(minor);
 
 	return;
 }

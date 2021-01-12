@@ -87,8 +87,6 @@ struct qce_alg_template {
 		struct ahash_alg ahash;
 	} alg;
 	struct qce_device *qce;
-	const u8 *hash_zero;
-	const u32 digest_size;
 };
 
 void qce_cpu_to_be32p_array(__be32 *dst, const u8 *src, unsigned int len);

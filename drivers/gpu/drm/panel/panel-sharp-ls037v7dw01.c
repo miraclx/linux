@@ -93,6 +93,7 @@ static const struct drm_display_mode ls037v7dw01_mode = {
 	.vsync_start = 640 + 1,
 	.vsync_end = 640 + 1 + 1,
 	.vtotal = 640 + 1 + 1 + 1,
+	.vrefresh = 58,
 	.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
 	.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 	.width_mm = 56,
@@ -187,9 +188,7 @@ static int ls037v7dw01_probe(struct platform_device *pdev)
 	drm_panel_init(&lcd->panel, &pdev->dev, &ls037v7dw01_funcs,
 		       DRM_MODE_CONNECTOR_DPI);
 
-	drm_panel_add(&lcd->panel);
-
-	return 0;
+	return drm_panel_add(&lcd->panel);
 }
 
 static int ls037v7dw01_remove(struct platform_device *pdev)

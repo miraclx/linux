@@ -160,8 +160,14 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	cgfd = cgroup_setup_and_join(CGROUP_PATH);
+	if (setup_cgroup_environment())
+		goto err;
+
+	cgfd = create_and_get_cgroup(CGROUP_PATH);
 	if (cgfd < 0)
+		goto err;
+
+	if (join_cgroup(CGROUP_PATH))
 		goto err;
 
 	if (send_packet(argv[1]))

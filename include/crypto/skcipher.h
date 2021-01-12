@@ -18,7 +18,7 @@
  *	@iv: Initialisation Vector
  *	@src: Source SG list
  *	@dst: Destination SG list
- *	@base: Underlying async request
+ *	@base: Underlying async request request
  *	@__ctx: Start of private context data
  */
 struct skcipher_request {
@@ -508,7 +508,7 @@ static inline struct skcipher_request *skcipher_request_alloc(
  */
 static inline void skcipher_request_free(struct skcipher_request *req)
 {
-	kfree_sensitive(req);
+	kzfree(req);
 }
 
 static inline void skcipher_request_zero(struct skcipher_request *req)

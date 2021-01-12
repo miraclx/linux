@@ -55,9 +55,6 @@ enum pgtable_bits {
 #if defined(CONFIG_ARCH_HAS_PTE_SPECIAL)
 	_PAGE_SPECIAL_SHIFT,
 #endif
-#if defined(CONFIG_HAVE_ARCH_SOFT_DIRTY)
-	_PAGE_SOFT_DIRTY_SHIFT,
-#endif
 };
 
 /*
@@ -87,9 +84,6 @@ enum pgtable_bits {
 #if defined(CONFIG_ARCH_HAS_PTE_SPECIAL)
 	_PAGE_SPECIAL_SHIFT,
 #endif
-#if defined(CONFIG_HAVE_ARCH_SOFT_DIRTY)
-	_PAGE_SOFT_DIRTY_SHIFT,
-#endif
 };
 
 #elif defined(CONFIG_CPU_R3K_TLB)
@@ -104,9 +98,6 @@ enum pgtable_bits {
 	_PAGE_MODIFIED_SHIFT,
 #if defined(CONFIG_ARCH_HAS_PTE_SPECIAL)
 	_PAGE_SPECIAL_SHIFT,
-#endif
-#if defined(CONFIG_HAVE_ARCH_SOFT_DIRTY)
-	_PAGE_SOFT_DIRTY_SHIFT,
 #endif
 
 	/* Used by TLB hardware (placed in EntryLo) */
@@ -134,9 +125,7 @@ enum pgtable_bits {
 #if defined(CONFIG_ARCH_HAS_PTE_SPECIAL)
 	_PAGE_SPECIAL_SHIFT,
 #endif
-#if defined(CONFIG_HAVE_ARCH_SOFT_DIRTY)
-	_PAGE_SOFT_DIRTY_SHIFT,
-#endif
+
 	/* Used by TLB hardware (placed in EntryLo*) */
 #if defined(CONFIG_CPU_HAS_RIXI)
 	_PAGE_NO_EXEC_SHIFT,
@@ -162,11 +151,6 @@ enum pgtable_bits {
 # define _PAGE_SPECIAL		(1 << _PAGE_SPECIAL_SHIFT)
 #else
 # define _PAGE_SPECIAL		0
-#endif
-#if defined(CONFIG_HAVE_ARCH_SOFT_DIRTY)
-# define _PAGE_SOFT_DIRTY	(1 << _PAGE_SOFT_DIRTY_SHIFT)
-#else
-# define _PAGE_SOFT_DIRTY	0
 #endif
 
 /* Used by TLB hardware (placed in EntryLo*) */
@@ -249,6 +233,11 @@ static inline uint64_t pte_to_entrylo(unsigned long pte_val)
 
 #define _CACHE_CACHABLE_NONCOHERENT (5<<_CACHE_SHIFT)
 
+#elif defined(CONFIG_MACH_INGENIC)
+
+/* Ingenic uses the WA bit to achieve write-combine memory writes */
+#define _CACHE_UNCACHED_ACCELERATED (1<<_CACHE_SHIFT)
+
 #endif
 
 #ifndef _CACHE_CACHABLE_NO_WA
@@ -280,6 +269,6 @@ static inline uint64_t pte_to_entrylo(unsigned long pte_val)
 #define __WRITEABLE	(_PAGE_SILENT_WRITE | _PAGE_WRITE | _PAGE_MODIFIED)
 
 #define _PAGE_CHG_MASK	(_PAGE_ACCESSED | _PAGE_MODIFIED |	\
-			 _PAGE_SOFT_DIRTY | _PFN_MASK | _CACHE_MASK)
+			 _PFN_MASK | _CACHE_MASK)
 
 #endif /* _ASM_PGTABLE_BITS_H */

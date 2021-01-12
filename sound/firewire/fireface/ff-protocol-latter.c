@@ -16,8 +16,7 @@
 #define LATTER_SYNC_STATUS	0x0000801c0000ULL
 
 static int parse_clock_bits(u32 data, unsigned int *rate,
-			    enum snd_ff_clock_src *src,
-			    enum snd_ff_unit_version unit_version)
+			    enum snd_ff_clock_src *src)
 {
 	static const struct {
 		unsigned int rate;
@@ -43,11 +42,6 @@ static int parse_clock_bits(u32 data, unsigned int *rate,
 		{ SND_FF_CLOCK_SRC_INTERNAL,	0x00000e00, },
 	};
 	int i;
-
-	if (unit_version != SND_FF_UNIT_VERSION_UCX) {
-		// e.g. 0x00fe0f20 but expected 0x00eff002.
-		data = ((data & 0xf0f0f0f0) >> 4) | ((data & 0x0f0f0f0f) << 4);
-	}
 
 	for (i = 0; i < ARRAY_SIZE(rate_entries); ++i) {
 		rate_entry = rate_entries + i;
@@ -85,7 +79,7 @@ static int latter_get_clock(struct snd_ff *ff, unsigned int *rate,
 		return err;
 	data = le32_to_cpu(reg);
 
-	return parse_clock_bits(data, rate, src, ff->unit_version);
+	return parse_clock_bits(data, rate, src);
 }
 
 static int latter_switch_fetching_mode(struct snd_ff *ff, bool enable)
@@ -113,18 +107,18 @@ static int latter_allocate_resources(struct snd_ff *ff, unsigned int rate)
 	int err;
 
 	// Set the number of data blocks transferred in a second.
-	if (rate % 48000 == 0)
-		code = 0x04;
+	if (rate % 32000 == 0)
+		code = 0x00;
 	else if (rate % 44100 == 0)
 		code = 0x02;
-	else if (rate % 32000 == 0)
-		code = 0x00;
+	else if (rate % 48000 == 0)
+		code = 0x04;
 	else
 		return -EINVAL;
 
 	if (rate >= 64000 && rate < 128000)
 		code |= 0x08;
-	else if (rate >= 128000)
+	else if (rate >= 128000 && rate < 192000)
 		code |= 0x10;
 
 	reg = cpu_to_le32(code);
@@ -146,7 +140,7 @@ static int latter_allocate_resources(struct snd_ff *ff, unsigned int rate)
 		if (curr_rate == rate)
 			break;
 	}
-	if (count > 10)
+	if (count == 10)
 		return -ETIMEDOUT;
 
 	for (i = 0; i < ARRAY_SIZE(amdtp_rate_table); ++i) {
@@ -187,30 +181,14 @@ static int latter_begin_session(struct snd_ff *ff, unsigned int rate)
 	__le32 reg;
 	int err;
 
-	if (ff->unit_version == SND_FF_UNIT_VERSION_UCX) {
-		// For Fireface UCX. Always use the maximum number of data
-		// channels in data block of packet.
-		if (rate >= 32000 && rate <= 48000)
-			flag = 0x92;
-		else if (rate >= 64000 && rate <= 96000)
-			flag = 0x8e;
-		else if (rate >= 128000 && rate <= 192000)
-			flag = 0x8c;
-		else
-			return -EINVAL;
-	} else {
-		// For Fireface UFX and 802. Due to bandwidth limitation on
-		// IEEE 1394a (400 Mbps), Analog 1-12 and AES are available
-		// without any ADAT at quadruple speed.
-		if (rate >= 32000 && rate <= 48000)
-			flag = 0x9e;
-		else if (rate >= 64000 && rate <= 96000)
-			flag = 0x96;
-		else if (rate >= 128000 && rate <= 192000)
-			flag = 0x8e;
-		else
-			return -EINVAL;
-	}
+	if (rate >= 32000 && rate <= 48000)
+		flag = 0x92;
+	else if (rate >= 64000 && rate <= 96000)
+		flag = 0x8e;
+	else if (rate >= 128000 && rate <= 192000)
+		flag = 0x8c;
+	else
+		return -EINVAL;
 
 	if (generation != fw_parent_device(ff->unit)->card->generation) {
 		err = fw_iso_resources_update(&ff->tx_resources);
@@ -229,6 +207,8 @@ static int latter_begin_session(struct snd_ff *ff, unsigned int rate)
 	if (err < 0)
 		return err;
 
+	// Always use the maximum number of data channels in data block of
+	// packet.
 	reg = cpu_to_le32(flag);
 	return snd_fw_transaction(ff->unit, TCODE_WRITE_QUADLET_REQUEST,
 				  LATTER_ISOC_START, &reg, sizeof(reg), 0);
@@ -283,7 +263,7 @@ static void latter_dump_status(struct snd_ff *ff, struct snd_info_buffer *buffer
 		}
 	}
 
-	err = parse_clock_bits(data, &rate, &src, ff->unit_version);
+	err = parse_clock_bits(data, &rate, &src);
 	if (err < 0)
 		return;
 	label = snd_ff_proc_get_clk_label(src);

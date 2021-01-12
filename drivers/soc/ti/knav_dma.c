@@ -355,7 +355,7 @@ static void dma_debug_show_devices(struct seq_file *s,
 	}
 }
 
-static int knav_dma_debug_show(struct seq_file *s, void *v)
+static int dma_debug_show(struct seq_file *s, void *v)
 {
 	struct knav_dma_device *dma;
 
@@ -370,7 +370,17 @@ static int knav_dma_debug_show(struct seq_file *s, void *v)
 	return 0;
 }
 
-DEFINE_SHOW_ATTRIBUTE(knav_dma_debug);
+static int knav_dma_debug_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, dma_debug_show, NULL);
+}
+
+static const struct file_operations knav_dma_debug_ops = {
+	.open		= knav_dma_debug_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
 
 static int of_channel_match_helper(struct device_node *np, const char *name,
 					const char **dma_instance)
@@ -500,7 +510,7 @@ EXPORT_SYMBOL_GPL(knav_dma_open_channel);
 /**
  * knav_dma_close_channel()	- Destroy a dma channel
  *
- * @channel:	dma channel handle
+ * channel:	dma channel handle
  *
  */
 void knav_dma_close_channel(void *channel)
@@ -749,9 +759,8 @@ static int knav_dma_probe(struct platform_device *pdev)
 	pm_runtime_enable(kdev->dev);
 	ret = pm_runtime_get_sync(kdev->dev);
 	if (ret < 0) {
-		pm_runtime_put_noidle(kdev->dev);
 		dev_err(kdev->dev, "unable to enable pktdma, err %d\n", ret);
-		goto err_pm_disable;
+		return ret;
 	}
 
 	/* Initialise all packet dmas */
@@ -765,21 +774,13 @@ static int knav_dma_probe(struct platform_device *pdev)
 
 	if (list_empty(&kdev->list)) {
 		dev_err(dev, "no valid dma instance\n");
-		ret = -ENODEV;
-		goto err_put_sync;
+		return -ENODEV;
 	}
 
 	debugfs_create_file("knav_dma", S_IFREG | S_IRUGO, NULL, NULL,
-			    &knav_dma_debug_fops);
+			    &knav_dma_debug_ops);
 
 	device_ready = true;
-	return ret;
-
-err_put_sync:
-	pm_runtime_put_sync(kdev->dev);
-err_pm_disable:
-	pm_runtime_disable(kdev->dev);
-
 	return ret;
 }
 

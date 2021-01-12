@@ -31,11 +31,11 @@
  */
 
 #include <linux/mlx5/driver.h>
+#include <linux/mlx5/cmd.h>
 #include <linux/mlx5/eswitch.h>
 #include <linux/module.h>
 #include "mlx5_core.h"
 #include "../../mlxfw/mlxfw.h"
-#include "accel/tls.h"
 
 enum {
 	MCQS_IDENTIFIER_BOOT_IMG	= 0x1,
@@ -68,19 +68,26 @@ enum {
 	MCQI_FW_STORED_VERSION  = 1,
 };
 
+static int mlx5_cmd_query_adapter(struct mlx5_core_dev *dev, u32 *out,
+				  int outlen)
+{
+	u32 in[MLX5_ST_SZ_DW(query_adapter_in)] = {0};
+
+	MLX5_SET(query_adapter_in, in, opcode, MLX5_CMD_OP_QUERY_ADAPTER);
+	return mlx5_cmd_exec(dev, in, sizeof(in), out, outlen);
+}
+
 int mlx5_query_board_id(struct mlx5_core_dev *dev)
 {
 	u32 *out;
 	int outlen = MLX5_ST_SZ_BYTES(query_adapter_out);
-	u32 in[MLX5_ST_SZ_DW(query_adapter_in)] = {};
 	int err;
 
 	out = kzalloc(outlen, GFP_KERNEL);
 	if (!out)
 		return -ENOMEM;
 
-	MLX5_SET(query_adapter_in, in, opcode, MLX5_CMD_OP_QUERY_ADAPTER);
-	err = mlx5_cmd_exec_inout(dev, query_adapter, in, out);
+	err = mlx5_cmd_query_adapter(dev, out, outlen);
 	if (err)
 		goto out;
 
@@ -99,15 +106,13 @@ int mlx5_core_query_vendor_id(struct mlx5_core_dev *mdev, u32 *vendor_id)
 {
 	u32 *out;
 	int outlen = MLX5_ST_SZ_BYTES(query_adapter_out);
-	u32 in[MLX5_ST_SZ_DW(query_adapter_in)] = {};
 	int err;
 
 	out = kzalloc(outlen, GFP_KERNEL);
 	if (!out)
 		return -ENOMEM;
 
-	MLX5_SET(query_adapter_in, in, opcode, MLX5_CMD_OP_QUERY_ADAPTER);
-	err = mlx5_cmd_exec_inout(mdev, query_adapter, in, out);
+	err = mlx5_cmd_query_adapter(mdev, out, outlen);
 	if (err)
 		goto out;
 
@@ -237,7 +242,7 @@ int mlx5_query_hca_caps(struct mlx5_core_dev *dev)
 			return err;
 	}
 
-	if (mlx5_accel_is_ktls_tx(dev) || mlx5_accel_is_ktls_rx(dev)) {
+	if (MLX5_CAP_GEN(dev, tls_tx)) {
 		err = mlx5_core_get_caps(dev, MLX5_CAP_TLS);
 		if (err)
 			return err;
@@ -250,18 +255,13 @@ int mlx5_query_hca_caps(struct mlx5_core_dev *dev)
 			return err;
 	}
 
-	if (MLX5_CAP_GEN(dev, ipsec_offload)) {
-		err = mlx5_core_get_caps(dev, MLX5_CAP_IPSEC);
-		if (err)
-			return err;
-	}
-
 	return 0;
 }
 
 int mlx5_cmd_init_hca(struct mlx5_core_dev *dev, uint32_t *sw_owner_id)
 {
-	u32 in[MLX5_ST_SZ_DW(init_hca_in)] = {};
+	u32 out[MLX5_ST_SZ_DW(init_hca_out)] = {0};
+	u32 in[MLX5_ST_SZ_DW(init_hca_in)]   = {0};
 	int i;
 
 	MLX5_SET(init_hca_in, in, opcode, MLX5_CMD_OP_INIT_HCA);
@@ -272,15 +272,16 @@ int mlx5_cmd_init_hca(struct mlx5_core_dev *dev, uint32_t *sw_owner_id)
 				       sw_owner_id[i]);
 	}
 
-	return mlx5_cmd_exec_in(dev, init_hca, in);
+	return mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
 }
 
 int mlx5_cmd_teardown_hca(struct mlx5_core_dev *dev)
 {
-	u32 in[MLX5_ST_SZ_DW(teardown_hca_in)] = {};
+	u32 out[MLX5_ST_SZ_DW(teardown_hca_out)] = {0};
+	u32 in[MLX5_ST_SZ_DW(teardown_hca_in)]   = {0};
 
 	MLX5_SET(teardown_hca_in, in, opcode, MLX5_CMD_OP_TEARDOWN_HCA);
-	return mlx5_cmd_exec_in(dev, teardown_hca, in);
+	return mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
 }
 
 int mlx5_cmd_force_teardown_hca(struct mlx5_core_dev *dev)
@@ -315,8 +316,8 @@ int mlx5_cmd_force_teardown_hca(struct mlx5_core_dev *dev)
 int mlx5_cmd_fast_teardown_hca(struct mlx5_core_dev *dev)
 {
 	unsigned long end, delay_ms = MLX5_FAST_TEARDOWN_WAIT_MS;
-	u32 out[MLX5_ST_SZ_DW(teardown_hca_out)] = {};
-	u32 in[MLX5_ST_SZ_DW(teardown_hca_in)] = {};
+	u32 out[MLX5_ST_SZ_DW(teardown_hca_out)] = {0};
+	u32 in[MLX5_ST_SZ_DW(teardown_hca_in)] = {0};
 	int state;
 	int ret;
 
@@ -329,7 +330,7 @@ int mlx5_cmd_fast_teardown_hca(struct mlx5_core_dev *dev)
 	MLX5_SET(teardown_hca_in, in, profile,
 		 MLX5_TEARDOWN_HCA_IN_PROFILE_PREPARE_FAST_TEARDOWN);
 
-	ret = mlx5_cmd_exec_inout(dev, teardown_hca, in, out);
+	ret = mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
 	if (ret)
 		return ret;
 

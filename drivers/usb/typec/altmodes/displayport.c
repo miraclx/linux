@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
+/**
  * USB Typec-C DisplayPort Alternate Mode driver
  *
  * Copyright (C) 2018 Intel Corporation
@@ -13,7 +13,6 @@
 #include <linux/module.h>
 #include <linux/usb/pd_vdo.h>
 #include <linux/usb/typec_dp.h>
-#include "displayport.h"
 
 #define DP_HEADER(_dp, cmd)		(VDO((_dp)->alt->svid, 1, cmd) | \
 					 VDO_OPOS(USB_TYPEC_DP_MODE))
@@ -190,7 +189,7 @@ static void dp_altmode_work(struct work_struct *work)
 	switch (dp->state) {
 	case DP_STATE_ENTER:
 		ret = typec_altmode_enter(dp->alt, NULL);
-		if (ret && ret != -EBUSY)
+		if (ret)
 			dev_err(&dp->alt->dev, "failed to enter mode\n");
 		break;
 	case DP_STATE_UPDATE:

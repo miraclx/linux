@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause) */
+/* SPDX-License-Identifier: (GPL-2.0 OR BSD-3-Clause) */
 /*
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
@@ -31,8 +31,6 @@ enum sof_ipc_ext_data {
 	SOF_IPC_EXT_UNUSED		= 0,
 	SOF_IPC_EXT_WINDOW		= 1,
 	SOF_IPC_EXT_CC_INFO		= 2,
-	SOF_IPC_EXT_PROBE_INFO		= 3,
-	SOF_IPC_EXT_USER_ABI_INFO	= 4,
 };
 
 /* FW version - SOF_IPC_GLB_VERSION */
@@ -46,11 +44,9 @@ struct sof_ipc_fw_version {
 	uint8_t time[10];
 	uint8_t tag[6];
 	uint32_t abi_version;
-	/* used to check FW and ldc file compatibility, reproducible value */
-	uint32_t src_hash;
 
 	/* reserved for future use */
-	uint32_t reserved[3];
+	uint32_t reserved[4];
 } __packed;
 
 /* FW ready Message - sent by firmware when boot has completed */
@@ -101,7 +97,7 @@ struct sof_ipc_window_elem {
 struct sof_ipc_window {
 	struct sof_ipc_ext_data_hdr ext_hdr;
 	uint32_t num_windows;
-	struct sof_ipc_window_elem window[SOF_IPC_MAX_ELEMS];
+	struct sof_ipc_window_elem window[];
 }  __packed;
 
 struct sof_ipc_cc_version {
@@ -113,27 +109,9 @@ struct sof_ipc_cc_version {
 	/* reserved for future use */
 	uint32_t reserved[4];
 
-	uint8_t name[16]; /* null terminated compiler name */
-	uint8_t optim[4]; /* null terminated compiler -O flag value */
-	uint8_t desc[32]; /* null terminated compiler description */
+	char name[16]; /* null terminated compiler name */
+	char optim[4]; /* null terminated compiler -O flag value */
+	char desc[]; /* null terminated compiler description */
 } __packed;
-
-/* extended data: Probe setup */
-struct sof_ipc_probe_support {
-	struct sof_ipc_ext_data_hdr ext_hdr;
-
-	uint32_t probe_points_max;
-	uint32_t injection_dmas_max;
-
-	/* reserved for future use */
-	uint32_t reserved[2];
-} __packed;
-
-/* extended data: user abi version(s) */
-struct sof_ipc_user_abi_version {
-	struct sof_ipc_ext_data_hdr ext_hdr;
-
-	uint32_t abi_dbg_version;
-}  __packed;
 
 #endif

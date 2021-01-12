@@ -25,9 +25,8 @@
 #define __MXGPU_AI_H__
 
 #define AI_MAILBOX_POLL_ACK_TIMEDOUT	500
-#define AI_MAILBOX_POLL_MSG_TIMEDOUT	6000
-#define AI_MAILBOX_POLL_FLR_TIMEDOUT	5000
-#define AI_MAILBOX_POLL_MSG_REP_MAX	11
+#define AI_MAILBOX_POLL_MSG_TIMEDOUT	12000
+#define AI_MAILBOX_POLL_FLR_TIMEDOUT	500
 
 enum idh_request {
 	IDH_REQ_GPU_INIT_ACCESS = 1,
@@ -47,8 +46,7 @@ enum idh_event {
 	IDH_SUCCESS,
 	IDH_FAIL,
 	IDH_QUERY_ALIVE,
-
-	IDH_TEXT_MESSAGE = 255,
+	IDH_EVENT_MAX
 };
 
 extern const struct amdgpu_virt_ops xgpu_ai_virt_ops;

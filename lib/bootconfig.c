@@ -31,8 +31,6 @@ static size_t xbc_data_size __initdata;
 static struct xbc_node *last_parent __initdata;
 static const char *xbc_err_msg __initdata;
 static int xbc_err_pos __initdata;
-static int open_brace[XBC_DEPTH_MAX] __initdata;
-static int brace_index __initdata;
 
 static int __init xbc_parse_error(const char *msg, const char *p)
 {
@@ -331,30 +329,22 @@ const char * __init xbc_node_find_next_key_value(struct xbc_node *root,
 
 /* XBC parse and tree build */
 
-static int __init xbc_init_node(struct xbc_node *node, char *data, u32 flag)
-{
-	unsigned long offset = data - xbc_data;
-
-	if (WARN_ON(offset >= XBC_DATA_MAX))
-		return -EINVAL;
-
-	node->data = (u16)offset | flag;
-	node->child = 0;
-	node->next = 0;
-
-	return 0;
-}
-
 static struct xbc_node * __init xbc_add_node(char *data, u32 flag)
 {
 	struct xbc_node *node;
+	unsigned long offset;
 
 	if (xbc_node_num == XBC_NODE_MAX)
 		return NULL;
 
 	node = &xbc_nodes[xbc_node_num++];
-	if (xbc_init_node(node, data, flag) < 0)
+	offset = data - xbc_data;
+	node->data = (u16)offset;
+	if (WARN_ON(offset >= XBC_DATA_MAX))
 		return NULL;
+	node->data |= flag;
+	node->child = 0;
+	node->next = 0;
 
 	return node;
 }
@@ -433,27 +423,27 @@ static char *skip_spaces_until_newline(char *p)
 	return p;
 }
 
-static int __init __xbc_open_brace(char *p)
+static int __init __xbc_open_brace(void)
 {
-	/* Push the last key as open brace */
-	open_brace[brace_index++] = xbc_node_index(last_parent);
-	if (brace_index >= XBC_DEPTH_MAX)
-		return xbc_parse_error("Exceed max depth of braces", p);
+	/* Mark the last key as open brace */
+	last_parent->next = XBC_NODE_MAX;
 
 	return 0;
 }
 
 static int __init __xbc_close_brace(char *p)
 {
-	brace_index--;
-	if (!last_parent || brace_index < 0 ||
-	    (open_brace[brace_index] != xbc_node_index(last_parent)))
+	struct xbc_node *node;
+
+	if (!last_parent || last_parent->next != XBC_NODE_MAX)
 		return xbc_parse_error("Unexpected closing brace", p);
 
-	if (brace_index == 0)
-		last_parent = NULL;
-	else
-		last_parent = &xbc_nodes[open_brace[brace_index - 1]];
+	node = last_parent;
+	node->next = 0;
+	do {
+		node = xbc_node_get_parent(node);
+	} while (node && node->next != XBC_NODE_MAX);
+	last_parent = node;
 
 	return 0;
 }
@@ -494,8 +484,8 @@ static int __init __xbc_parse_value(char **__v, char **__n)
 			break;
 		}
 		if (strchr(",;\n#}", c)) {
-			*p++ = '\0';
 			v = strim(v);
+			*p++ = '\0';
 			break;
 		}
 	}
@@ -613,9 +603,7 @@ static int __init xbc_parse_kv(char **k, char *v, int op)
 	if (c < 0)
 		return c;
 
-	if (op == ':' && child) {
-		xbc_init_node(child, v, XBC_VALUE);
-	} else if (!xbc_add_sibling(v, XBC_VALUE))
+	if (!xbc_add_sibling(v, XBC_VALUE))
 		return -ENOMEM;
 
 	if (c == ',') {	/* Array */
@@ -663,7 +651,7 @@ static int __init xbc_open_brace(char **k, char *n)
 		return ret;
 	*k = n;
 
-	return __xbc_open_brace(n - 1);
+	return __xbc_open_brace();
 }
 
 static int __init xbc_close_brace(char **k, char *n)
@@ -682,13 +670,6 @@ static int __init xbc_verify_tree(void)
 {
 	int i, depth, len, wlen;
 	struct xbc_node *n, *m;
-
-	/* Brace closing */
-	if (brace_index) {
-		n = &xbc_nodes[open_brace[brace_index]];
-		return xbc_parse_error("Brace is not closed",
-					xbc_node_get_data(n));
-	}
 
 	/* Empty tree */
 	if (xbc_node_num == 0) {
@@ -754,7 +735,6 @@ void __init xbc_destroy_all(void)
 	xbc_node_num = 0;
 	memblock_free(__pa(xbc_nodes), sizeof(struct xbc_node) * XBC_NODE_MAX);
 	xbc_nodes = NULL;
-	brace_index = 0;
 }
 
 /**
@@ -807,7 +787,7 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
 
 	p = buf;
 	do {
-		q = strpbrk(p, "{}=+;:\n#");
+		q = strpbrk(p, "{}=+;\n#");
 		if (!q) {
 			p = skip_spaces(p);
 			if (*p != '\0')
@@ -818,16 +798,13 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
 		c = *q;
 		*q++ = '\0';
 		switch (c) {
-		case ':':
 		case '+':
 			if (*q++ != '=') {
-				ret = xbc_parse_error(c == '+' ?
-						"Wrong '+' operator" :
-						"Wrong ':' operator",
+				ret = xbc_parse_error("Wrong '+' operator",
 							q - 2);
 				break;
 			}
-			fallthrough;
+			/* Fall through */
 		case '=':
 			ret = xbc_parse_kv(&p, q, c);
 			break;
@@ -836,7 +813,7 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
 			break;
 		case '#':
 			q = skip_comment(q);
-			fallthrough;
+			/* fall through */
 		case ';':
 		case '\n':
 			ret = xbc_parse_key(&p, q);

@@ -48,11 +48,7 @@ struct _ddebug {
 
 
 
-#if defined(CONFIG_DYNAMIC_DEBUG_CORE)
-
-/* exported for module authors to exercise >control */
-int dynamic_debug_exec_queries(const char *query, const char *modname);
-
+#if defined(CONFIG_DYNAMIC_DEBUG)
 int ddebug_add_module(struct _ddebug *tab, unsigned int n,
 				const char *modname);
 extern int ddebug_remove_module(const char *mod_name);
@@ -84,7 +80,7 @@ void __dynamic_ibdev_dbg(struct _ddebug *descriptor,
 
 #define DEFINE_DYNAMIC_DEBUG_METADATA(name, fmt)		\
 	static struct _ddebug  __aligned(8)			\
-	__section("__dyndbg") name = {				\
+	__attribute__((section("__verbose"))) name = {		\
 		.modname = KBUILD_MODNAME,			\
 		.function = __func__,				\
 		.filename = __FILE__,				\
@@ -109,7 +105,7 @@ void __dynamic_ibdev_dbg(struct _ddebug *descriptor,
 	static_branch_unlikely(&descriptor.key.dd_key_false)
 #endif
 
-#else /* !CONFIG_JUMP_LABEL */
+#else /* !HAVE_JUMP_LABEL */
 
 #define _DPRINTK_KEY_INIT
 
@@ -121,7 +117,7 @@ void __dynamic_ibdev_dbg(struct _ddebug *descriptor,
 	unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT)
 #endif
 
-#endif /* CONFIG_JUMP_LABEL */
+#endif
 
 #define __dynamic_func_call(id, fmt, func, ...) do {	\
 	DEFINE_DYNAMIC_DEBUG_METADATA(id, fmt);		\
@@ -137,7 +133,7 @@ void __dynamic_ibdev_dbg(struct _ddebug *descriptor,
 
 /*
  * "Factory macro" for generating a call to func, guarded by a
- * DYNAMIC_DEBUG_BRANCH. The dynamic debug descriptor will be
+ * DYNAMIC_DEBUG_BRANCH. The dynamic debug decriptor will be
  * initialized using the fmt argument. The function will be called with
  * the address of the descriptor as first argument, followed by all
  * the varargs. Note that fmt is repeated in invocations of this
@@ -176,11 +172,10 @@ void __dynamic_ibdev_dbg(struct _ddebug *descriptor,
 				   KERN_DEBUG, prefix_str, prefix_type,	\
 				   rowsize, groupsize, buf, len, ascii)
 
-#else /* !CONFIG_DYNAMIC_DEBUG_CORE */
+#else
 
 #include <linux/string.h>
 #include <linux/errno.h>
-#include <linux/printk.h>
 
 static inline int ddebug_add_module(struct _ddebug *tab, unsigned int n,
 				    const char *modname)
@@ -215,13 +210,6 @@ static inline int ddebug_dyndbg_module_param_cb(char *param, char *val,
 		print_hex_dump(KERN_DEBUG, prefix_str, prefix_type,	\
 				rowsize, groupsize, buf, len, ascii);	\
 	} while (0)
-
-static inline int dynamic_debug_exec_queries(const char *query, const char *modname)
-{
-	pr_warn("kernel not built with CONFIG_DYNAMIC_DEBUG_CORE\n");
-	return 0;
-}
-
-#endif /* !CONFIG_DYNAMIC_DEBUG_CORE */
+#endif
 
 #endif

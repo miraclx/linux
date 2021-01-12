@@ -194,7 +194,8 @@ static void rt2x00lib_beaconupdate_iter(void *data, u8 *mac,
 
 	if (vif->type != NL80211_IFTYPE_AP &&
 	    vif->type != NL80211_IFTYPE_ADHOC &&
-	    vif->type != NL80211_IFTYPE_MESH_POINT)
+	    vif->type != NL80211_IFTYPE_MESH_POINT &&
+	    vif->type != NL80211_IFTYPE_WDS)
 		return;
 
 	/*
@@ -1166,8 +1167,9 @@ static int rt2x00lib_probe_hw(struct rt2x00_dev *rt2x00dev)
 	 */
 #define RT2X00_TASKLET_INIT(taskletname) \
 	if (rt2x00dev->ops->lib->taskletname) { \
-		tasklet_setup(&rt2x00dev->taskletname, \
-			     rt2x00dev->ops->lib->taskletname); \
+		tasklet_init(&rt2x00dev->taskletname, \
+			     rt2x00dev->ops->lib->taskletname, \
+			     (unsigned long)rt2x00dev); \
 	}
 
 	RT2X00_TASKLET_INIT(txstatus_tasklet);
@@ -1436,6 +1438,9 @@ int rt2x00lib_probe_dev(struct rt2x00_dev *rt2x00dev)
 #ifdef CONFIG_MAC80211_MESH
 		    BIT(NL80211_IFTYPE_MESH_POINT) |
 #endif
+#ifdef CONFIG_WIRELESS_WDS
+		    BIT(NL80211_IFTYPE_WDS) |
+#endif
 		    BIT(NL80211_IFTYPE_AP);
 
 	rt2x00dev->hw->wiphy->flags |= WIPHY_FLAG_IBSS_RSN;
@@ -1551,7 +1556,8 @@ EXPORT_SYMBOL_GPL(rt2x00lib_remove_dev);
 /*
  * Device state handlers
  */
-int rt2x00lib_suspend(struct rt2x00_dev *rt2x00dev)
+#ifdef CONFIG_PM
+int rt2x00lib_suspend(struct rt2x00_dev *rt2x00dev, pm_message_t state)
 {
 	rt2x00_dbg(rt2x00dev, "Going to sleep\n");
 
@@ -1608,6 +1614,7 @@ int rt2x00lib_resume(struct rt2x00_dev *rt2x00dev)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(rt2x00lib_resume);
+#endif /* CONFIG_PM */
 
 /*
  * rt2x00lib module information.

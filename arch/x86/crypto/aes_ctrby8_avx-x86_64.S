@@ -63,6 +63,7 @@
  */
 
 #include <linux/linkage.h>
+#include <asm/inst.h>
 
 #define VMOVDQ		vmovdqu
 
@@ -126,6 +127,10 @@ ddq_add_8:
 
 /* generate a unique variable for ddq_add_x */
 
+.macro setddq n
+	var_ddq_add = ddq_add_\n
+.endm
+
 /* generate a unique variable for xmm register */
 .macro setxdata n
 	var_xdata = %xmm\n
@@ -135,7 +140,9 @@ ddq_add_8:
 
 .macro club name, id
 .altmacro
-	.if \name == XDATA
+	.if \name == DDQ_DATA
+		setddq %\id
+	.elseif \name == XDATA
 		setxdata %\id
 	.endif
 .noaltmacro
@@ -158,8 +165,9 @@ ddq_add_8:
 
 	.set i, 1
 	.rept (by - 1)
+		club DDQ_DATA, i
 		club XDATA, i
-		vpaddq	(ddq_add_1 + 16 * (i - 1))(%rip), xcounter, var_xdata
+		vpaddq	var_ddq_add(%rip), xcounter, var_xdata
 		vptest	ddq_low_msk(%rip), var_xdata
 		jnz 1f
 		vpaddq	ddq_high_add_1(%rip), var_xdata, var_xdata
@@ -172,7 +180,8 @@ ddq_add_8:
 	vmovdqa	1*16(p_keys), xkeyA
 
 	vpxor	xkey0, xdata0, xdata0
-	vpaddq	(ddq_add_1 + 16 * (by - 1))(%rip), xcounter, xcounter
+	club DDQ_DATA, by
+	vpaddq	var_ddq_add(%rip), xcounter, xcounter
 	vptest	ddq_low_msk(%rip), xcounter
 	jnz	1f
 	vpaddq	ddq_high_add_1(%rip), xcounter, xcounter

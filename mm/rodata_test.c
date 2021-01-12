@@ -7,7 +7,6 @@
  */
 #define pr_fmt(fmt) "rodata_test: " fmt
 
-#include <linux/rodata_test.h>
 #include <linux/uaccess.h>
 #include <asm/sections.h>
 
@@ -26,7 +25,7 @@ void rodata_test(void)
 	}
 
 	/* test 2: write to the variable; this should fault */
-	if (!copy_to_kernel_nofault((void *)&rodata_test_data,
+	if (!probe_kernel_write((void *)&rodata_test_data,
 				(void *)&zero, sizeof(zero))) {
 		pr_err("test data was not read only\n");
 		return;

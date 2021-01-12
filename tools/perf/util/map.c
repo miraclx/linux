@@ -27,6 +27,21 @@
 
 static void __maps__insert(struct maps *maps, struct map *map);
 
+static inline int is_anon_memory(const char *filename, u32 flags)
+{
+	return flags & MAP_HUGETLB ||
+	       !strcmp(filename, "//anon") ||
+	       !strncmp(filename, "/dev/zero", sizeof("/dev/zero") - 1) ||
+	       !strncmp(filename, "/anon_hugepage", sizeof("/anon_hugepage") - 1);
+}
+
+static inline int is_no_dso_memory(const char *filename)
+{
+	return !strncmp(filename, "[stack", 6) ||
+	       !strncmp(filename, "/SYSV",5)   ||
+	       !strcmp(filename, "[heap]");
+}
+
 static inline int is_android_lib(const char *filename)
 {
 	return strstarts(filename, "/data/app-lib/") ||
@@ -143,7 +158,7 @@ struct map *map__new(struct machine *machine, u64 start, u64 len,
 		int anon, no_dso, vdso, android;
 
 		android = is_android_lib(filename);
-		anon = is_anon_memory(filename) || flags & MAP_HUGETLB;
+		anon = is_anon_memory(filename, flags);
 		vdso = is_vdso_map(filename);
 		no_dso = is_no_dso_memory(filename);
 		map->prot = prot;
@@ -252,27 +267,6 @@ bool __map__is_bpf_prog(const struct map *map)
 	return name && (strstr(name, "bpf_prog_") == name);
 }
 
-bool __map__is_bpf_image(const struct map *map)
-{
-	const char *name;
-
-	if (map->dso->binary_type == DSO_BINARY_TYPE__BPF_IMAGE)
-		return true;
-
-	/*
-	 * If PERF_RECORD_KSYMBOL is not included, the dso will not have
-	 * type of DSO_BINARY_TYPE__BPF_IMAGE. In such cases, we can
-	 * guess the type based on name.
-	 */
-	name = map->dso->short_name;
-	return name && is_bpf_image(name);
-}
-
-bool __map__is_ool(const struct map *map)
-{
-	return map->dso && map->dso->binary_type == DSO_BINARY_TYPE__OOL;
-}
-
 bool map__has_symbols(const struct map *map)
 {
 	return dso__has_symbols(map->dso);
@@ -331,7 +325,9 @@ int map__load(struct map *map)
 		if (map->dso->has_build_id) {
 			char sbuild_id[SBUILD_ID_SIZE];
 
-			build_id__sprintf(&map->dso->bid, sbuild_id);
+			build_id__sprintf(map->dso->build_id,
+					  sizeof(map->dso->build_id),
+					  sbuild_id);
 			pr_debug("%s with build id %s not found", name, sbuild_id);
 		} else
 			pr_debug("Failed to open %s", name);
@@ -485,7 +481,7 @@ u64 map__rip_2objdump(struct map *map, u64 rip)
 	 * kernel modules also have DSO_TYPE_USER in dso->kernel,
 	 * but all kernel modules are ET_REL, so won't get here.
 	 */
-	if (map->dso->kernel == DSO_SPACE__USER)
+	if (map->dso->kernel == DSO_TYPE_USER)
 		return rip + map->dso->text_offset;
 
 	return map->unmap_ip(map, rip) - map->reloc;
@@ -515,7 +511,7 @@ u64 map__objdump_2mem(struct map *map, u64 ip)
 	 * kernel modules also have DSO_TYPE_USER in dso->kernel,
 	 * but all kernel modules are ET_REL, so won't get here.
 	 */
-	if (map->dso->kernel == DSO_SPACE__USER)
+	if (map->dso->kernel == DSO_TYPE_USER)
 		return map->unmap_ip(map, ip - map->dso->text_offset);
 
 	return ip + map->reloc;

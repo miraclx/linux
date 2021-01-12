@@ -664,7 +664,7 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 	Mpi26NVMeEncapsulatedRequest_t *nvme_encap_request = NULL;
 	struct _pcie_device *pcie_device = NULL;
 	u16 smid;
-	unsigned long timeout;
+	u8 timeout;
 	u8 issue_reset;
 	u32 sz, sz_arg;
 	void *psge;
@@ -902,10 +902,8 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 		    (Mpi2SmpPassthroughRequest_t *)mpi_request;
 		u8 *data;
 
-		if (!ioc->multipath_on_hba) {
-			/* ioc determines which port to use */
-			smp_request->PhysicalPort = 0xFF;
-		}
+		/* ioc determines which port to use */
+		smp_request->PhysicalPort = 0xFF;
 		if (smp_request->PassthroughFlags &
 		    MPI2_SMP_PT_REQ_PT_FLAGS_IMMEDIATE)
 			data = (u8 *)&smp_request->SGL;
@@ -1004,7 +1002,7 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 		}
 		/* drop to default case for posting the request */
 	}
-		fallthrough;
+		/* fall through */
 	default:
 		ioc->build_sg_mpi(ioc, psge, data_out_dma, data_out_sz,
 		    data_in_dma, data_in_sz);
@@ -1111,15 +1109,13 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 			    pcie_device->device_info))))
 				mpt3sas_scsih_issue_locked_tm(ioc,
 				  le16_to_cpu(mpi_request->FunctionDependent1),
-				  0, 0, 0,
-				  MPI2_SCSITASKMGMT_TASKTYPE_TARGET_RESET, 0,
+				  0, MPI2_SCSITASKMGMT_TASKTYPE_TARGET_RESET, 0,
 				  0, pcie_device->reset_timeout,
 			MPI26_SCSITASKMGMT_MSGFLAGS_PROTOCOL_LVL_RST_PCIE);
 			else
 				mpt3sas_scsih_issue_locked_tm(ioc,
 				  le16_to_cpu(mpi_request->FunctionDependent1),
-				  0, 0, 0,
-				  MPI2_SCSITASKMGMT_TASKTYPE_TARGET_RESET, 0,
+				  0, MPI2_SCSITASKMGMT_TASKTYPE_TARGET_RESET, 0,
 				  0, 30, MPI2_SCSITASKMGMT_MSGFLAGS_LINK_RESET);
 		} else
 			mpt3sas_base_hard_reset_handler(ioc, FORCE_BIG_HAMMER);
@@ -3149,18 +3145,19 @@ BRM_status_show(struct device *cdev, struct device_attribute *attr,
 	if (!ioc->is_warpdrive) {
 		ioc_err(ioc, "%s: BRM attribute is only for warpdrive\n",
 			__func__);
-		return 0;
+		goto out;
 	}
 	/* pci_access_mutex lock acquired by sysfs show path */
 	mutex_lock(&ioc->pci_access_mutex);
-	if (ioc->pci_error_recovery || ioc->remove_host)
-		goto out;
+	if (ioc->pci_error_recovery || ioc->remove_host) {
+		mutex_unlock(&ioc->pci_access_mutex);
+		return 0;
+	}
 
 	/* allocate upto GPIOVal 36 entries */
 	sz = offsetof(Mpi2IOUnitPage3_t, GPIOVal) + (sizeof(u16) * 36);
 	io_unit_pg3 = kzalloc(sz, GFP_KERNEL);
 	if (!io_unit_pg3) {
-		rc = -ENOMEM;
 		ioc_err(ioc, "%s: failed allocating memory for iounit_pg3: (%d) bytes\n",
 			__func__, sz);
 		goto out;
@@ -3170,7 +3167,6 @@ BRM_status_show(struct device *cdev, struct device_attribute *attr,
 	    0) {
 		ioc_err(ioc, "%s: failed reading iounit_pg3\n",
 			__func__);
-		rc = -EINVAL;
 		goto out;
 	}
 
@@ -3178,14 +3174,12 @@ BRM_status_show(struct device *cdev, struct device_attribute *attr,
 	if (ioc_status != MPI2_IOCSTATUS_SUCCESS) {
 		ioc_err(ioc, "%s: iounit_pg3 failed with ioc_status(0x%04x)\n",
 			__func__, ioc_status);
-		rc = -EINVAL;
 		goto out;
 	}
 
 	if (io_unit_pg3->GPIOCount < 25) {
 		ioc_err(ioc, "%s: iounit_pg3->GPIOCount less than 25 entries, detected (%d) entries\n",
 			__func__, io_unit_pg3->GPIOCount);
-		rc = -EINVAL;
 		goto out;
 	}
 
@@ -3388,10 +3382,12 @@ host_trace_buffer_enable_store(struct device *cdev,
 			    &&
 			    (ioc->diag_buffer_status[MPI2_DIAG_BUF_TYPE_TRACE] &
 			    MPT3_DIAG_BUFFER_IS_APP_OWNED)) {
-				dma_free_coherent(&ioc->pdev->dev,
-						  ioc->diag_buffer_sz[MPI2_DIAG_BUF_TYPE_TRACE],
-						  ioc->diag_buffer[MPI2_DIAG_BUF_TYPE_TRACE],
-						  ioc->diag_buffer_dma[MPI2_DIAG_BUF_TYPE_TRACE]);
+				pci_free_consistent(ioc->pdev,
+				    ioc->diag_buffer_sz[
+				    MPI2_DIAG_BUF_TYPE_TRACE],
+				    ioc->diag_buffer[MPI2_DIAG_BUF_TYPE_TRACE],
+				    ioc->diag_buffer_dma[
+				    MPI2_DIAG_BUF_TYPE_TRACE]);
 				ioc->diag_buffer[MPI2_DIAG_BUF_TYPE_TRACE] =
 				    NULL;
 			}
@@ -3664,9 +3660,8 @@ static DEVICE_ATTR_RW(diag_trigger_mpi);
 
 /**
  * drv_support_bitmap_show - driver supported feature bitmap
- * @cdev: pointer to embedded class device
- * @attr: unused
- * @buf: the buffer returned
+ * @cdev - pointer to embedded class device
+ * @buf - the buffer returned
  *
  * A sysfs 'read-only' shost attribute.
  */
@@ -3683,9 +3678,8 @@ static DEVICE_ATTR_RO(drv_support_bitmap);
 
 /**
  * enable_sdev_max_qd_show - display whether sdev max qd is enabled/disabled
- * @cdev: pointer to embedded class device
- * @attr: unused
- * @buf: the buffer returned
+ * @cdev - pointer to embedded class device
+ * @buf - the buffer returned
  *
  * A sysfs read/write shost attribute. This attribute is used to set the
  * targets queue depth to HBA IO queue depth if this attribute is enabled.
@@ -3702,10 +3696,8 @@ enable_sdev_max_qd_show(struct device *cdev,
 
 /**
  * enable_sdev_max_qd_store - Enable/disable sdev max qd
- * @cdev: pointer to embedded class device
- * @attr: unused
- * @buf: the buffer returned
- * @count: unused
+ * @cdev - pointer to embedded class device
+ * @buf - the buffer returned
  *
  * A sysfs read/write shost attribute. This attribute is used to set the
  * targets queue depth to HBA IO queue depth if this attribute is enabled.

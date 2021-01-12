@@ -357,6 +357,8 @@ static void free_buffer(struct videobuf_queue *vq, struct zr364xx_buffer *buf)
 {
 	_DBG("%s\n", __func__);
 
+	BUG_ON(in_interrupt());
+
 	videobuf_vmalloc_free(&buf->vb);
 	buf->vb.state = VIDEOBUF_NEEDS_INIT;
 }
@@ -1325,7 +1327,6 @@ static int zr364xx_board_init(struct zr364xx_camera *cam)
 {
 	struct zr364xx_pipeinfo *pipe = cam->pipe;
 	unsigned long i;
-	int err;
 
 	DBG("board init: %p\n", cam);
 	memset(pipe, 0, sizeof(*pipe));
@@ -1358,8 +1359,9 @@ static int zr364xx_board_init(struct zr364xx_camera *cam)
 
 	if (i == 0) {
 		printk(KERN_INFO KBUILD_MODNAME ": out of memory. Aborting\n");
-		err = -ENOMEM;
-		goto err_free;
+		kfree(cam->pipe->transfer_buffer);
+		cam->pipe->transfer_buffer = NULL;
+		return -ENOMEM;
 	} else
 		cam->buffer.dwFrames = i;
 
@@ -1374,17 +1376,9 @@ static int zr364xx_board_init(struct zr364xx_camera *cam)
 	/*** end create system buffers ***/
 
 	/* start read pipe */
-	err = zr364xx_start_readpipe(cam);
-	if (err)
-		goto err_free;
-
+	zr364xx_start_readpipe(cam);
 	DBG(": board initialized\n");
 	return 0;
-
-err_free:
-	kfree(cam->pipe->transfer_buffer);
-	cam->pipe->transfer_buffer = NULL;
-	return err;
 }
 
 static int zr364xx_probe(struct usb_interface *intf,
@@ -1581,19 +1575,10 @@ static int zr364xx_resume(struct usb_interface *intf)
 	if (!cam->was_streaming)
 		return 0;
 
-	res = zr364xx_start_readpipe(cam);
-	if (res)
-		return res;
-
+	zr364xx_start_readpipe(cam);
 	res = zr364xx_prepare(cam);
-	if (res)
-		goto err_prepare;
-
-	zr364xx_start_acquire(cam);
-	return 0;
-
-err_prepare:
-	zr364xx_stop_readpipe(cam);
+	if (!res)
+		zr364xx_start_acquire(cam);
 	return res;
 }
 #endif

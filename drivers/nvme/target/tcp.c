@@ -94,6 +94,7 @@ struct nvmet_tcp_queue {
 	struct socket		*sock;
 	struct nvmet_tcp_port	*port;
 	struct work_struct	io_work;
+	int			cpu;
 	struct nvmet_cq		nvme_cq;
 	struct nvmet_sq		nvme_sq;
 
@@ -143,6 +144,7 @@ struct nvmet_tcp_port {
 	struct work_struct	accept_work;
 	struct nvmet_port	*nport;
 	struct sockaddr_storage addr;
+	int			last_cpu;
 	void (*data_ready)(struct sock *);
 };
 
@@ -151,18 +153,13 @@ static LIST_HEAD(nvmet_tcp_queue_list);
 static DEFINE_MUTEX(nvmet_tcp_queue_mutex);
 
 static struct workqueue_struct *nvmet_tcp_wq;
-static const struct nvmet_fabrics_ops nvmet_tcp_ops;
+static struct nvmet_fabrics_ops nvmet_tcp_ops;
 static void nvmet_tcp_free_cmd(struct nvmet_tcp_cmd *c);
 static void nvmet_tcp_finish_cmd(struct nvmet_tcp_cmd *cmd);
 
 static inline u16 nvmet_tcp_cmd_tag(struct nvmet_tcp_queue *queue,
 		struct nvmet_tcp_cmd *cmd)
 {
-	if (unlikely(!queue->nr_cmds)) {
-		/* We didn't allocate cmds yet, send 0xffff */
-		return USHRT_MAX;
-	}
-
 	return cmd - queue->cmds;
 }
 
@@ -215,11 +212,6 @@ static inline void nvmet_tcp_put_cmd(struct nvmet_tcp_cmd *cmd)
 		return;
 
 	list_add_tail(&cmd->entry, &cmd->queue->free_list);
-}
-
-static inline int queue_cpu(struct nvmet_tcp_queue *queue)
-{
-	return queue->sock->sk->sk_incoming_cpu;
 }
 
 static inline u8 nvmet_tcp_hdgst_len(struct nvmet_tcp_queue *queue)
@@ -331,14 +323,6 @@ static void nvmet_tcp_fatal_error(struct nvmet_tcp_queue *queue)
 		nvmet_ctrl_fatal_error(queue->nvme_sq.ctrl);
 	else
 		kernel_sock_shutdown(queue->sock, SHUT_RDWR);
-}
-
-static void nvmet_tcp_socket_error(struct nvmet_tcp_queue *queue, int status)
-{
-	if (status == -EPIPE || status == -ECONNRESET)
-		kernel_sock_shutdown(queue->sock, SHUT_RDWR);
-	else
-		nvmet_tcp_fatal_error(queue);
 }
 
 static int nvmet_tcp_map_data(struct nvmet_tcp_cmd *cmd)
@@ -467,11 +451,17 @@ static void nvmet_setup_response_pdu(struct nvmet_tcp_cmd *cmd)
 static void nvmet_tcp_process_resp_list(struct nvmet_tcp_queue *queue)
 {
 	struct llist_node *node;
-	struct nvmet_tcp_cmd *cmd;
 
-	for (node = llist_del_all(&queue->resp_list); node; node = node->next) {
-		cmd = llist_entry(node, struct nvmet_tcp_cmd, lentry);
+	node = llist_del_all(&queue->resp_list);
+	if (!node)
+		return;
+
+	while (node) {
+		struct nvmet_tcp_cmd *cmd = llist_entry(node,
+					struct nvmet_tcp_cmd, lentry);
+
 		list_add(&cmd->entry, &queue->resp_send_list);
+		node = node->next;
 		queue->send_list_len++;
 	}
 }
@@ -509,7 +499,7 @@ static void nvmet_tcp_queue_response(struct nvmet_req *req)
 	struct nvmet_tcp_queue	*queue = cmd->queue;
 
 	llist_add(&cmd->lentry, &queue->resp_list);
-	queue_work_on(queue_cpu(queue), nvmet_tcp_wq, &cmd->queue->io_work);
+	queue_work_on(cmd->queue->cpu, nvmet_tcp_wq, &cmd->queue->io_work);
 }
 
 static int nvmet_try_send_data_pdu(struct nvmet_tcp_cmd *cmd)
@@ -520,7 +510,7 @@ static int nvmet_try_send_data_pdu(struct nvmet_tcp_cmd *cmd)
 
 	ret = kernel_sendpage(cmd->queue->sock, virt_to_page(cmd->data_pdu),
 			offset_in_page(cmd->data_pdu) + cmd->offset,
-			left, MSG_DONTWAIT | MSG_MORE | MSG_SENDPAGE_NOTLAST);
+			left, MSG_DONTWAIT | MSG_MORE);
 	if (ret <= 0)
 		return ret;
 
@@ -548,7 +538,7 @@ static int nvmet_try_send_data(struct nvmet_tcp_cmd *cmd, bool last_in_batch)
 		if ((!last_in_batch && cmd->queue->send_list_len) ||
 		    cmd->wbytes_done + left < cmd->req.transfer_len ||
 		    queue->data_digest || !queue->nvme_sq.sqhd_disabled)
-			flags |= MSG_MORE | MSG_SENDPAGE_NOTLAST;
+			flags |= MSG_MORE;
 
 		ret = kernel_sendpage(cmd->queue->sock, page, cmd->offset,
 					left, flags);
@@ -595,7 +585,7 @@ static int nvmet_try_send_response(struct nvmet_tcp_cmd *cmd,
 	int ret;
 
 	if (!last_in_batch && cmd->queue->send_list_len)
-		flags |= MSG_MORE | MSG_SENDPAGE_NOTLAST;
+		flags |= MSG_MORE;
 	else
 		flags |= MSG_EOR;
 
@@ -624,7 +614,7 @@ static int nvmet_try_send_r2t(struct nvmet_tcp_cmd *cmd, bool last_in_batch)
 	int ret;
 
 	if (!last_in_batch && cmd->queue->send_list_len)
-		flags |= MSG_MORE | MSG_SENDPAGE_NOTLAST;
+		flags |= MSG_MORE;
 	else
 		flags |= MSG_EOR;
 
@@ -654,8 +644,6 @@ static int nvmet_try_send_ddgst(struct nvmet_tcp_cmd *cmd, bool last_in_batch)
 
 	if (!last_in_batch && cmd->queue->send_list_len)
 		msg.msg_flags |= MSG_MORE;
-	else
-		msg.msg_flags |= MSG_EOR;
 
 	ret = kernel_sendmsg(queue->sock, &msg, &iov, 1, iov.iov_len);
 	if (unlikely(ret <= 0))
@@ -728,15 +716,11 @@ static int nvmet_tcp_try_send(struct nvmet_tcp_queue *queue,
 
 	for (i = 0; i < budget; i++) {
 		ret = nvmet_tcp_try_send_one(queue, i == budget - 1);
-		if (unlikely(ret < 0)) {
-			nvmet_tcp_socket_error(queue, ret);
-			goto done;
-		} else if (ret == 0) {
+		if (ret <= 0)
 			break;
-		}
 		(*sends)++;
 	}
-done:
+
 	return ret;
 }
 
@@ -874,10 +858,7 @@ static int nvmet_tcp_handle_h2c_data_pdu(struct nvmet_tcp_queue *queue)
 	struct nvme_tcp_data_pdu *data = &queue->pdu.data;
 	struct nvmet_tcp_cmd *cmd;
 
-	if (likely(queue->nr_cmds))
-		cmd = &queue->cmds[data->ttag];
-	else
-		cmd = &queue->connect;
+	cmd = &queue->cmds[data->ttag];
 
 	if (le32_to_cpu(data->data_offset) != cmd->rbytes_done) {
 		pr_err("ttag %u unexpected data offset %u (expected %u)\n",
@@ -1176,15 +1157,11 @@ static int nvmet_tcp_try_recv(struct nvmet_tcp_queue *queue,
 
 	for (i = 0; i < budget; i++) {
 		ret = nvmet_tcp_try_recv_one(queue);
-		if (unlikely(ret < 0)) {
-			nvmet_tcp_socket_error(queue, ret);
-			goto done;
-		} else if (ret == 0) {
+		if (ret <= 0)
 			break;
-		}
 		(*recvs)++;
 	}
-done:
+
 	return ret;
 }
 
@@ -1209,16 +1186,27 @@ static void nvmet_tcp_io_work(struct work_struct *w)
 		pending = false;
 
 		ret = nvmet_tcp_try_recv(queue, NVMET_TCP_RECV_BUDGET, &ops);
-		if (ret > 0)
+		if (ret > 0) {
 			pending = true;
-		else if (ret < 0)
+		} else if (ret < 0) {
+			if (ret == -EPIPE || ret == -ECONNRESET)
+				kernel_sock_shutdown(queue->sock, SHUT_RDWR);
+			else
+				nvmet_tcp_fatal_error(queue);
 			return;
+		}
 
 		ret = nvmet_tcp_try_send(queue, NVMET_TCP_SEND_BUDGET, &ops);
-		if (ret > 0)
+		if (ret > 0) {
+			/* transmitted message/data */
 			pending = true;
-		else if (ret < 0)
+		} else if (ret < 0) {
+			if (ret == -EPIPE || ret == -ECONNRESET)
+				kernel_sock_shutdown(queue->sock, SHUT_RDWR);
+			else
+				nvmet_tcp_fatal_error(queue);
 			return;
+		}
 
 	} while (pending && ops < NVMET_TCP_IO_WORK_BUDGET);
 
@@ -1226,7 +1214,7 @@ static void nvmet_tcp_io_work(struct work_struct *w)
 	 * We exahusted our budget, requeue our selves
 	 */
 	if (pending)
-		queue_work_on(queue_cpu(queue), nvmet_tcp_wq, &queue->io_work);
+		queue_work_on(queue->cpu, nvmet_tcp_wq, &queue->io_work);
 }
 
 static int nvmet_tcp_alloc_cmd(struct nvmet_tcp_queue *queue,
@@ -1386,7 +1374,7 @@ static void nvmet_tcp_data_ready(struct sock *sk)
 	read_lock_bh(&sk->sk_callback_lock);
 	queue = sk->sk_user_data;
 	if (likely(queue))
-		queue_work_on(queue_cpu(queue), nvmet_tcp_wq, &queue->io_work);
+		queue_work_on(queue->cpu, nvmet_tcp_wq, &queue->io_work);
 	read_unlock_bh(&sk->sk_callback_lock);
 }
 
@@ -1406,7 +1394,7 @@ static void nvmet_tcp_write_space(struct sock *sk)
 
 	if (sk_stream_is_writeable(sk)) {
 		clear_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
-		queue_work_on(queue_cpu(queue), nvmet_tcp_wq, &queue->io_work);
+		queue_work_on(queue->cpu, nvmet_tcp_wq, &queue->io_work);
 	}
 out:
 	read_unlock_bh(&sk->sk_callback_lock);
@@ -1441,6 +1429,7 @@ static int nvmet_tcp_set_queue_sock(struct nvmet_tcp_queue *queue)
 {
 	struct socket *sock = queue->sock;
 	struct inet_sock *inet = inet_sk(sock->sk);
+	struct linger sol = { .l_onoff = 1, .l_linger = 0 };
 	int ret;
 
 	ret = kernel_getsockname(sock,
@@ -1458,14 +1447,27 @@ static int nvmet_tcp_set_queue_sock(struct nvmet_tcp_queue *queue)
 	 * close. This is done to prevent stale data from being sent should
 	 * the network connection be restored before TCP times out.
 	 */
-	sock_no_linger(sock->sk);
+	ret = kernel_setsockopt(sock, SOL_SOCKET, SO_LINGER,
+			(char *)&sol, sizeof(sol));
+	if (ret)
+		return ret;
 
-	if (so_priority > 0)
-		sock_set_priority(sock->sk, so_priority);
+	if (so_priority > 0) {
+		ret = kernel_setsockopt(sock, SOL_SOCKET, SO_PRIORITY,
+				(char *)&so_priority, sizeof(so_priority));
+		if (ret)
+			return ret;
+	}
 
 	/* Set socket type of service */
-	if (inet->rcv_tos > 0)
-		ip_sock_set_tos(sock->sk, inet->rcv_tos);
+	if (inet->rcv_tos > 0) {
+		int tos = inet->rcv_tos;
+
+		ret = kernel_setsockopt(sock, SOL_IP, IP_TOS,
+				(char *)&tos, sizeof(tos));
+		if (ret)
+			return ret;
+	}
 
 	write_lock_bh(&sock->sk->sk_callback_lock);
 	sock->sk->sk_user_data = queue;
@@ -1515,6 +1517,9 @@ static int nvmet_tcp_alloc_queue(struct nvmet_tcp_port *port,
 	if (ret)
 		goto out_free_connect;
 
+	port->last_cpu = cpumask_next_wrap(port->last_cpu,
+				cpu_online_mask, -1, false);
+	queue->cpu = port->last_cpu;
 	nvmet_prepare_receive_pdu(queue);
 
 	mutex_lock(&nvmet_tcp_queue_mutex);
@@ -1525,7 +1530,7 @@ static int nvmet_tcp_alloc_queue(struct nvmet_tcp_port *port,
 	if (ret)
 		goto out_destroy_sq;
 
-	queue_work_on(queue_cpu(queue), nvmet_tcp_wq, &queue->io_work);
+	queue_work_on(queue->cpu, nvmet_tcp_wq, &queue->io_work);
 
 	return 0;
 out_destroy_sq:
@@ -1583,7 +1588,7 @@ static int nvmet_tcp_add_port(struct nvmet_port *nport)
 {
 	struct nvmet_tcp_port *port;
 	__kernel_sa_family_t af;
-	int ret;
+	int opt, ret;
 
 	port = kzalloc(sizeof(*port), GFP_KERNEL);
 	if (!port)
@@ -1612,6 +1617,7 @@ static int nvmet_tcp_add_port(struct nvmet_port *nport)
 	}
 
 	port->nport = nport;
+	port->last_cpu = -1;
 	INIT_WORK(&port->accept_work, nvmet_tcp_accept_work);
 	if (port->nport->inline_data_size < 0)
 		port->nport->inline_data_size = NVMET_TCP_DEF_INLINE_DATA_SIZE;
@@ -1626,10 +1632,30 @@ static int nvmet_tcp_add_port(struct nvmet_port *nport)
 	port->sock->sk->sk_user_data = port;
 	port->data_ready = port->sock->sk->sk_data_ready;
 	port->sock->sk->sk_data_ready = nvmet_tcp_listen_data_ready;
-	sock_set_reuseaddr(port->sock->sk);
-	tcp_sock_set_nodelay(port->sock->sk);
-	if (so_priority > 0)
-		sock_set_priority(port->sock->sk, so_priority);
+
+	opt = 1;
+	ret = kernel_setsockopt(port->sock, IPPROTO_TCP,
+			TCP_NODELAY, (char *)&opt, sizeof(opt));
+	if (ret) {
+		pr_err("failed to set TCP_NODELAY sock opt %d\n", ret);
+		goto err_sock;
+	}
+
+	ret = kernel_setsockopt(port->sock, SOL_SOCKET, SO_REUSEADDR,
+			(char *)&opt, sizeof(opt));
+	if (ret) {
+		pr_err("failed to set SO_REUSEADDR sock opt %d\n", ret);
+		goto err_sock;
+	}
+
+	if (so_priority > 0) {
+		ret = kernel_setsockopt(port->sock, SOL_SOCKET, SO_PRIORITY,
+				(char *)&so_priority, sizeof(so_priority));
+		if (ret) {
+			pr_err("failed to set SO_PRIORITY sock opt %d\n", ret);
+			goto err_sock;
+		}
+	}
 
 	ret = kernel_bind(port->sock, (struct sockaddr *)&port->addr,
 			sizeof(port->addr));
@@ -1714,10 +1740,11 @@ static void nvmet_tcp_disc_port_addr(struct nvmet_req *req,
 	}
 }
 
-static const struct nvmet_fabrics_ops nvmet_tcp_ops = {
+static struct nvmet_fabrics_ops nvmet_tcp_ops = {
 	.owner			= THIS_MODULE,
 	.type			= NVMF_TRTYPE_TCP,
 	.msdbd			= 1,
+	.has_keyed_sgls		= 0,
 	.add_port		= nvmet_tcp_add_port,
 	.remove_port		= nvmet_tcp_remove_port,
 	.queue_response		= nvmet_tcp_queue_response,

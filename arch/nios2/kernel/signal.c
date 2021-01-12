@@ -252,7 +252,6 @@ static int do_signal(struct pt_regs *regs)
 		switch (retval) {
 		case ERESTART_RESTARTBLOCK:
 			restart = -2;
-			fallthrough;
 		case ERESTARTNOHAND:
 		case ERESTARTSYS:
 		case ERESTARTNOINTR:
@@ -306,8 +305,7 @@ asmlinkage int do_notify_resume(struct pt_regs *regs)
 	if (!user_mode(regs))
 		return 0;
 
-	if (test_thread_flag(TIF_SIGPENDING) ||
-	    test_thread_flag(TIF_NOTIFY_SIGNAL)) {
+	if (test_thread_flag(TIF_SIGPENDING)) {
 		int restart = do_signal(regs);
 
 		if (unlikely(restart)) {
@@ -318,7 +316,7 @@ asmlinkage int do_notify_resume(struct pt_regs *regs)
 			 */
 			return restart;
 		}
-	} else if (test_thread_flag(TIF_NOTIFY_RESUME))
+	} else if (test_and_clear_thread_flag(TIF_NOTIFY_RESUME))
 		tracehook_notify_resume(regs);
 
 	return 0;

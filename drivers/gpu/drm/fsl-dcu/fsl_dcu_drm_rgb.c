@@ -13,10 +13,18 @@
 #include <drm/drm_of.h>
 #include <drm/drm_panel.h>
 #include <drm/drm_probe_helper.h>
-#include <drm/drm_simple_kms_helper.h>
 
 #include "fsl_dcu_drm_drv.h"
 #include "fsl_tcon.h"
+
+static void fsl_dcu_drm_encoder_destroy(struct drm_encoder *encoder)
+{
+	drm_encoder_cleanup(encoder);
+}
+
+static const struct drm_encoder_funcs encoder_funcs = {
+	.destroy = fsl_dcu_drm_encoder_destroy,
+};
 
 int fsl_dcu_drm_encoder_create(struct fsl_dcu_drm_device *fsl_dev,
 			       struct drm_crtc *crtc)
@@ -30,8 +38,8 @@ int fsl_dcu_drm_encoder_create(struct fsl_dcu_drm_device *fsl_dev,
 	if (fsl_dev->tcon)
 		fsl_tcon_bypass_enable(fsl_dev->tcon);
 
-	ret = drm_simple_encoder_init(fsl_dev->drm, encoder,
-				      DRM_MODE_ENCODER_LVDS);
+	ret = drm_encoder_init(fsl_dev->drm, encoder, &encoder_funcs,
+			       DRM_MODE_ENCODER_LVDS, NULL);
 	if (ret < 0)
 		return ret;
 
@@ -40,7 +48,10 @@ int fsl_dcu_drm_encoder_create(struct fsl_dcu_drm_device *fsl_dev,
 
 static void fsl_dcu_drm_connector_destroy(struct drm_connector *connector)
 {
+	struct fsl_dcu_drm_connector *fsl_con = to_fsl_dcu_connector(connector);
+
 	drm_connector_unregister(connector);
+	drm_panel_detach(fsl_con->panel);
 	drm_connector_cleanup(connector);
 }
 
@@ -97,6 +108,12 @@ static int fsl_dcu_attach_panel(struct fsl_dcu_drm_device *fsl_dev,
 	ret = drm_connector_attach_encoder(connector, encoder);
 	if (ret < 0)
 		goto err_sysfs;
+
+	ret = drm_panel_attach(panel, connector);
+	if (ret) {
+		dev_err(fsl_dev->dev, "failed to attach panel\n");
+		goto err_sysfs;
+	}
 
 	return 0;
 

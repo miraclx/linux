@@ -450,7 +450,7 @@ int kgdb_arch_handle_exception(int e_vector, int signo, int err_code,
 		ptr = &remcomInBuffer[1];
 		if (kgdb_hex2long(&ptr, &addr))
 			linux_regs->ip = addr;
-		fallthrough;
+		/* fall through */
 	case 'D':
 	case 'k':
 		/* clear the trace bit */
@@ -539,7 +539,7 @@ static int __kgdb_notify(struct die_args *args, unsigned long cmd)
 			 * a system call which should be ignored
 			 */
 			return NOTIFY_DONE;
-		fallthrough;
+		/* fall through */
 	default:
 		if (user_mode(regs))
 			return NOTIFY_DONE;
@@ -629,10 +629,9 @@ static void kgdb_hw_overflow_handler(struct perf_event *event,
 	struct task_struct *tsk = current;
 	int i;
 
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < 4; i++)
 		if (breakinfo[i].enabled)
-			tsk->thread.virtual_dr6 |= (DR_TRAP0 << i);
-	}
+			tsk->thread.debugreg6 |= (DR_TRAP0 << i);
 }
 
 void kgdb_arch_late(void)
@@ -733,11 +732,11 @@ int kgdb_arch_set_breakpoint(struct kgdb_bkpt *bpt)
 	int err;
 
 	bpt->type = BP_BREAKPOINT;
-	err = copy_from_kernel_nofault(bpt->saved_instr, (char *)bpt->bpt_addr,
+	err = probe_kernel_read(bpt->saved_instr, (char *)bpt->bpt_addr,
 				BREAK_INSTR_SIZE);
 	if (err)
 		return err;
-	err = copy_to_kernel_nofault((char *)bpt->bpt_addr,
+	err = probe_kernel_write((char *)bpt->bpt_addr,
 				 arch_kgdb_ops.gdb_bpt_instr, BREAK_INSTR_SIZE);
 	if (!err)
 		return err;
@@ -769,7 +768,7 @@ int kgdb_arch_remove_breakpoint(struct kgdb_bkpt *bpt)
 	return 0;
 
 knl_write:
-	return copy_to_kernel_nofault((char *)bpt->bpt_addr,
+	return probe_kernel_write((char *)bpt->bpt_addr,
 				  (char *)bpt->saved_instr, BREAK_INSTR_SIZE);
 }
 

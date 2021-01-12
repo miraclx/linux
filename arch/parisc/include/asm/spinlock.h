@@ -10,7 +10,8 @@
 static inline int arch_spin_is_locked(arch_spinlock_t *x)
 {
 	volatile unsigned int *a = __ldcw_align(x);
-	return READ_ONCE(*a) == 0;
+	smp_mb();
+	return *a == 0;
 }
 
 static inline void arch_spin_lock(arch_spinlock_t *x)
@@ -20,21 +21,23 @@ static inline void arch_spin_lock(arch_spinlock_t *x)
 	a = __ldcw_align(x);
 	while (__ldcw(a) == 0)
 		while (*a == 0)
-			continue;
+			cpu_relax();
 }
 
 static inline void arch_spin_lock_flags(arch_spinlock_t *x,
-					unsigned long flags)
+					 unsigned long flags)
 {
 	volatile unsigned int *a;
+	unsigned long flags_dis;
 
 	a = __ldcw_align(x);
-	while (__ldcw(a) == 0)
+	while (__ldcw(a) == 0) {
+		local_save_flags(flags_dis);
+		local_irq_restore(flags);
 		while (*a == 0)
-			if (flags & PSW_SM_I) {
-				local_irq_enable();
-				local_irq_disable();
-			}
+			cpu_relax();
+		local_irq_restore(flags_dis);
+	}
 }
 #define arch_spin_lock_flags arch_spin_lock_flags
 
@@ -43,16 +46,23 @@ static inline void arch_spin_unlock(arch_spinlock_t *x)
 	volatile unsigned int *a;
 
 	a = __ldcw_align(x);
-	/* Release with ordered store. */
-	__asm__ __volatile__("stw,ma %0,0(%1)" : : "r"(1), "r"(a) : "memory");
+#ifdef CONFIG_SMP
+	(void) __ldcw(a);
+#else
+	mb();
+#endif
+	*a = 1;
 }
 
 static inline int arch_spin_trylock(arch_spinlock_t *x)
 {
 	volatile unsigned int *a;
+	int ret;
 
 	a = __ldcw_align(x);
-	return __ldcw(a) != 0;
+        ret = __ldcw(a) != 0;
+
+	return ret;
 }
 
 /*

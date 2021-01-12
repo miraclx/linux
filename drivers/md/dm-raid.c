@@ -242,6 +242,7 @@ struct raid_set {
 
 	struct mddev md;
 	struct raid_type *raid_type;
+	struct dm_target_callbacks callbacks;
 
 	sector_t array_sectors;
 	sector_t dev_sectors;
@@ -253,7 +254,7 @@ struct raid_set {
 		int mode;
 	} journal_dev;
 
-	struct raid_dev dev[];
+	struct raid_dev dev[0];
 };
 
 static void rs_config_backup(struct raid_set *rs, struct rs_layout *l)
@@ -700,7 +701,8 @@ static void rs_set_capacity(struct raid_set *rs)
 {
 	struct gendisk *gendisk = dm_disk(dm_table_get_md(rs->ti->table));
 
-	set_capacity_and_notify(gendisk, rs->md.array_sectors);
+	set_capacity(gendisk, rs->md.array_sectors);
+	revalidate_disk(gendisk);
 }
 
 /*
@@ -1703,6 +1705,13 @@ static void do_table_event(struct work_struct *ws)
 	dm_table_event(rs->ti->table);
 }
 
+static int raid_is_congested(struct dm_target_callbacks *cb, int bits)
+{
+	struct raid_set *rs = container_of(cb, struct raid_set, callbacks);
+
+	return mddev_congested(&rs->md, bits);
+}
+
 /*
  * Make sure a valid takover (level switch) is being requested on @rs
  *
@@ -2336,6 +2345,8 @@ static int super_init_validation(struct raid_set *rs, struct md_rdev *rdev)
 
 	if (new_devs == rs->raid_disks || !rebuilds) {
 		/* Replace a broken device */
+		if (new_devs == 1 && !rs->delta_disks)
+			;
 		if (new_devs == rs->raid_disks) {
 			DMINFO("Superblocks created for new raid set");
 			set_bit(MD_ARRAY_FIRST_USE, &mddev->flags);
@@ -3237,6 +3248,9 @@ size_check:
 		goto bad_md_start;
 	}
 
+	rs->callbacks.congested_fn = raid_is_congested;
+	dm_table_add_target_callbacks(ti->table, &rs->callbacks);
+
 	/* If raid4/5/6 journal mode explicitly requested (only possible with journal dev) -> set it */
 	if (test_bit(__CTR_FLAG_JOURNAL_MODE, &rs->ctr_flags)) {
 		r = r5c_journal_mode_set(&rs->md, rs->journal_dev.mode);
@@ -3296,6 +3310,7 @@ static void raid_dtr(struct dm_target *ti)
 {
 	struct raid_set *rs = ti->private;
 
+	list_del_init(&rs->callbacks.list);
 	md_stop(&rs->md);
 	raid_set_free(rs);
 }

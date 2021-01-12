@@ -104,6 +104,11 @@ static int pm2xxx_charger_current_map[] = {
 	3000,
 };
 
+static const struct i2c_device_id pm2xxx_ident[] = {
+	{ "pm2301", 0 },
+	{ }
+};
+
 static void set_lpn_pin(struct pm2xxx_charger *pm2)
 {
 	if (!pm2->ac.charger_connected && gpio_is_valid(pm2->lpn_pin)) {
@@ -391,7 +396,7 @@ static int pm2_int_reg3(void *pm2_data, int val)
 
 	if (val & (PM2XXX_INT4_ITCHARGINGON)) {
 		dev_dbg(pm2->dev ,
-			"charging operation has started\n");
+			"chargind operation has started\n");
 	}
 
 	if (val & (PM2XXX_INT4_ITVRESUME)) {
@@ -455,6 +460,7 @@ static int pm2_int_reg4(void *pm2_data, int val)
 static int pm2_int_reg5(void *pm2_data, int val)
 {
 	struct pm2xxx_charger *pm2 = pm2_data;
+	int ret = 0;
 
 	if (val & (PM2XXX_INT6_ITVPWR2DROP | PM2XXX_INT6_ITVPWR1DROP)) {
 		dev_dbg(pm2->dev, "VMPWR drop to VBAT level\n");
@@ -467,7 +473,7 @@ static int pm2_int_reg5(void *pm2_data, int val)
 		dev_dbg(pm2->dev, "Falling/Rising edge on WPWR1/2\n");
 	}
 
-	return 0;
+	return ret;
 }
 
 static irqreturn_t  pm2xxx_irq_int(int irq, void *data)

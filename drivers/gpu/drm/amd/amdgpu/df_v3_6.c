@@ -30,17 +30,71 @@
 #define DF_3_6_SMN_REG_INST_DIST        0x8
 #define DF_3_6_INST_CNT                 8
 
-/* Defined in global_features.h as FTI_PERFMON_VISIBLE */
-#define DF_V3_6_MAX_COUNTERS		4
-
-/* get flags from df perfmon config */
-#define DF_V3_6_GET_EVENT(x)		(x & 0xFFUL)
-#define DF_V3_6_GET_INSTANCE(x)		((x >> 8) & 0xFFUL)
-#define DF_V3_6_GET_UNITMASK(x)		((x >> 16) & 0xFFUL)
-#define DF_V3_6_PERFMON_OVERFLOW	0xFFFFFFFFFFFFULL
-
 static u32 df_v3_6_channel_number[] = {1, 2, 0, 4, 0, 8, 0,
 				       16, 32, 0, 0, 0, 2, 4, 8};
+
+/* init df format attrs */
+AMDGPU_PMU_ATTR(event,		"config:0-7");
+AMDGPU_PMU_ATTR(instance,	"config:8-15");
+AMDGPU_PMU_ATTR(umask,		"config:16-23");
+
+/* df format attributes  */
+static struct attribute *df_v3_6_format_attrs[] = {
+	&pmu_attr_event.attr,
+	&pmu_attr_instance.attr,
+	&pmu_attr_umask.attr,
+	NULL
+};
+
+/* df format attribute group */
+static struct attribute_group df_v3_6_format_attr_group = {
+	.name = "format",
+	.attrs = df_v3_6_format_attrs,
+};
+
+/* df event attrs */
+AMDGPU_PMU_ATTR(cake0_pcsout_txdata,
+		      "event=0x7,instance=0x46,umask=0x2");
+AMDGPU_PMU_ATTR(cake1_pcsout_txdata,
+		      "event=0x7,instance=0x47,umask=0x2");
+AMDGPU_PMU_ATTR(cake0_pcsout_txmeta,
+		      "event=0x7,instance=0x46,umask=0x4");
+AMDGPU_PMU_ATTR(cake1_pcsout_txmeta,
+		      "event=0x7,instance=0x47,umask=0x4");
+AMDGPU_PMU_ATTR(cake0_ftiinstat_reqalloc,
+		      "event=0xb,instance=0x46,umask=0x4");
+AMDGPU_PMU_ATTR(cake1_ftiinstat_reqalloc,
+		      "event=0xb,instance=0x47,umask=0x4");
+AMDGPU_PMU_ATTR(cake0_ftiinstat_rspalloc,
+		      "event=0xb,instance=0x46,umask=0x8");
+AMDGPU_PMU_ATTR(cake1_ftiinstat_rspalloc,
+		      "event=0xb,instance=0x47,umask=0x8");
+
+/* df event attributes  */
+static struct attribute *df_v3_6_event_attrs[] = {
+	&pmu_attr_cake0_pcsout_txdata.attr,
+	&pmu_attr_cake1_pcsout_txdata.attr,
+	&pmu_attr_cake0_pcsout_txmeta.attr,
+	&pmu_attr_cake1_pcsout_txmeta.attr,
+	&pmu_attr_cake0_ftiinstat_reqalloc.attr,
+	&pmu_attr_cake1_ftiinstat_reqalloc.attr,
+	&pmu_attr_cake0_ftiinstat_rspalloc.attr,
+	&pmu_attr_cake1_ftiinstat_rspalloc.attr,
+	NULL
+};
+
+/* df event attribute group */
+static struct attribute_group df_v3_6_event_attr_group = {
+	.name = "events",
+	.attrs = df_v3_6_event_attrs
+};
+
+/* df event attr groups  */
+const struct attribute_group *df_v3_6_attr_groups[] = {
+		&df_v3_6_format_attr_group,
+		&df_v3_6_event_attr_group,
+		NULL
+};
 
 static uint64_t df_v3_6_get_fica(struct amdgpu_device *adev,
 				 uint32_t ficaa_val)
@@ -197,7 +251,7 @@ static ssize_t df_v3_6_get_df_cntr_avail(struct device *dev,
 	int i, count;
 
 	ddev = dev_get_drvdata(dev);
-	adev = drm_to_adev(ddev);
+	adev = ddev->dev_private;
 	count = 0;
 
 	for (i = 0; i < DF_V3_6_MAX_COUNTERS; i++) {
@@ -337,28 +391,33 @@ static void df_v3_6_get_clockgating_state(struct amdgpu_device *adev,
 }
 
 /* get assigned df perfmon ctr as int */
-static bool df_v3_6_pmc_has_counter(struct amdgpu_device *adev,
-				      uint64_t config,
-				      int counter_idx)
+static int df_v3_6_pmc_config_2_cntr(struct amdgpu_device *adev,
+				      uint64_t config)
 {
+	int i;
 
-	return ((config & 0x0FFFFFFUL) ==
-			adev->df_perfmon_config_assign_mask[counter_idx]);
+	for (i = 0; i < DF_V3_6_MAX_COUNTERS; i++) {
+		if ((config & 0x0FFFFFFUL) ==
+					adev->df_perfmon_config_assign_mask[i])
+			return i;
+	}
 
+	return -EINVAL;
 }
 
 /* get address based on counter assignment */
 static void df_v3_6_pmc_get_addr(struct amdgpu_device *adev,
 				 uint64_t config,
-				 int counter_idx,
 				 int is_ctrl,
 				 uint32_t *lo_base_addr,
 				 uint32_t *hi_base_addr)
 {
-	if (!df_v3_6_pmc_has_counter(adev, config, counter_idx))
+	int target_cntr = df_v3_6_pmc_config_2_cntr(adev, config);
+
+	if (target_cntr < 0)
 		return;
 
-	switch (counter_idx) {
+	switch (target_cntr) {
 
 	case 0:
 		*lo_base_addr = is_ctrl ? smnPerfMonCtlLo4 : smnPerfMonCtrLo4;
@@ -384,30 +443,25 @@ static void df_v3_6_pmc_get_addr(struct amdgpu_device *adev,
 /* get read counter address */
 static void df_v3_6_pmc_get_read_settings(struct amdgpu_device *adev,
 					  uint64_t config,
-					  int counter_idx,
 					  uint32_t *lo_base_addr,
 					  uint32_t *hi_base_addr)
 {
-	df_v3_6_pmc_get_addr(adev, config, counter_idx, 0, lo_base_addr,
-								hi_base_addr);
+	df_v3_6_pmc_get_addr(adev, config, 0, lo_base_addr, hi_base_addr);
 }
 
 /* get control counter settings i.e. address and values to set */
 static int df_v3_6_pmc_get_ctrl_settings(struct amdgpu_device *adev,
 					  uint64_t config,
-					  int counter_idx,
 					  uint32_t *lo_base_addr,
 					  uint32_t *hi_base_addr,
 					  uint32_t *lo_val,
-					  uint32_t *hi_val,
-					  bool is_enable)
+					  uint32_t *hi_val)
 {
 
 	uint32_t eventsel, instance, unitmask;
 	uint32_t instance_10, instance_5432, instance_76;
 
-	df_v3_6_pmc_get_addr(adev, config, counter_idx, 1, lo_base_addr,
-				hi_base_addr);
+	df_v3_6_pmc_get_addr(adev, config, 1, lo_base_addr, hi_base_addr);
 
 	if ((*lo_base_addr == 0) || (*hi_base_addr == 0)) {
 		DRM_ERROR("[DF PMC] addressing not retrieved! Lo: %x, Hi: %x",
@@ -423,8 +477,7 @@ static int df_v3_6_pmc_get_ctrl_settings(struct amdgpu_device *adev,
 	instance_5432 = (instance >> 2) & 0xf;
 	instance_76 = (instance >> 6) & 0x3;
 
-	*lo_val = (unitmask << 8) | (instance_10 << 6) | eventsel;
-	*lo_val = is_enable ? *lo_val | (1 << 22) : *lo_val & ~(1 << 22);
+	*lo_val = (unitmask << 8) | (instance_10 << 6) | eventsel | (1 << 22);
 	*hi_val = (instance_76 << 29) | instance_5432;
 
 	DRM_DEBUG_DRIVER("config=%llx addr=%08x:%08x val=%08x:%08x",
@@ -437,13 +490,18 @@ static int df_v3_6_pmc_get_ctrl_settings(struct amdgpu_device *adev,
 static int df_v3_6_pmc_add_cntr(struct amdgpu_device *adev,
 				   uint64_t config)
 {
-	int i;
+	int i, target_cntr;
+
+	target_cntr = df_v3_6_pmc_config_2_cntr(adev, config);
+
+	if (target_cntr >= 0)
+		return 0;
 
 	for (i = 0; i < DF_V3_6_MAX_COUNTERS; i++) {
 		if (adev->df_perfmon_config_assign_mask[i] == 0U) {
 			adev->df_perfmon_config_assign_mask[i] =
 							config & 0x0FFFFFFUL;
-			return i;
+			return 0;
 		}
 	}
 
@@ -452,50 +510,59 @@ static int df_v3_6_pmc_add_cntr(struct amdgpu_device *adev,
 
 #define DEFERRED_ARM_MASK	(1 << 31)
 static int df_v3_6_pmc_set_deferred(struct amdgpu_device *adev,
-				    int counter_idx, uint64_t config,
-				    bool is_deferred)
+				    uint64_t config, bool is_deferred)
 {
+	int target_cntr;
 
-	if (!df_v3_6_pmc_has_counter(adev, config, counter_idx))
+	target_cntr = df_v3_6_pmc_config_2_cntr(adev, config);
+
+	if (target_cntr < 0)
 		return -EINVAL;
 
 	if (is_deferred)
-		adev->df_perfmon_config_assign_mask[counter_idx] |=
+		adev->df_perfmon_config_assign_mask[target_cntr] |=
 							DEFERRED_ARM_MASK;
 	else
-		adev->df_perfmon_config_assign_mask[counter_idx] &=
+		adev->df_perfmon_config_assign_mask[target_cntr] &=
 							~DEFERRED_ARM_MASK;
 
 	return 0;
 }
 
 static bool df_v3_6_pmc_is_deferred(struct amdgpu_device *adev,
-				    int counter_idx,
 				    uint64_t config)
 {
-	return	(df_v3_6_pmc_has_counter(adev, config, counter_idx) &&
-			(adev->df_perfmon_config_assign_mask[counter_idx]
-				& DEFERRED_ARM_MASK));
+	int target_cntr;
+
+	target_cntr = df_v3_6_pmc_config_2_cntr(adev, config);
+
+	/*
+	 * we never get target_cntr < 0 since this funciton is only called in
+	 * pmc_count for now but we should check anyways.
+	 */
+	return (target_cntr >= 0 &&
+			(adev->df_perfmon_config_assign_mask[target_cntr]
+			& DEFERRED_ARM_MASK));
 
 }
 
 /* release performance counter */
 static void df_v3_6_pmc_release_cntr(struct amdgpu_device *adev,
-				     uint64_t config,
-				     int counter_idx)
+				     uint64_t config)
 {
-	if (df_v3_6_pmc_has_counter(adev, config, counter_idx))
-		adev->df_perfmon_config_assign_mask[counter_idx] = 0ULL;
+	int target_cntr = df_v3_6_pmc_config_2_cntr(adev, config);
+
+	if (target_cntr >= 0)
+		adev->df_perfmon_config_assign_mask[target_cntr] = 0ULL;
 }
 
 
 static void df_v3_6_reset_perfmon_cntr(struct amdgpu_device *adev,
-					 uint64_t config,
-					 int counter_idx)
+					 uint64_t config)
 {
-	uint32_t lo_base_addr = 0, hi_base_addr = 0;
+	uint32_t lo_base_addr, hi_base_addr;
 
-	df_v3_6_pmc_get_read_settings(adev, config, counter_idx, &lo_base_addr,
+	df_v3_6_pmc_get_read_settings(adev, config, &lo_base_addr,
 				      &hi_base_addr);
 
 	if ((lo_base_addr == 0) || (hi_base_addr == 0))
@@ -504,27 +571,25 @@ static void df_v3_6_reset_perfmon_cntr(struct amdgpu_device *adev,
 	df_v3_6_perfmon_wreg(adev, lo_base_addr, 0, hi_base_addr, 0);
 }
 
-/* return available counter if is_add == 1 otherwise return error status. */
 static int df_v3_6_pmc_start(struct amdgpu_device *adev, uint64_t config,
-			     int counter_idx, int is_add)
+			     int is_enable)
 {
 	uint32_t lo_base_addr, hi_base_addr, lo_val, hi_val;
 	int err = 0, ret = 0;
 
 	switch (adev->asic_type) {
 	case CHIP_VEGA20:
-	case CHIP_ARCTURUS:
-		if (is_add)
+		if (is_enable)
 			return df_v3_6_pmc_add_cntr(adev, config);
+
+		df_v3_6_reset_perfmon_cntr(adev, config);
 
 		ret = df_v3_6_pmc_get_ctrl_settings(adev,
 					config,
-					counter_idx,
 					&lo_base_addr,
 					&hi_base_addr,
 					&lo_val,
-					&hi_val,
-					true);
+					&hi_val);
 
 		if (ret)
 			return ret;
@@ -536,8 +601,7 @@ static int df_v3_6_pmc_start(struct amdgpu_device *adev, uint64_t config,
 						     hi_val);
 
 		if (err)
-			ret = df_v3_6_pmc_set_deferred(adev, config,
-							counter_idx, true);
+			ret = df_v3_6_pmc_set_deferred(adev, config, true);
 
 		break;
 	default:
@@ -548,31 +612,27 @@ static int df_v3_6_pmc_start(struct amdgpu_device *adev, uint64_t config,
 }
 
 static int df_v3_6_pmc_stop(struct amdgpu_device *adev, uint64_t config,
-			    int counter_idx, int is_remove)
+			    int is_disable)
 {
 	uint32_t lo_base_addr, hi_base_addr, lo_val, hi_val;
 	int ret = 0;
 
 	switch (adev->asic_type) {
 	case CHIP_VEGA20:
-	case CHIP_ARCTURUS:
 		ret = df_v3_6_pmc_get_ctrl_settings(adev,
 			config,
-			counter_idx,
 			&lo_base_addr,
 			&hi_base_addr,
 			&lo_val,
-			&hi_val,
-			false);
+			&hi_val);
 
 		if (ret)
 			return ret;
 
+		df_v3_6_reset_perfmon_cntr(adev, config);
 
-		if (is_remove) {
-			df_v3_6_reset_perfmon_cntr(adev, config, counter_idx);
-			df_v3_6_pmc_release_cntr(adev, config, counter_idx);
-		}
+		if (is_disable)
+			df_v3_6_pmc_release_cntr(adev, config);
 
 		break;
 	default:
@@ -584,23 +644,21 @@ static int df_v3_6_pmc_stop(struct amdgpu_device *adev, uint64_t config,
 
 static void df_v3_6_pmc_get_count(struct amdgpu_device *adev,
 				  uint64_t config,
-				  int counter_idx,
 				  uint64_t *count)
 {
-	uint32_t lo_base_addr = 0, hi_base_addr = 0, lo_val = 0, hi_val = 0;
+	uint32_t lo_base_addr, hi_base_addr, lo_val = 0, hi_val = 0;
 	*count = 0;
 
 	switch (adev->asic_type) {
 	case CHIP_VEGA20:
-	case CHIP_ARCTURUS:
-		df_v3_6_pmc_get_read_settings(adev, config, counter_idx,
-						&lo_base_addr, &hi_base_addr);
+		df_v3_6_pmc_get_read_settings(adev, config, &lo_base_addr,
+				      &hi_base_addr);
 
 		if ((lo_base_addr == 0) || (hi_base_addr == 0))
 			return;
 
 		/* rearm the counter or throw away count value on failure */
-		if (df_v3_6_pmc_is_deferred(adev, config, counter_idx)) {
+		if (df_v3_6_pmc_is_deferred(adev, config)) {
 			int rearm_err = df_v3_6_perfmon_arm_with_status(adev,
 							lo_base_addr, lo_val,
 							hi_base_addr, hi_val);
@@ -608,8 +666,7 @@ static void df_v3_6_pmc_get_count(struct amdgpu_device *adev,
 			if (rearm_err)
 				return;
 
-			df_v3_6_pmc_set_deferred(adev, config, counter_idx,
-									false);
+			df_v3_6_pmc_set_deferred(adev, config, false);
 		}
 
 		df_v3_6_perfmon_rreg(adev, lo_base_addr, &lo_val,
@@ -629,6 +686,58 @@ static void df_v3_6_pmc_get_count(struct amdgpu_device *adev,
 	}
 }
 
+static uint64_t df_v3_6_get_dram_base_addr(struct amdgpu_device *adev,
+					   uint32_t df_inst)
+{
+	uint32_t base_addr_reg_val 	= 0;
+	uint64_t base_addr	 	= 0;
+
+	base_addr_reg_val = RREG32_PCIE(smnDF_CS_UMC_AON0_DramBaseAddress0 +
+					df_inst * DF_3_6_SMN_REG_INST_DIST);
+
+	if (REG_GET_FIELD(base_addr_reg_val,
+			  DF_CS_UMC_AON0_DramBaseAddress0,
+			  AddrRngVal) == 0) {
+		DRM_WARN("address range not valid");
+		return 0;
+	}
+
+	base_addr = REG_GET_FIELD(base_addr_reg_val,
+				  DF_CS_UMC_AON0_DramBaseAddress0,
+				  DramBaseAddr);
+
+	return base_addr << 28;
+}
+
+static uint32_t df_v3_6_get_df_inst_id(struct amdgpu_device *adev)
+{
+	uint32_t xgmi_node_id	= 0;
+	uint32_t df_inst_id 	= 0;
+
+	/* Walk through DF dst nodes to find current XGMI node */
+	for (df_inst_id = 0; df_inst_id < DF_3_6_INST_CNT; df_inst_id++) {
+
+		xgmi_node_id = RREG32_PCIE(smnDF_CS_UMC_AON0_DramLimitAddress0 +
+					   df_inst_id * DF_3_6_SMN_REG_INST_DIST);
+		xgmi_node_id = REG_GET_FIELD(xgmi_node_id,
+					     DF_CS_UMC_AON0_DramLimitAddress0,
+					     DstFabricID);
+
+		/* TODO: establish reason dest fabric id is offset by 7 */
+		xgmi_node_id = xgmi_node_id >> 7;
+
+		if (adev->gmc.xgmi.physical_node_id == xgmi_node_id)
+			break;
+	}
+
+	if (df_inst_id == DF_3_6_INST_CNT) {
+		DRM_WARN("cant match df dst id with gpu node");
+		return 0;
+	}
+
+	return df_inst_id;
+}
+
 const struct amdgpu_df_funcs df_v3_6_funcs = {
 	.sw_init = df_v3_6_sw_init,
 	.sw_fini = df_v3_6_sw_fini,
@@ -643,4 +752,6 @@ const struct amdgpu_df_funcs df_v3_6_funcs = {
 	.pmc_get_count = df_v3_6_pmc_get_count,
 	.get_fica = df_v3_6_get_fica,
 	.set_fica = df_v3_6_set_fica,
+	.get_dram_base_addr = df_v3_6_get_dram_base_addr,
+	.get_df_inst_id = df_v3_6_get_df_inst_id
 };

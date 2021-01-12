@@ -19,6 +19,7 @@
 #include <linux/err.h>
 #include <linux/clk.h>
 #include <linux/io.h>
+#include <linux/gpio.h>
 #include <linux/slab.h>
 
 #include <linux/spi/spi.h>

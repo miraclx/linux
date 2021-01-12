@@ -255,7 +255,7 @@ DECLARE_EVENT_CLASS(tipc_link_class,
 
 	TP_fast_assign(
 		__assign_str(header, header);
-		memcpy(__entry->name, tipc_link_name(l), TIPC_MAX_LINK_NAME);
+		tipc_link_name_ext(l, __entry->name);
 		tipc_link_dump(l, dqueues, __get_str(buf));
 	),
 
@@ -295,14 +295,12 @@ DECLARE_EVENT_CLASS(tipc_link_transmq_class,
 	),
 
 	TP_fast_assign(
-		memcpy(__entry->name, tipc_link_name(r), TIPC_MAX_LINK_NAME);
+		tipc_link_name_ext(r, __entry->name);
 		__entry->from = f;
 		__entry->to = t;
 		__entry->len = skb_queue_len(tq);
-		__entry->fseqno = __entry->len ?
-				  msg_seqno(buf_msg(skb_peek(tq))) : 0;
-		__entry->lseqno = __entry->len ?
-				  msg_seqno(buf_msg(skb_peek_tail(tq))) : 0;
+		__entry->fseqno = msg_seqno(buf_msg(skb_peek(tq)));
+		__entry->lseqno = msg_seqno(buf_msg(skb_peek_tail(tq)));
 	),
 
 	TP_printk("<%s> retrans req: [%u-%u] transmq: %u [%u-%u]\n",
@@ -310,16 +308,15 @@ DECLARE_EVENT_CLASS(tipc_link_transmq_class,
 		  __entry->len, __entry->fseqno, __entry->lseqno)
 );
 
-DEFINE_EVENT_CONDITION(tipc_link_transmq_class, tipc_link_retrans,
+DEFINE_EVENT(tipc_link_transmq_class, tipc_link_retrans,
 	TP_PROTO(struct tipc_link *r, u16 f, u16 t, struct sk_buff_head *tq),
-	TP_ARGS(r, f, t, tq),
-	TP_CONDITION(less_eq(f, t))
+	TP_ARGS(r, f, t, tq)
 );
 
 DEFINE_EVENT_PRINT(tipc_link_transmq_class, tipc_link_bc_ack,
 	TP_PROTO(struct tipc_link *r, u16 f, u16 t, struct sk_buff_head *tq),
 	TP_ARGS(r, f, t, tq),
-	TP_printk("<%s> acked: %u gap: %u transmq: %u [%u-%u]\n",
+	TP_printk("<%s> acked: [%u-%u] transmq: %u [%u-%u]\n",
 		  __entry->name, __entry->from, __entry->to,
 		  __entry->len, __entry->fseqno, __entry->lseqno)
 );

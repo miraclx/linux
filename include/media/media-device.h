@@ -128,7 +128,7 @@ struct media_device_ops {
  *
  * Use-case: find tuner entity connected to the decoder
  * entity and check if it is available, and activate the
- * link between them from @enable_source and deactivate
+ * the link between them from @enable_source and deactivate
  * from @disable_source.
  *
  * .. note::

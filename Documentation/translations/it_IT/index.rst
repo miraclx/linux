@@ -121,10 +121,9 @@ file sorgenti, informazioni aggiuntive vengono aggiunte solo se necessarie
 (o almeno ci proviamo — probabilmente *non* tutto quello che è davvero
 necessario).
 
-.. toctree::
-   :maxdepth: 2
+.. warning::
 
-   core-api/index
+    TODO ancora da tradurre
 
 Documentazione specifica per architettura
 -----------------------------------------

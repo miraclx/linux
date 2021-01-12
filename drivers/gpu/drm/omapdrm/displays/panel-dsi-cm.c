@@ -2,7 +2,7 @@
 /*
  * Generic DSI Command Mode panel driver
  *
- * Copyright (C) 2013 Texas Instruments Incorporated - https://www.ti.com/
+ * Copyright (C) 2013 Texas Instruments Incorporated - http://www.ti.com/
  * Author: Tomi Valkeinen <tomi.valkeinen@ti.com>
  */
 
@@ -1163,7 +1163,7 @@ static const struct omap_dss_driver dsicm_dss_driver = {
 static int dsicm_probe_of(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
-	struct backlight_device *backlight;
+	struct device_node *backlight;
 	struct panel_drv_data *ddata = platform_get_drvdata(pdev);
 	struct display_timing timing;
 	int err;
@@ -1216,15 +1216,17 @@ static int dsicm_probe_of(struct platform_device *pdev)
 		ddata->vddi = NULL;
 	}
 
-	backlight = devm_of_find_backlight(&pdev->dev);
-	if (IS_ERR(backlight))
-		return PTR_ERR(backlight);
+	backlight = of_parse_phandle(node, "backlight", 0);
+	if (backlight) {
+		ddata->extbldev = of_find_backlight_by_node(backlight);
+		of_node_put(backlight);
 
-	/* If no backlight device is found assume native backlight support */
-	if (backlight)
-		ddata->extbldev = backlight;
-	else
+		if (!ddata->extbldev)
+			return -EPROBE_DEFER;
+	} else {
+		/* assume native backlight support */
 		ddata->use_dsi_backlight = true;
+	}
 
 	/* TODO: ulps */
 

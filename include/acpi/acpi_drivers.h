@@ -64,14 +64,14 @@
    -------------------------------------------------------------------------- */
 
 
-/* ACPI PCI Interrupt Link */
+/* ACPI PCI Interrupt Link (pci_link.c) */
 
 int acpi_irq_penalty_init(void);
 int acpi_pci_link_allocate_irq(acpi_handle handle, int index, int *triggering,
 			       int *polarity, char **name);
 int acpi_pci_link_free_irq(acpi_handle handle);
 
-/* ACPI PCI Device Binding */
+/* ACPI PCI Device Binding (pci_bind.c) */
 
 struct pci_bus;
 
@@ -93,6 +93,14 @@ void pci_acpi_crs_quirks(void);
 #else
 static inline void pci_acpi_crs_quirks(void) { }
 #endif
+
+/* --------------------------------------------------------------------------
+                                    Processor
+   -------------------------------------------------------------------------- */
+
+#define ACPI_PROCESSOR_LIMIT_NONE	0x00
+#define ACPI_PROCESSOR_LIMIT_INCREMENT	0x01
+#define ACPI_PROCESSOR_LIMIT_DECREMENT	0x02
 
 /*--------------------------------------------------------------------------
                                   Dock Station

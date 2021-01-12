@@ -32,14 +32,14 @@ struct section {
 	GElf_Shdr sh;
 	struct rb_root symbol_tree;
 	struct list_head symbol_list;
-	struct list_head reloc_list;
-	struct section *base, *reloc;
+	struct list_head rela_list;
+	struct section *base, *rela;
 	struct symbol *sym;
 	Elf_Data *data;
 	char *name;
 	int idx;
 	unsigned int len;
-	bool changed, text, rodata, noinstr;
+	bool changed, text, rodata;
 };
 
 struct symbol {
@@ -56,39 +56,31 @@ struct symbol {
 	unsigned int len;
 	struct symbol *pfunc, *cfunc, *alias;
 	bool uaccess_safe;
-	bool static_call_tramp;
 };
 
-struct reloc {
+struct rela {
 	struct list_head list;
 	struct hlist_node hash;
-	union {
-		GElf_Rela rela;
-		GElf_Rel  rel;
-	};
+	GElf_Rela rela;
 	struct section *sec;
 	struct symbol *sym;
-	unsigned long offset;
 	unsigned int type;
+	unsigned long offset;
 	int addend;
-	int idx;
 	bool jump_table_start;
 };
-
-#define ELF_HASH_BITS	20
 
 struct elf {
 	Elf *elf;
 	GElf_Ehdr ehdr;
 	int fd;
-	bool changed;
 	char *name;
 	struct list_head sections;
-	DECLARE_HASHTABLE(symbol_hash, ELF_HASH_BITS);
-	DECLARE_HASHTABLE(symbol_name_hash, ELF_HASH_BITS);
-	DECLARE_HASHTABLE(section_hash, ELF_HASH_BITS);
-	DECLARE_HASHTABLE(section_name_hash, ELF_HASH_BITS);
-	DECLARE_HASHTABLE(reloc_hash, ELF_HASH_BITS);
+	DECLARE_HASHTABLE(symbol_hash, 20);
+	DECLARE_HASHTABLE(symbol_name_hash, 20);
+	DECLARE_HASHTABLE(section_hash, 16);
+	DECLARE_HASHTABLE(section_name_hash, 16);
+	DECLARE_HASHTABLE(rela_hash, 20);
 };
 
 #define OFFSET_STRIDE_BITS	4
@@ -115,34 +107,27 @@ static inline u32 sec_offset_hash(struct section *sec, unsigned long offset)
 	return ol;
 }
 
-static inline u32 reloc_hash(struct reloc *reloc)
+static inline u32 rela_hash(struct rela *rela)
 {
-	return sec_offset_hash(reloc->sec, reloc->offset);
+	return sec_offset_hash(rela->sec, rela->offset);
 }
 
-struct elf *elf_open_read(const char *name, int flags);
-struct section *elf_create_section(struct elf *elf, const char *name, unsigned int sh_flags, size_t entsize, int nr);
-struct section *elf_create_reloc_section(struct elf *elf, struct section *base, int reltype);
-void elf_add_reloc(struct elf *elf, struct reloc *reloc);
-int elf_write_insn(struct elf *elf, struct section *sec,
-		   unsigned long offset, unsigned int len,
-		   const char *insn);
-int elf_write_reloc(struct elf *elf, struct reloc *reloc);
-int elf_write(struct elf *elf);
-void elf_close(struct elf *elf);
-
-struct section *find_section_by_name(const struct elf *elf, const char *name);
+struct elf *elf_read(const char *name, int flags);
+struct section *find_section_by_name(struct elf *elf, const char *name);
 struct symbol *find_func_by_offset(struct section *sec, unsigned long offset);
 struct symbol *find_symbol_by_offset(struct section *sec, unsigned long offset);
-struct symbol *find_symbol_by_name(const struct elf *elf, const char *name);
-struct symbol *find_symbol_containing(const struct section *sec, unsigned long offset);
-struct reloc *find_reloc_by_dest(const struct elf *elf, struct section *sec, unsigned long offset);
-struct reloc *find_reloc_by_dest_range(const struct elf *elf, struct section *sec,
+struct symbol *find_symbol_by_name(struct elf *elf, const char *name);
+struct symbol *find_symbol_containing(struct section *sec, unsigned long offset);
+struct rela *find_rela_by_dest(struct elf *elf, struct section *sec, unsigned long offset);
+struct rela *find_rela_by_dest_range(struct elf *elf, struct section *sec,
 				     unsigned long offset, unsigned int len);
 struct symbol *find_func_containing(struct section *sec, unsigned long offset);
-void insn_to_reloc_sym_addend(struct section *sec, unsigned long offset,
-			      struct reloc *reloc);
-int elf_rebuild_reloc_section(struct elf *elf, struct section *sec);
+struct section *elf_create_section(struct elf *elf, const char *name, size_t
+				   entsize, int nr);
+struct section *elf_create_rela_section(struct elf *elf, struct section *base);
+int elf_rebuild_rela_section(struct section *sec);
+int elf_write(struct elf *elf);
+void elf_close(struct elf *elf);
 
 #define for_each_sec(file, sec)						\
 	list_for_each_entry(sec, &file->elf->sections, list)

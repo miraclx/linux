@@ -858,10 +858,3 @@ be misspelled d_alloc_anon().
 [should've been added in 2016] stale comment in finish_open() nonwithstanding,
 failure exits in ->atomic_open() instances should *NOT* fput() the file,
 no matter what.  Everything is handled by the caller.
-
----
-
-**mandatory**
-
-clone_private_mount() returns a longterm mount now, so the proper destructor of
-its result is kern_unmount() or kern_unmount_array().

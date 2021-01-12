@@ -4,7 +4,6 @@
  */
 
 #include <linux/device.h>
-#include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 #include <crypto/internal/hash.h>
 
@@ -48,7 +47,7 @@ static void qce_ahash_done(void *data)
 	dma_unmap_sg(qce->dev, &rctx->result_sg, 1, DMA_FROM_DEVICE);
 
 	memcpy(rctx->digest, result->auth_iv, digestsize);
-	if (req->result && rctx->last_blk)
+	if (req->result)
 		memcpy(req->result, result->auth_iv, digestsize);
 
 	rctx->byte_count[0] = cpu_to_be32(result->auth_byte_count[0]);
@@ -204,18 +203,10 @@ static int qce_import_common(struct ahash_request *req, u64 in_count,
 
 static int qce_ahash_import(struct ahash_request *req, const void *in)
 {
-	struct qce_sha_reqctx *rctx;
-	unsigned long flags;
-	bool hmac;
-	int ret;
-
-	ret = qce_ahash_init(req);
-	if (ret)
-		return ret;
-
-	rctx = ahash_request_ctx(req);
-	flags = rctx->flags;
-	hmac = IS_SHA_HMAC(flags);
+	struct qce_sha_reqctx *rctx = ahash_request_ctx(req);
+	unsigned long flags = rctx->flags;
+	bool hmac = IS_SHA_HMAC(flags);
+	int ret = -EINVAL;
 
 	if (IS_SHA1(flags) || IS_SHA1_HMAC(flags)) {
 		const struct sha1_state *state = in;
@@ -293,6 +284,8 @@ static int qce_ahash_update(struct ahash_request *req)
 	if (!sg_last)
 		return -EINVAL;
 
+	sg_mark_end(sg_last);
+
 	if (rctx->buflen) {
 		sg_init_table(rctx->sg, 2);
 		sg_set_buf(rctx->sg, rctx->tmpbuf, rctx->buflen);
@@ -312,12 +305,8 @@ static int qce_ahash_final(struct ahash_request *req)
 	struct qce_alg_template *tmpl = to_ahash_tmpl(req->base.tfm);
 	struct qce_device *qce = tmpl->qce;
 
-	if (!rctx->buflen) {
-		if (tmpl->hash_zero)
-			memcpy(req->result, tmpl->hash_zero,
-					tmpl->alg.ahash.halg.digestsize);
+	if (!rctx->buflen)
 		return 0;
-	}
 
 	rctx->last_blk = true;
 
@@ -348,13 +337,6 @@ static int qce_ahash_digest(struct ahash_request *req)
 	rctx->nbytes_orig = req->nbytes;
 	rctx->first_blk = true;
 	rctx->last_blk = true;
-
-	if (!rctx->nbytes_orig) {
-		if (tmpl->hash_zero)
-			memcpy(req->result, tmpl->hash_zero,
-					tmpl->alg.ahash.halg.digestsize);
-		return 0;
-	}
 
 	return qce->async_req_enqueue(tmpl->qce, &req->base);
 }
@@ -507,11 +489,6 @@ static int qce_ahash_register_one(const struct qce_ahash_def *def,
 		alg->setkey = qce_ahash_hmac_setkey;
 	alg->halg.digestsize = def->digestsize;
 	alg->halg.statesize = def->statesize;
-
-	if (IS_SHA1(def->flags))
-		tmpl->hash_zero = sha1_zero_message_hash;
-	else if (IS_SHA256(def->flags))
-		tmpl->hash_zero = sha256_zero_message_hash;
 
 	base = &alg->halg.base;
 	base->cra_blocksize = def->blocksize;

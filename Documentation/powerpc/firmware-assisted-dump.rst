@@ -344,7 +344,7 @@ Here is the list of files under powerpc debugfs:
 
 
 NOTE:
-      Please refer to Documentation/filesystems/debugfs.rst on
+      Please refer to Documentation/filesystems/debugfs.txt on
       how to mount the debugfs filesystem.
 
 

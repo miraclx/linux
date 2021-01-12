@@ -14,7 +14,7 @@
 };
 
 &ecspi2 {
-	cs-gpios = <&gpio4 22 GPIO_ACTIVE_LOW>;
+	cs-gpios = <&gpio4 22 GPIO_ACTIVE_HIGH>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_ecspi2>;
 	status = "okay";
@@ -54,13 +54,6 @@
 &qspi {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_qspi>;
-	status = "okay";
-};
-
-&wdog1 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_wdog>;
-	fsl,ext-reset-output;
 	status = "okay";
 };
 
@@ -111,12 +104,6 @@
 	pinctrl_reset_out: rstoutgrp {
 		fsl,pins = <
 			MX6UL_PAD_SNVS_TAMPER9__GPIO5_IO09      0x1b0b0
-		>;
-	};
-
-	pinctrl_wdog: wdoggrp {
-		fsl,pins = <
-			MX6UL_PAD_GPIO1_IO09__WDOG1_WDOG_ANY    0x18b0
 		>;
 	};
 };

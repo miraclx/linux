@@ -3,7 +3,6 @@
 #define __MACH_MMP_CLK_H
 
 #include <linux/clk-provider.h>
-#include <linux/pm_domain.h>
 #include <linux/clkdev.h>
 
 #define APBC_NO_BUS_CTRL	BIT(0)
@@ -17,7 +16,6 @@ struct mmp_clk_factor_masks {
 	unsigned int den_mask;
 	unsigned int num_shift;
 	unsigned int den_shift;
-	unsigned int enable_mask;
 };
 
 struct mmp_clk_factor_tbl {
@@ -253,13 +251,4 @@ void mmp_clk_init(struct device_node *np, struct mmp_clk_unit *unit,
 		int nr_clks);
 void mmp_clk_add(struct mmp_clk_unit *unit, unsigned int id,
 		struct clk *clk);
-
-/* Power islands */
-#define MMP_PM_DOMAIN_NO_DISABLE		BIT(0)
-
-struct generic_pm_domain *mmp_pm_domain_register(const char *name,
-		void __iomem *reg,
-		u32 power_on, u32 reset, u32 clock_enable,
-		unsigned int flags, spinlock_t *lock);
-
 #endif

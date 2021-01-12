@@ -45,8 +45,11 @@ int nvkm_firmware_load_name(const struct nvkm_subdev *subdev, const char *path,
 		}                                                              \
 	}                                                                      \
                                                                                \
-	if (_ret)                                                              \
+	if (_ret) {                                                            \
+		nvkm_error(_s, "failed to load firmware\n");                   \
 		_fwif = ERR_PTR(_ret);                                         \
+	}                                                                      \
+	                                                                       \
 	_fwif;                                                                 \
 })
 #endif

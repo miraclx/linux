@@ -98,7 +98,7 @@ static inline void VXGE_COMPLETE_VPATH_TX(struct vxge_fifo *fifo)
 {
 	struct sk_buff **skb_ptr = NULL;
 	struct sk_buff **temp;
-#define NR_SKB_COMPLETED 16
+#define NR_SKB_COMPLETED 128
 	struct sk_buff *completed[NR_SKB_COMPLETED];
 	int more;
 
@@ -241,10 +241,10 @@ static int vxge_rx_map(void *dtrh, struct vxge_ring *ring)
 	rx_priv = vxge_hw_ring_rxd_private_get(dtrh);
 
 	rx_priv->skb_data = rx_priv->skb->data;
-	dma_addr = dma_map_single(&ring->pdev->dev, rx_priv->skb_data,
-				  rx_priv->data_size, DMA_FROM_DEVICE);
+	dma_addr = pci_map_single(ring->pdev, rx_priv->skb_data,
+				rx_priv->data_size, PCI_DMA_FROMDEVICE);
 
-	if (unlikely(dma_mapping_error(&ring->pdev->dev, dma_addr))) {
+	if (unlikely(pci_dma_mapping_error(ring->pdev, dma_addr))) {
 		ring->stats.pci_map_fail++;
 		return -EIO;
 	}
@@ -323,8 +323,8 @@ vxge_rx_complete(struct vxge_ring *ring, struct sk_buff *skb, u16 vlan,
 static inline void vxge_re_pre_post(void *dtr, struct vxge_ring *ring,
 				    struct vxge_rx_priv *rx_priv)
 {
-	dma_sync_single_for_device(&ring->pdev->dev, rx_priv->data_dma,
-				   rx_priv->data_size, DMA_FROM_DEVICE);
+	pci_dma_sync_single_for_device(ring->pdev,
+		rx_priv->data_dma, rx_priv->data_size, PCI_DMA_FROMDEVICE);
 
 	vxge_hw_ring_rxd_1b_set(dtr, rx_priv->data_dma, rx_priv->data_size);
 	vxge_hw_ring_rxd_pre_post(ring->handle, dtr);
@@ -425,9 +425,8 @@ vxge_rx_1b_compl(struct __vxge_hw_ring *ringh, void *dtr,
 				if (!vxge_rx_map(dtr, ring)) {
 					skb_put(skb, pkt_length);
 
-					dma_unmap_single(&ring->pdev->dev,
-							 data_dma, data_size,
-							 DMA_FROM_DEVICE);
+					pci_unmap_single(ring->pdev, data_dma,
+						data_size, PCI_DMA_FROMDEVICE);
 
 					vxge_hw_ring_rxd_pre_post(ringh, dtr);
 					vxge_post(&dtr_cnt, &first_dtr, dtr,
@@ -459,9 +458,9 @@ vxge_rx_1b_compl(struct __vxge_hw_ring *ringh, void *dtr,
 				skb_reserve(skb_up,
 				    VXGE_HW_HEADER_ETHERNET_II_802_3_ALIGN);
 
-				dma_sync_single_for_cpu(&ring->pdev->dev,
-							data_dma, data_size,
-							DMA_FROM_DEVICE);
+				pci_dma_sync_single_for_cpu(ring->pdev,
+					data_dma, data_size,
+					PCI_DMA_FROMDEVICE);
 
 				vxge_debug_mem(VXGE_TRACE,
 					"%s: %s:%d  skb_up = %p",
@@ -586,13 +585,13 @@ vxge_xmit_compl(struct __vxge_hw_fifo *fifo_hw, void *dtr,
 		}
 
 		/*  for unfragmented skb */
-		dma_unmap_single(&fifo->pdev->dev, txd_priv->dma_buffers[i++],
-				 skb_headlen(skb), DMA_TO_DEVICE);
+		pci_unmap_single(fifo->pdev, txd_priv->dma_buffers[i++],
+				skb_headlen(skb), PCI_DMA_TODEVICE);
 
 		for (j = 0; j < frg_cnt; j++) {
-			dma_unmap_page(&fifo->pdev->dev,
-				       txd_priv->dma_buffers[i++],
-				       skb_frag_size(frag), DMA_TO_DEVICE);
+			pci_unmap_page(fifo->pdev,
+					txd_priv->dma_buffers[i++],
+					skb_frag_size(frag), PCI_DMA_TODEVICE);
 			frag += 1;
 		}
 
@@ -898,10 +897,10 @@ vxge_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	first_frg_len = skb_headlen(skb);
 
-	dma_pointer = dma_map_single(&fifo->pdev->dev, skb->data,
-				     first_frg_len, DMA_TO_DEVICE);
+	dma_pointer = pci_map_single(fifo->pdev, skb->data, first_frg_len,
+				PCI_DMA_TODEVICE);
 
-	if (unlikely(dma_mapping_error(&fifo->pdev->dev, dma_pointer))) {
+	if (unlikely(pci_dma_mapping_error(fifo->pdev, dma_pointer))) {
 		vxge_hw_fifo_txdl_free(fifo_hw, dtr);
 		fifo->stats.pci_map_fail++;
 		goto _exit0;
@@ -978,12 +977,12 @@ _exit1:
 	j = 0;
 	frag = &skb_shinfo(skb)->frags[0];
 
-	dma_unmap_single(&fifo->pdev->dev, txdl_priv->dma_buffers[j++],
-			 skb_headlen(skb), DMA_TO_DEVICE);
+	pci_unmap_single(fifo->pdev, txdl_priv->dma_buffers[j++],
+			skb_headlen(skb), PCI_DMA_TODEVICE);
 
 	for (; j < i; j++) {
-		dma_unmap_page(&fifo->pdev->dev, txdl_priv->dma_buffers[j],
-			       skb_frag_size(frag), DMA_TO_DEVICE);
+		pci_unmap_page(fifo->pdev, txdl_priv->dma_buffers[j],
+			skb_frag_size(frag), PCI_DMA_TODEVICE);
 		frag += 1;
 	}
 
@@ -1013,8 +1012,8 @@ vxge_rx_term(void *dtrh, enum vxge_hw_rxd_state state, void *userdata)
 	if (state != VXGE_HW_RXD_STATE_POSTED)
 		return;
 
-	dma_unmap_single(&ring->pdev->dev, rx_priv->data_dma,
-			 rx_priv->data_size, DMA_FROM_DEVICE);
+	pci_unmap_single(ring->pdev, rx_priv->data_dma,
+		rx_priv->data_size, PCI_DMA_FROMDEVICE);
 
 	dev_kfree_skb(rx_priv->skb);
 	rx_priv->skb_data = NULL;
@@ -1049,12 +1048,12 @@ vxge_tx_term(void *dtrh, enum vxge_hw_txdl_state state, void *userdata)
 	frag = &skb_shinfo(skb)->frags[0];
 
 	/*  for unfragmented skb */
-	dma_unmap_single(&fifo->pdev->dev, txd_priv->dma_buffers[i++],
-			 skb_headlen(skb), DMA_TO_DEVICE);
+	pci_unmap_single(fifo->pdev, txd_priv->dma_buffers[i++],
+		skb_headlen(skb), PCI_DMA_TODEVICE);
 
 	for (j = 0; j < frg_cnt; j++) {
-		dma_unmap_page(&fifo->pdev->dev, txd_priv->dma_buffers[i++],
-			       skb_frag_size(frag), DMA_TO_DEVICE);
+		pci_unmap_page(fifo->pdev, txd_priv->dma_buffers[i++],
+			       skb_frag_size(frag), PCI_DMA_TODEVICE);
 		frag += 1;
 	}
 
@@ -1076,7 +1075,7 @@ static int vxge_mac_list_del(struct vxge_vpath *vpath, struct macInfo *mac)
 	list_for_each_safe(entry, next, &vpath->mac_addr_list) {
 		if (((struct vxge_mac_addrs *)entry)->macaddr == del_mac) {
 			list_del(entry);
-			kfree(entry);
+			kfree((struct vxge_mac_addrs *)entry);
 			vpath->mac_addr_cnt--;
 
 			if (is_multicast_ether_addr(mac->macaddr))
@@ -1275,7 +1274,6 @@ _set_all_mcast:
 /**
  * vxge_set_mac_addr
  * @dev: pointer to the device structure
- * @p: socket info
  *
  * Update entry "0" (default MAC addr)
  */
@@ -1800,7 +1798,7 @@ static void vxge_reset(struct work_struct *work)
 
 /**
  * vxge_poll - Receive handler when Receive Polling is used.
- * @napi: pointer to the napi structure.
+ * @dev: pointer to the device structure.
  * @budget: Number of packets budgeted to be processed in this iteration.
  *
  * This function comes into picture only if Receive side is being handled
@@ -2914,7 +2912,7 @@ static void vxge_free_mac_add_list(struct vxge_vpath *vpath)
 
 	list_for_each_safe(entry, next, &vpath->mac_addr_list) {
 		list_del(entry);
-		kfree(entry);
+		kfree((struct vxge_mac_addrs *)entry);
 	}
 }
 
@@ -3097,7 +3095,7 @@ static int vxge_change_mtu(struct net_device *dev, int new_mtu)
 /**
  * vxge_get_stats64
  * @dev: pointer to the device structure
- * @net_stats: pointer to struct rtnl_link_stats64
+ * @stats: pointer to struct rtnl_link_stats64
  *
  */
 static void
@@ -3246,7 +3244,7 @@ static int vxge_hwtstamp_get(struct vxgedev *vdev, void __user *data)
 /**
  * vxge_ioctl
  * @dev: Device pointer.
- * @rq: An IOCTL specific structure, that can contain a pointer to
+ * @ifr: An IOCTL specific structure, that can contain a pointer to
  *       a proprietary structure used to pass information to the driver.
  * @cmd: This is used to distinguish between the different commands that
  *       can be passed to the IOCTL functions.
@@ -3270,7 +3268,6 @@ static int vxge_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 /**
  * vxge_tx_watchdog
  * @dev: pointer to net device structure
- * @txqueue: index of the hanging queue
  *
  * Watchdog for transmit side.
  * This function is triggered if the Tx Queue is stopped
@@ -4002,24 +3999,25 @@ static void vxge_print_parm(struct vxgedev *vdev, u64 vpath_mask)
 	}
 }
 
+#ifdef CONFIG_PM
 /**
  * vxge_pm_suspend - vxge power management suspend entry point
- * @dev_d: device pointer
  *
  */
-static int __maybe_unused vxge_pm_suspend(struct device *dev_d)
+static int vxge_pm_suspend(struct pci_dev *pdev, pm_message_t state)
 {
 	return -ENOSYS;
 }
 /**
  * vxge_pm_resume - vxge power management resume entry point
- * @dev_d: device pointer
  *
  */
-static int __maybe_unused vxge_pm_resume(struct device *dev_d)
+static int vxge_pm_resume(struct pci_dev *pdev)
 {
 	return -ENOSYS;
 }
+
+#endif
 
 /**
  * vxge_io_error_detected - called when PCI error is detected
@@ -4392,20 +4390,21 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 		goto _exit0;
 	}
 
-	if (!dma_set_mask(&pdev->dev, DMA_BIT_MASK(64))) {
+	if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(64))) {
 		vxge_debug_ll_config(VXGE_TRACE,
 			"%s : using 64bit DMA", __func__);
 
 		high_dma = 1;
 
-		if (dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64))) {
+		if (pci_set_consistent_dma_mask(pdev,
+						DMA_BIT_MASK(64))) {
 			vxge_debug_init(VXGE_ERR,
 				"%s : unable to obtain 64bit DMA for "
 				"consistent allocations", __func__);
 			ret = -ENOMEM;
 			goto _exit1;
 		}
-	} else if (!dma_set_mask(&pdev->dev, DMA_BIT_MASK(32))) {
+	} else if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(32))) {
 		vxge_debug_ll_config(VXGE_TRACE,
 			"%s : using 32bit DMA", __func__);
 	} else {
@@ -4543,7 +4542,7 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 	 * due to the fact that HWTS is using the FCS as the location of the
 	 * timestamp.  The HW FCS checking will still correctly determine if
 	 * there is a valid checksum, and the FCS is being removed by the driver
-	 * anyway.  So no functionality is being lost.  Since it is always
+	 * anyway.  So no fucntionality is being lost.  Since it is always
 	 * enabled, we now simply use the ioctl call to set whether or not the
 	 * driver should be paying attention to the HWTS.
 	 */
@@ -4797,14 +4796,15 @@ static const struct pci_error_handlers vxge_err_handler = {
 	.resume = vxge_io_resume,
 };
 
-static SIMPLE_DEV_PM_OPS(vxge_pm_ops, vxge_pm_suspend, vxge_pm_resume);
-
 static struct pci_driver vxge_driver = {
 	.name = VXGE_DRIVER_NAME,
 	.id_table = vxge_id_table,
 	.probe = vxge_probe,
 	.remove = vxge_remove,
-	.driver.pm = &vxge_pm_ops,
+#ifdef CONFIG_PM
+	.suspend = vxge_pm_suspend,
+	.resume = vxge_pm_resume,
+#endif
 	.err_handler = &vxge_err_handler,
 };
 

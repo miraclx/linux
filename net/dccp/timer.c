@@ -85,7 +85,7 @@ static void dccp_retransmit_timer(struct sock *sk)
 	struct inet_connection_sock *icsk = inet_csk(sk);
 
 	/*
-	 * More than 4MSL (8 minutes) has passed, a RESET(aborted) was
+	 * More than than 4MSL (8 minutes) has passed, a RESET(aborted) was
 	 * sent, no need to retransmit, this sock is dead.
 	 */
 	if (dccp_write_timeout(sk))
@@ -176,6 +176,7 @@ static void dccp_delack_timer(struct timer_list *t)
 	bh_lock_sock(sk);
 	if (sock_owned_by_user(sk)) {
 		/* Try again later. */
+		icsk->icsk_ack.blocked = 1;
 		__NET_INC_STATS(sock_net(sk), LINUX_MIB_DELAYEDACKLOCKED);
 		sk_reset_timer(sk, &icsk->icsk_delack_timer,
 			       jiffies + TCP_DELACK_MIN);
@@ -215,14 +216,11 @@ out:
 
 /**
  * dccp_write_xmitlet  -  Workhorse for CCID packet dequeueing interface
- * @t: pointer to the tasklet associated with this handler
- *
  * See the comments above %ccid_dequeueing_decision for supported modes.
  */
-static void dccp_write_xmitlet(struct tasklet_struct *t)
+static void dccp_write_xmitlet(unsigned long data)
 {
-	struct dccp_sock *dp = from_tasklet(dp, t, dccps_xmitlet);
-	struct sock *sk = &dp->dccps_inet_connection.icsk_inet.sk;
+	struct sock *sk = (struct sock *)data;
 
 	bh_lock_sock(sk);
 	if (sock_owned_by_user(sk))
@@ -236,15 +234,16 @@ static void dccp_write_xmitlet(struct tasklet_struct *t)
 static void dccp_write_xmit_timer(struct timer_list *t)
 {
 	struct dccp_sock *dp = from_timer(dp, t, dccps_xmit_timer);
+	struct sock *sk = &dp->dccps_inet_connection.icsk_inet.sk;
 
-	dccp_write_xmitlet(&dp->dccps_xmitlet);
+	dccp_write_xmitlet((unsigned long)sk);
 }
 
 void dccp_init_xmit_timers(struct sock *sk)
 {
 	struct dccp_sock *dp = dccp_sk(sk);
 
-	tasklet_setup(&dp->dccps_xmitlet, dccp_write_xmitlet);
+	tasklet_init(&dp->dccps_xmitlet, dccp_write_xmitlet, (unsigned long)sk);
 	timer_setup(&dp->dccps_xmit_timer, dccp_write_xmit_timer, 0);
 	inet_csk_init_xmit_timers(sk, &dccp_write_timer, &dccp_delack_timer,
 				  &dccp_keepalive_timer);

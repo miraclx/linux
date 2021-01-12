@@ -4,6 +4,7 @@
  */
 
 #include <linux/clk.h>
+#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/delay.h>
@@ -263,7 +264,6 @@ struct brcmnand_controller {
 	const unsigned int	*block_sizes;
 	unsigned int		max_page_size;
 	const unsigned int	*page_sizes;
-	unsigned int		page_size_shift;
 	unsigned int		max_oob;
 	u32			features;
 
@@ -338,38 +338,8 @@ enum brcmnand_reg {
 	BRCMNAND_FC_BASE,
 };
 
-/* BRCMNAND v2.1-v2.2 */
-static const u16 brcmnand_regs_v21[] = {
-	[BRCMNAND_CMD_START]		=  0x04,
-	[BRCMNAND_CMD_EXT_ADDRESS]	=  0x08,
-	[BRCMNAND_CMD_ADDRESS]		=  0x0c,
-	[BRCMNAND_INTFC_STATUS]		=  0x5c,
-	[BRCMNAND_CS_SELECT]		=  0x14,
-	[BRCMNAND_CS_XOR]		=  0x18,
-	[BRCMNAND_LL_OP]		=     0,
-	[BRCMNAND_CS0_BASE]		=  0x40,
-	[BRCMNAND_CS1_BASE]		=     0,
-	[BRCMNAND_CORR_THRESHOLD]	=     0,
-	[BRCMNAND_CORR_THRESHOLD_EXT]	=     0,
-	[BRCMNAND_UNCORR_COUNT]		=     0,
-	[BRCMNAND_CORR_COUNT]		=     0,
-	[BRCMNAND_CORR_EXT_ADDR]	=  0x60,
-	[BRCMNAND_CORR_ADDR]		=  0x64,
-	[BRCMNAND_UNCORR_EXT_ADDR]	=  0x68,
-	[BRCMNAND_UNCORR_ADDR]		=  0x6c,
-	[BRCMNAND_SEMAPHORE]		=  0x50,
-	[BRCMNAND_ID]			=  0x54,
-	[BRCMNAND_ID_EXT]		=     0,
-	[BRCMNAND_LL_RDATA]		=     0,
-	[BRCMNAND_OOB_READ_BASE]	=  0x20,
-	[BRCMNAND_OOB_READ_10_BASE]	=     0,
-	[BRCMNAND_OOB_WRITE_BASE]	=  0x30,
-	[BRCMNAND_OOB_WRITE_10_BASE]	=     0,
-	[BRCMNAND_FC_BASE]		= 0x200,
-};
-
-/* BRCMNAND v3.3-v4.0 */
-static const u16 brcmnand_regs_v33[] = {
+/* BRCMNAND v4.0 */
+static const u16 brcmnand_regs_v40[] = {
 	[BRCMNAND_CMD_START]		=  0x04,
 	[BRCMNAND_CMD_EXT_ADDRESS]	=  0x08,
 	[BRCMNAND_CMD_ADDRESS]		=  0x0c,
@@ -566,9 +536,6 @@ enum {
 	CFG_BUS_WIDTH			= BIT(CFG_BUS_WIDTH_SHIFT),
 	CFG_DEVICE_SIZE_SHIFT		= 24,
 
-	/* Only for v2.1 */
-	CFG_PAGE_SIZE_SHIFT_v2_1	= 30,
-
 	/* Only for pre-v7.1 (with no CFG_EXT register) */
 	CFG_PAGE_SIZE_SHIFT		= 20,
 	CFG_BLK_SIZE_SHIFT		= 28,
@@ -604,16 +571,12 @@ static int brcmnand_revision_init(struct brcmnand_controller *ctrl)
 {
 	static const unsigned int block_sizes_v6[] = { 8, 16, 128, 256, 512, 1024, 2048, 0 };
 	static const unsigned int block_sizes_v4[] = { 16, 128, 8, 512, 256, 1024, 2048, 0 };
-	static const unsigned int block_sizes_v2_2[] = { 16, 128, 8, 512, 256, 0 };
-	static const unsigned int block_sizes_v2_1[] = { 16, 128, 8, 512, 0 };
-	static const unsigned int page_sizes_v3_4[] = { 512, 2048, 4096, 8192, 0 };
-	static const unsigned int page_sizes_v2_2[] = { 512, 2048, 4096, 0 };
-	static const unsigned int page_sizes_v2_1[] = { 512, 2048, 0 };
+	static const unsigned int page_sizes[] = { 512, 2048, 4096, 8192, 0 };
 
 	ctrl->nand_version = nand_readreg(ctrl, 0) & 0xffff;
 
-	/* Only support v2.1+ */
-	if (ctrl->nand_version < 0x0201) {
+	/* Only support v4.0+? */
+	if (ctrl->nand_version < 0x0400) {
 		dev_err(ctrl->dev, "version %#x not supported\n",
 			ctrl->nand_version);
 		return -ENODEV;
@@ -628,10 +591,8 @@ static int brcmnand_revision_init(struct brcmnand_controller *ctrl)
 		ctrl->reg_offsets = brcmnand_regs_v60;
 	else if (ctrl->nand_version >= 0x0500)
 		ctrl->reg_offsets = brcmnand_regs_v50;
-	else if (ctrl->nand_version >= 0x0303)
-		ctrl->reg_offsets = brcmnand_regs_v33;
-	else if (ctrl->nand_version >= 0x0201)
-		ctrl->reg_offsets = brcmnand_regs_v21;
+	else if (ctrl->nand_version >= 0x0400)
+		ctrl->reg_offsets = brcmnand_regs_v40;
 
 	/* Chip-select stride */
 	if (ctrl->nand_version >= 0x0701)
@@ -645,9 +606,8 @@ static int brcmnand_revision_init(struct brcmnand_controller *ctrl)
 	} else {
 		ctrl->cs_offsets = brcmnand_cs_offsets;
 
-		/* v3.3-5.0 have a different CS0 offset layout */
-		if (ctrl->nand_version >= 0x0303 &&
-		    ctrl->nand_version <= 0x0500)
+		/* v5.0 and earlier has a different CS0 offset layout */
+		if (ctrl->nand_version <= 0x0500)
 			ctrl->cs0_offsets = brcmnand_cs_offsets_cs0;
 	}
 
@@ -657,32 +617,14 @@ static int brcmnand_revision_init(struct brcmnand_controller *ctrl)
 		ctrl->max_page_size = 16 * 1024;
 		ctrl->max_block_size = 2 * 1024 * 1024;
 	} else {
-		if (ctrl->nand_version >= 0x0304)
-			ctrl->page_sizes = page_sizes_v3_4;
-		else if (ctrl->nand_version >= 0x0202)
-			ctrl->page_sizes = page_sizes_v2_2;
-		else
-			ctrl->page_sizes = page_sizes_v2_1;
-
-		if (ctrl->nand_version >= 0x0202)
-			ctrl->page_size_shift = CFG_PAGE_SIZE_SHIFT;
-		else
-			ctrl->page_size_shift = CFG_PAGE_SIZE_SHIFT_v2_1;
-
+		ctrl->page_sizes = page_sizes;
 		if (ctrl->nand_version >= 0x0600)
 			ctrl->block_sizes = block_sizes_v6;
-		else if (ctrl->nand_version >= 0x0400)
-			ctrl->block_sizes = block_sizes_v4;
-		else if (ctrl->nand_version >= 0x0202)
-			ctrl->block_sizes = block_sizes_v2_2;
 		else
-			ctrl->block_sizes = block_sizes_v2_1;
+			ctrl->block_sizes = block_sizes_v4;
 
 		if (ctrl->nand_version < 0x0400) {
-			if (ctrl->nand_version < 0x0202)
-				ctrl->max_page_size = 2048;
-			else
-				ctrl->max_page_size = 4096;
+			ctrl->max_page_size = 4096;
 			ctrl->max_block_size = 512 * 1024;
 		}
 	}
@@ -868,9 +810,6 @@ static void brcmnand_wr_corr_thresh(struct brcmnand_host *host, u8 val)
 	enum brcmnand_reg reg = BRCMNAND_CORR_THRESHOLD;
 	int cs = host->cs;
 
-	if (!ctrl->reg_offsets[reg])
-		return;
-
 	if (ctrl->nand_version == 0x0702)
 		bits = 7;
 	else if (ctrl->nand_version >= 0x0600)
@@ -929,10 +868,8 @@ static inline u32 brcmnand_spare_area_mask(struct brcmnand_controller *ctrl)
 		return GENMASK(7, 0);
 	else if (ctrl->nand_version >= 0x0600)
 		return GENMASK(6, 0);
-	else if (ctrl->nand_version >= 0x0303)
-		return GENMASK(5, 0);
 	else
-		return GENMASK(4, 0);
+		return GENMASK(5, 0);
 }
 
 #define NAND_ACC_CONTROL_ECC_SHIFT	16
@@ -1163,29 +1100,29 @@ static int brcmnand_hamming_ooblayout_free(struct mtd_info *mtd, int section,
 	struct brcmnand_cfg *cfg = &host->hwcfg;
 	int sas = cfg->spare_area_size << cfg->sector_size_1k;
 	int sectors = cfg->page_size / (512 << cfg->sector_size_1k);
-	u32 next;
 
-	if (section > sectors)
+	if (section >= sectors * 2)
 		return -ERANGE;
 
-	next = (section * sas);
-	if (section < sectors)
-		next += 6;
+	oobregion->offset = (section / 2) * sas;
 
-	if (section) {
-		oobregion->offset = ((section - 1) * sas) + 9;
+	if (section & 1) {
+		oobregion->offset += 9;
+		oobregion->length = 7;
 	} else {
-		if (cfg->page_size > 512) {
-			/* Large page NAND uses first 2 bytes for BBI */
-			oobregion->offset = 2;
-		} else {
-			/* Small page NAND uses last byte before ECC for BBI */
-			oobregion->offset = 0;
-			next--;
+		oobregion->length = 6;
+
+		/* First sector of each page may have BBI */
+		if (!section) {
+			/*
+			 * Small-page NAND use byte 6 for BBI while large-page
+			 * NAND use byte 0.
+			 */
+			if (cfg->page_size > 512)
+				oobregion->offset++;
+			oobregion->length--;
 		}
 	}
-
-	oobregion->length = next - oobregion->offset;
 
 	return 0;
 }
@@ -1846,7 +1783,7 @@ static void brcmnand_write_buf(struct nand_chip *chip, const uint8_t *buf,
 	}
 }
 
-/*
+/**
  *  Kick EDU engine
  */
 static int brcmnand_edu_trans(struct brcmnand_host *host, u64 addr, u32 *buf,
@@ -1918,26 +1855,10 @@ static int brcmnand_edu_trans(struct brcmnand_host *host, u64 addr, u32 *buf,
 	edu_writel(ctrl, EDU_STOP, 0); /* force stop */
 	edu_readl(ctrl, EDU_STOP);
 
-	if (!ret && edu_cmd == EDU_CMD_READ) {
-		u64 err_addr = 0;
-
-		/*
-		 * check for ECC errors here, subpage ECC errors are
-		 * retained in ECC error address register
-		 */
-		err_addr = brcmnand_get_uncorrecc_addr(ctrl);
-		if (!err_addr) {
-			err_addr = brcmnand_get_correcc_addr(ctrl);
-			if (err_addr)
-				ret = -EUCLEAN;
-		} else
-			ret = -EBADMSG;
-	}
-
 	return ret;
 }
 
-/*
+/**
  * Construct a FLASH_DMA descriptor as part of a linked list. You must know the
  * following ahead of time:
  *  - Is this descriptor the beginning or end of a linked list?
@@ -1970,7 +1891,7 @@ static int brcmnand_fill_dma_desc(struct brcmnand_host *host,
 	return 0;
 }
 
-/*
+/**
  * Kick the FLASH_DMA engine, with a given DMA descriptor
  */
 static void brcmnand_dma_run(struct brcmnand_host *host, dma_addr_t desc)
@@ -2097,31 +2018,28 @@ static int brcmnand_read_by_pio(struct mtd_info *mtd, struct nand_chip *chip,
 static int brcmstb_nand_verify_erased_page(struct mtd_info *mtd,
 		  struct nand_chip *chip, void *buf, u64 addr)
 {
-	struct mtd_oob_region ecc;
-	int i;
+	int i, sas;
+	void *oob = chip->oob_poi;
 	int bitflips = 0;
 	int page = addr >> chip->page_shift;
 	int ret;
-	void *ecc_bytes;
 	void *ecc_chunk;
 
 	if (!buf)
 		buf = nand_get_data_buf(chip);
+
+	sas = mtd->oobsize / chip->ecc.steps;
 
 	/* read without ecc for verification */
 	ret = chip->ecc.read_page_raw(chip, buf, true, page);
 	if (ret)
 		return ret;
 
-	for (i = 0; i < chip->ecc.steps; i++) {
+	for (i = 0; i < chip->ecc.steps; i++, oob += sas) {
 		ecc_chunk = buf + chip->ecc.size * i;
-
-		mtd_ooblayout_ecc(mtd, i, &ecc);
-		ecc_bytes = chip->oob_poi + ecc.offset;
-
-		ret = nand_check_erased_ecc_chunk(ecc_chunk, chip->ecc.size,
-						  ecc_bytes, ecc.length,
-						  NULL, 0,
+		ret = nand_check_erased_ecc_chunk(ecc_chunk,
+						  chip->ecc.size,
+						  oob, sas, NULL, 0,
 						  chip->ecc.strength);
 		if (ret < 0)
 			return ret;
@@ -2140,7 +2058,6 @@ static int brcmnand_read(struct mtd_info *mtd, struct nand_chip *chip,
 	u64 err_addr = 0;
 	int err;
 	bool retry = true;
-	bool edu_err = false;
 
 	dev_dbg(ctrl->dev, "read %llx -> %p\n", (unsigned long long)addr, buf);
 
@@ -2158,10 +2075,6 @@ try_dmaread:
 			else
 				return -EIO;
 		}
-
-		if (has_edu(ctrl) && err_addr)
-			edu_err = true;
-
 	} else {
 		if (oob)
 			memset(oob, 0x99, mtd->oobsize);
@@ -2208,11 +2121,6 @@ try_dmaread:
 
 	if (mtd_is_bitflip(err)) {
 		unsigned int corrected = brcmnand_count_corrected(ctrl);
-
-		/* in case of EDU correctable error we read again using PIO */
-		if (edu_err)
-			err = brcmnand_read_by_pio(mtd, chip, addr, trans, buf,
-						   oob, &err_addr);
 
 		dev_dbg(ctrl->dev, "corrected error at 0x%llx\n",
 			(unsigned long long)err_addr);
@@ -2469,7 +2377,7 @@ static int brcmnand_set_cfg(struct brcmnand_host *host,
 		(!!(cfg->device_width == 16) << CFG_BUS_WIDTH_SHIFT) |
 		(device_size << CFG_DEVICE_SIZE_SHIFT);
 	if (cfg_offs == cfg_ext_offs) {
-		tmp |= (page_size << ctrl->page_size_shift) |
+		tmp |= (page_size << CFG_PAGE_SIZE_SHIFT) |
 		       (block_size << CFG_BLK_SIZE_SHIFT);
 		nand_writereg(ctrl, cfg_offs, tmp);
 	} else {
@@ -2481,11 +2389,9 @@ static int brcmnand_set_cfg(struct brcmnand_host *host,
 
 	tmp = nand_readreg(ctrl, acc_control_offs);
 	tmp &= ~brcmnand_ecc_level_mask(ctrl);
+	tmp |= cfg->ecc_level << NAND_ACC_CONTROL_ECC_SHIFT;
 	tmp &= ~brcmnand_spare_area_mask(ctrl);
-	if (ctrl->nand_version >= 0x0302) {
-		tmp |= cfg->ecc_level << NAND_ACC_CONTROL_ECC_SHIFT;
-		tmp |= cfg->spare_area_size;
-	}
+	tmp |= cfg->spare_area_size;
 	nand_writereg(ctrl, acc_control_offs, tmp);
 
 	brcmnand_set_sector_size_1k(host, cfg->sector_size_1k);
@@ -2532,8 +2438,6 @@ static int brcmnand_setup_dev(struct brcmnand_host *host)
 {
 	struct mtd_info *mtd = nand_to_mtd(&host->chip);
 	struct nand_chip *chip = &host->chip;
-	const struct nand_ecc_props *requirements =
-		nanddev_get_ecc_requirements(&chip->base);
 	struct brcmnand_controller *ctrl = host->ctrl;
 	struct brcmnand_cfg *cfg = &host->hwcfg;
 	char msg[128];
@@ -2567,34 +2471,34 @@ static int brcmnand_setup_dev(struct brcmnand_host *host)
 	cfg->col_adr_bytes = 2;
 	cfg->blk_adr_bytes = get_blk_adr_bytes(mtd->size, mtd->writesize);
 
-	if (chip->ecc.engine_type != NAND_ECC_ENGINE_TYPE_ON_HOST) {
+	if (chip->ecc.mode != NAND_ECC_HW) {
 		dev_err(ctrl->dev, "only HW ECC supported; selected: %d\n",
-			chip->ecc.engine_type);
+			chip->ecc.mode);
 		return -EINVAL;
 	}
 
-	if (chip->ecc.algo == NAND_ECC_ALGO_UNKNOWN) {
+	if (chip->ecc.algo == NAND_ECC_UNKNOWN) {
 		if (chip->ecc.strength == 1 && chip->ecc.size == 512)
 			/* Default to Hamming for 1-bit ECC, if unspecified */
-			chip->ecc.algo = NAND_ECC_ALGO_HAMMING;
+			chip->ecc.algo = NAND_ECC_HAMMING;
 		else
 			/* Otherwise, BCH */
-			chip->ecc.algo = NAND_ECC_ALGO_BCH;
+			chip->ecc.algo = NAND_ECC_BCH;
 	}
 
-	if (chip->ecc.algo == NAND_ECC_ALGO_HAMMING &&
-	    (chip->ecc.strength != 1 || chip->ecc.size != 512)) {
+	if (chip->ecc.algo == NAND_ECC_HAMMING && (chip->ecc.strength != 1 ||
+						   chip->ecc.size != 512)) {
 		dev_err(ctrl->dev, "invalid Hamming params: %d bits per %d bytes\n",
 			chip->ecc.strength, chip->ecc.size);
 		return -EINVAL;
 	}
 
-	if (chip->ecc.engine_type != NAND_ECC_ENGINE_TYPE_NONE &&
+	if (chip->ecc.mode != NAND_ECC_NONE &&
 	    (!chip->ecc.size || !chip->ecc.strength)) {
-		if (requirements->step_size && requirements->strength) {
+		if (chip->base.eccreq.step_size && chip->base.eccreq.strength) {
 			/* use detected ECC parameters */
-			chip->ecc.size = requirements->step_size;
-			chip->ecc.strength = requirements->strength;
+			chip->ecc.size = chip->base.eccreq.step_size;
+			chip->ecc.strength = chip->base.eccreq.strength;
 			dev_info(ctrl->dev, "Using ECC step-size %d, strength %d\n",
 				chip->ecc.size, chip->ecc.strength);
 		}
@@ -2602,7 +2506,7 @@ static int brcmnand_setup_dev(struct brcmnand_host *host)
 
 	switch (chip->ecc.size) {
 	case 512:
-		if (chip->ecc.algo == NAND_ECC_ALGO_HAMMING)
+		if (chip->ecc.algo == NAND_ECC_HAMMING)
 			cfg->ecc_level = 15;
 		else
 			cfg->ecc_level = chip->ecc.strength;
@@ -2673,7 +2577,7 @@ static int brcmnand_attach_chip(struct nand_chip *chip)
 	 * to/from, and have nand_base pass us a bounce buffer instead, as
 	 * needed.
 	 */
-	chip->options |= NAND_USES_DMA;
+	chip->options |= NAND_USE_BOUNCE_BUFFER;
 
 	if (chip->bbt_options & NAND_BBT_USE_FLASH)
 		chip->bbt_options |= NAND_BBT_NO_OOB;
@@ -2730,7 +2634,7 @@ static int brcmnand_init_cs(struct brcmnand_host *host, struct device_node *dn)
 	chip->legacy.read_buf = brcmnand_read_buf;
 	chip->legacy.write_buf = brcmnand_write_buf;
 
-	chip->ecc.engine_type = NAND_ECC_ENGINE_TYPE_ON_HOST;
+	chip->ecc.mode = NAND_ECC_HW;
 	chip->ecc.read_page = brcmnand_read_page;
 	chip->ecc.write_page = brcmnand_write_page;
 	chip->ecc.read_page_raw = brcmnand_read_page_raw;
@@ -2860,8 +2764,6 @@ const struct dev_pm_ops brcmnand_pm_ops = {
 EXPORT_SYMBOL_GPL(brcmnand_pm_ops);
 
 static const struct of_device_id brcmnand_of_match[] = {
-	{ .compatible = "brcm,brcmnand-v2.1" },
-	{ .compatible = "brcm,brcmnand-v2.2" },
 	{ .compatible = "brcm,brcmnand-v4.0" },
 	{ .compatible = "brcm,brcmnand-v5.0" },
 	{ .compatible = "brcm,brcmnand-v6.0" },
@@ -3051,9 +2953,8 @@ int brcmnand_probe(struct platform_device *pdev, struct brcmnand_soc *soc)
 		if (ret < 0)
 			goto err;
 
-		if (has_edu(ctrl))
-			/* set edu transfer function to call */
-			ctrl->dma_trans = brcmnand_edu_trans;
+		/* set edu transfer function to call */
+		ctrl->dma_trans = brcmnand_edu_trans;
 	}
 
 	/* Disable automatic device ID config, direct addressing */
@@ -3144,15 +3045,9 @@ int brcmnand_remove(struct platform_device *pdev)
 {
 	struct brcmnand_controller *ctrl = dev_get_drvdata(&pdev->dev);
 	struct brcmnand_host *host;
-	struct nand_chip *chip;
-	int ret;
 
-	list_for_each_entry(host, &ctrl->host_list, node) {
-		chip = &host->chip;
-		ret = mtd_device_unregister(nand_to_mtd(chip));
-		WARN_ON(ret);
-		nand_cleanup(chip);
-	}
+	list_for_each_entry(host, &ctrl->host_list, node)
+		nand_release(&host->chip);
 
 	clk_disable_unprepare(ctrl->clk);
 

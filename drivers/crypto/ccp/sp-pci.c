@@ -252,19 +252,23 @@ static void sp_pci_remove(struct pci_dev *pdev)
 	sp_free_irqs(sp);
 }
 
-static int __maybe_unused sp_pci_suspend(struct device *dev)
+#ifdef CONFIG_PM
+static int sp_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 {
+	struct device *dev = &pdev->dev;
 	struct sp_device *sp = dev_get_drvdata(dev);
 
-	return sp_suspend(sp);
+	return sp_suspend(sp, state);
 }
 
-static int __maybe_unused sp_pci_resume(struct device *dev)
+static int sp_pci_resume(struct pci_dev *pdev)
 {
+	struct device *dev = &pdev->dev;
 	struct sp_device *sp = dev_get_drvdata(dev);
 
 	return sp_resume(sp);
 }
+#endif
 
 #ifdef CONFIG_CRYPTO_DEV_SP_PSP
 static const struct sev_vdata sevv1 = {
@@ -361,14 +365,15 @@ static const struct pci_device_id sp_pci_table[] = {
 };
 MODULE_DEVICE_TABLE(pci, sp_pci_table);
 
-static SIMPLE_DEV_PM_OPS(sp_pci_pm_ops, sp_pci_suspend, sp_pci_resume);
-
 static struct pci_driver sp_pci_driver = {
 	.name = "ccp",
 	.id_table = sp_pci_table,
 	.probe = sp_pci_probe,
 	.remove = sp_pci_remove,
-	.driver.pm = &sp_pci_pm_ops,
+#ifdef CONFIG_PM
+	.suspend = sp_pci_suspend,
+	.resume = sp_pci_resume,
+#endif
 };
 
 int sp_pci_init(void)

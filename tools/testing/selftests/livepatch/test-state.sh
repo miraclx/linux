@@ -10,10 +10,10 @@ MOD_LIVEPATCH3=test_klp_state3
 
 setup_config
 
+# TEST: Loading and removing a module that modifies the system state
 
-# Load and remove a module that modifies the system state
-
-start_test "system state modification"
+echo -n "TEST: system state modification ... "
+dmesg -C
 
 load_lp $MOD_LIVEPATCH
 disable_lp $MOD_LIVEPATCH
@@ -41,9 +41,10 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 % rmmod $MOD_LIVEPATCH"
 
 
-# Take over system state change by a cumulative patch
+# TEST: Take over system state change by a cumulative patch
 
-start_test "taking over system state modification"
+echo -n "TEST: taking over system state modification ... "
+dmesg -C
 
 load_lp $MOD_LIVEPATCH
 load_lp $MOD_LIVEPATCH2
@@ -84,9 +85,10 @@ livepatch: '$MOD_LIVEPATCH2': unpatching complete
 % rmmod $MOD_LIVEPATCH2"
 
 
-# Take over system state change by a cumulative patch
+# TEST: Take over system state change by a cumulative patch
 
-start_test "compatible cumulative livepatches"
+echo -n "TEST: compatible cumulative livepatches ... "
+dmesg -C
 
 load_lp $MOD_LIVEPATCH2
 load_lp $MOD_LIVEPATCH3
@@ -140,9 +142,10 @@ livepatch: '$MOD_LIVEPATCH2': unpatching complete
 % rmmod $MOD_LIVEPATCH3"
 
 
-# Failure caused by incompatible cumulative livepatches
+# TEST: Failure caused by incompatible cumulative livepatches
 
-start_test "incompatible cumulative livepatches"
+echo -n "TEST: incompatible cumulative livepatches ... "
+dmesg -C
 
 load_lp $MOD_LIVEPATCH2
 load_failing_mod $MOD_LIVEPATCH

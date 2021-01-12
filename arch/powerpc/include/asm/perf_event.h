@@ -12,8 +12,6 @@
 
 #ifdef CONFIG_PPC_PERF_CTRS
 #include <asm/perf_event_server.h>
-#else
-static inline bool is_sier_available(void) { return false; }
 #endif
 
 #ifdef CONFIG_FSL_EMB_PERF_EVENT
@@ -40,7 +38,4 @@ static inline bool is_sier_available(void) { return false; }
 
 /* To support perf_regs sier update */
 extern bool is_sier_available(void);
-/* To define perf extended regs mask value */
-extern u64 PERF_REG_EXTENDED_MASK;
-#define PERF_REG_EXTENDED_MASK	PERF_REG_EXTENDED_MASK
 #endif

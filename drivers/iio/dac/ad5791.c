@@ -76,11 +76,9 @@ struct ad5791_chip_info {
  * @chip_info:		chip model specific constants
  * @vref_mv:		actual reference voltage used
  * @vref_neg_mv:	voltage of the negative supply
- * @ctrl:		control regster cache
- * @pwr_down_mode:	current power down mode
- * @pwr_down:		true if device is powered down
- * @data:		spi transfer buffers
+ * @pwr_down_mode	current power down mode
  */
+
 struct ad5791_state {
 	struct spi_device		*spi;
 	struct regulator		*reg_vdd;
@@ -97,6 +95,10 @@ struct ad5791_state {
 		u8 d8[4];
 	} data[3] ____cacheline_aligned;
 };
+
+/**
+ * ad5791_supported_device_ids:
+ */
 
 enum ad5791_supported_device_ids {
 	ID_AD5760,
@@ -407,6 +409,7 @@ static int ad5791_probe(struct spi_device *spi)
 		goto error_disable_reg_neg;
 
 	spi_set_drvdata(spi, indio_dev);
+	indio_dev->dev.parent = &spi->dev;
 	indio_dev->info = &ad5791_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels

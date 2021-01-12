@@ -5,7 +5,6 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/workqueue.h>
 
@@ -110,7 +109,7 @@ static void pdr_locator_del_server(struct qmi_handle *qmi,
 	pdr->locator_addr.sq_port = 0;
 }
 
-static const struct qmi_ops pdr_locator_ops = {
+static struct qmi_ops pdr_locator_ops = {
 	.new_server = pdr_locator_new_server,
 	.del_server = pdr_locator_del_server,
 };
@@ -155,6 +154,10 @@ static int pdr_register_listener(struct pdr_handle *pdr,
 		       pds->service_path, resp.resp.error);
 		return ret;
 	}
+
+	if ((int)resp.curr_state < INT_MIN || (int)resp.curr_state > INT_MAX)
+		pr_err("PDR: %s notification state invalid: 0x%x\n",
+		       pds->service_path, resp.curr_state);
 
 	pds->state = resp.curr_state;
 
@@ -238,7 +241,7 @@ static void pdr_notifier_del_server(struct qmi_handle *qmi,
 	mutex_unlock(&pdr->list_lock);
 }
 
-static const struct qmi_ops pdr_notifier_ops = {
+static struct qmi_ops pdr_notifier_ops = {
 	.new_server = pdr_notifier_new_server,
 	.del_server = pdr_notifier_del_server,
 };
@@ -279,14 +282,12 @@ static void pdr_indack_work(struct work_struct *work)
 
 	list_for_each_entry_safe(ind, tmp, &pdr->indack_list, node) {
 		pds = ind->pds;
+		pdr_send_indack_msg(pdr, pds, ind->transaction_id);
 
 		mutex_lock(&pdr->status_lock);
 		pds->state = ind->curr_state;
 		pdr->status(pds->state, pds->service_path, pdr->priv);
 		mutex_unlock(&pdr->status_lock);
-
-		/* Ack the indication after clients release the PD resources */
-		pdr_send_indack_msg(pdr, pds, ind->transaction_id);
 
 		mutex_lock(&pdr->list_lock);
 		list_del(&ind->node);
@@ -343,7 +344,7 @@ static void pdr_indication_cb(struct qmi_handle *qmi,
 	queue_work(pdr->indack_wq, &pdr->indack_work);
 }
 
-static const struct qmi_msg_handler qmi_indication_handler[] = {
+static struct qmi_msg_handler qmi_indication_handler[] = {
 	{
 		.type = QMI_INDICATION,
 		.msg_id = SERVREG_STATE_UPDATED_IND_ID,
@@ -569,7 +570,7 @@ EXPORT_SYMBOL(pdr_add_lookup);
 int pdr_restart_pd(struct pdr_handle *pdr, struct pdr_service *pds)
 {
 	struct servreg_restart_pd_resp resp;
-	struct servreg_restart_pd_req req = { 0 };
+	struct servreg_restart_pd_req req;
 	struct sockaddr_qrtr addr;
 	struct pdr_service *tmp;
 	struct qmi_txn txn;

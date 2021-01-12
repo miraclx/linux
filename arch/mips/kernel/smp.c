@@ -687,13 +687,7 @@ EXPORT_SYMBOL(flush_tlb_one);
 
 #ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
 
-static void tick_broadcast_callee(void *info)
-{
-	tick_receive_broadcast();
-}
-
-static DEFINE_PER_CPU(call_single_data_t, tick_broadcast_csd) =
-	CSD_INIT(tick_broadcast_callee, NULL);
+static DEFINE_PER_CPU(call_single_data_t, tick_broadcast_csd);
 
 void tick_broadcast(const struct cpumask *mask)
 {
@@ -705,5 +699,24 @@ void tick_broadcast(const struct cpumask *mask)
 		smp_call_function_single_async(cpu, csd);
 	}
 }
+
+static void tick_broadcast_callee(void *info)
+{
+	tick_receive_broadcast();
+}
+
+static int __init tick_broadcast_init(void)
+{
+	call_single_data_t *csd;
+	int cpu;
+
+	for (cpu = 0; cpu < NR_CPUS; cpu++) {
+		csd = &per_cpu(tick_broadcast_csd, cpu);
+		csd->func = tick_broadcast_callee;
+	}
+
+	return 0;
+}
+early_initcall(tick_broadcast_init);
 
 #endif /* CONFIG_GENERIC_CLOCKEVENTS_BROADCAST */

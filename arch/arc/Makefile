@@ -10,25 +10,8 @@ CROSS_COMPILE := $(call cc-cross-prefix, arc-linux- arceb-linux-)
 endif
 
 cflags-y	+= -fno-common -pipe -fno-builtin -mmedium-calls -D__linux__
-
-tune-mcpu-def-$(CONFIG_ISA_ARCOMPACT)	:= -mcpu=arc700
-tune-mcpu-def-$(CONFIG_ISA_ARCV2)	:= -mcpu=hs38
-
-ifeq ($(CONFIG_ARC_TUNE_MCPU),"")
-cflags-y				+= $(tune-mcpu-def-y)
-else
-tune-mcpu				:= $(shell echo $(CONFIG_ARC_TUNE_MCPU))
-tune-mcpu-ok 				:= $(call cc-option-yn, $(tune-mcpu))
-ifeq ($(tune-mcpu-ok),y)
-cflags-y				+= $(tune-mcpu)
-else
-# The flag provided by 'CONFIG_ARC_TUNE_MCPU' option isn't known by this compiler
-# (probably the compiler is too old). Use ISA default mcpu flag instead as a safe option.
-$(warning ** WARNING ** CONFIG_ARC_TUNE_MCPU flag '$(tune-mcpu)' is unknown, fallback to '$(tune-mcpu-def-y)')
-cflags-y				+= $(tune-mcpu-def-y)
-endif
-endif
-
+cflags-$(CONFIG_ISA_ARCOMPACT)	+= -mA7
+cflags-$(CONFIG_ISA_ARCV2)	+= -mcpu=hs38
 
 ifdef CONFIG_ARC_CURR_IN_REG
 # For a global register defintion, make sure it gets passed to every file
@@ -94,7 +77,12 @@ core-y		+= arch/arc/boot/dts/
 core-y				+= arch/arc/plat-sim/
 core-$(CONFIG_ARC_PLAT_TB10X)	+= arch/arc/plat-tb10x/
 core-$(CONFIG_ARC_PLAT_AXS10X)	+= arch/arc/plat-axs10x/
+core-$(CONFIG_ARC_PLAT_EZNPS)	+= arch/arc/plat-eznps/
 core-$(CONFIG_ARC_SOC_HSDK)	+= arch/arc/plat-hsdk/
+
+ifdef CONFIG_ARC_PLAT_EZNPS
+KBUILD_CPPFLAGS += -I$(srctree)/arch/arc/plat-eznps/include
+endif
 
 drivers-$(CONFIG_OPROFILE)	+= arch/arc/oprofile/
 

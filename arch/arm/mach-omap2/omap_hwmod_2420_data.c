@@ -264,6 +264,14 @@ static struct omap_hwmod_ocp_if omap2420_l3__dsp = {
 	.user		= OCP_USER_MPU | OCP_USER_SDMA,
 };
 
+/* l4_wkup -> timer1 */
+static struct omap_hwmod_ocp_if omap2420_l4_wkup__timer1 = {
+	.master		= &omap2xxx_l4_wkup_hwmod,
+	.slave		= &omap2xxx_timer1_hwmod,
+	.clk		= "gpt1_ick",
+	.user		= OCP_USER_MPU | OCP_USER_SDMA,
+};
+
 /* l4_wkup -> wd_timer2 */
 static struct omap_hwmod_ocp_if omap2420_l4_wkup__wd_timer2 = {
 	.master		= &omap2xxx_l4_wkup_hwmod,
@@ -344,6 +352,15 @@ static struct omap_hwmod_ocp_if omap2420_l4_core__hdq1w = {
 	.flags		= OMAP_FIREWALL_L4 | OCPIF_SWSUP_IDLE,
 };
 
+
+/* l4_wkup -> 32ksync_counter */
+static struct omap_hwmod_ocp_if omap2420_l4_wkup__counter_32k = {
+	.master		= &omap2xxx_l4_wkup_hwmod,
+	.slave		= &omap2xxx_counter_32k_hwmod,
+	.clk		= "sync_32k_ick",
+	.user		= OCP_USER_MPU | OCP_USER_SDMA,
+};
+
 static struct omap_hwmod_ocp_if omap2420_l3__gpmc = {
 	.master		= &omap2xxx_l3_main_hwmod,
 	.slave		= &omap2xxx_gpmc_hwmod,
@@ -365,6 +382,8 @@ static struct omap_hwmod_ocp_if *omap2420_hwmod_ocp_ifs[] __initdata = {
 	&omap2420_l4_core__i2c2,
 	&omap2420_l3__iva,
 	&omap2420_l3__dsp,
+	&omap2420_l4_wkup__timer1,
+	&omap2xxx_l4_core__timer2,
 	&omap2xxx_l4_core__timer3,
 	&omap2xxx_l4_core__timer4,
 	&omap2xxx_l4_core__timer5,
@@ -392,6 +411,7 @@ static struct omap_hwmod_ocp_if *omap2420_hwmod_ocp_ifs[] __initdata = {
 	&omap2xxx_l4_core__sham,
 	&omap2xxx_l4_core__aes,
 	&omap2420_l4_core__hdq1w,
+	&omap2420_l4_wkup__counter_32k,
 	&omap2420_l3__gpmc,
 	NULL,
 };

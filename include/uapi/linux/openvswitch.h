@@ -86,7 +86,6 @@ enum ovs_datapath_attr {
 	OVS_DP_ATTR_MEGAFLOW_STATS,	/* struct ovs_dp_megaflow_stats */
 	OVS_DP_ATTR_USER_FEATURES,	/* OVS_DP_F_*  */
 	OVS_DP_ATTR_PAD,
-	OVS_DP_ATTR_MASKS_CACHE_SIZE,
 	__OVS_DP_ATTR_MAX
 };
 
@@ -103,8 +102,8 @@ struct ovs_dp_megaflow_stats {
 	__u64 n_mask_hit;	 /* Number of masks used for flow lookups. */
 	__u32 n_masks;		 /* Number of masks for the datapath. */
 	__u32 pad0;		 /* Pad for future expension. */
-	__u64 n_cache_hit;       /* Number of cache matches for flow lookups. */
 	__u64 pad1;		 /* Pad for future expension. */
+	__u64 pad2;		 /* Pad for future expension. */
 };
 
 struct ovs_vport_stats {
@@ -1057,7 +1056,5 @@ enum ovs_dec_ttl_attr {
 	OVS_DEC_TTL_ATTR_ACTION,	/* Nested struct nlattr */
 	__OVS_DEC_TTL_ATTR_MAX
 };
-
-#define OVS_DEC_TTL_ATTR_MAX (__OVS_DEC_TTL_ATTR_MAX - 1)
 
 #endif /* _LINUX_OPENVSWITCH_H */

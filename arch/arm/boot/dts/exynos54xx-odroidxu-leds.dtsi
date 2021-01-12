@@ -11,10 +11,10 @@
 #include <dt-bindings/gpio/gpio.h>
 
 / {
-	led-controller-1 {
+	pwmleds {
 		compatible = "pwm-leds";
 
-		led-1 {
+		greenled {
 			label = "green:mmc0";
 			pwms = <&pwm 1 2000000 0>;
 			pwm-names = "pwm1";
@@ -26,7 +26,7 @@
 			linux,default-trigger = "mmc0";
 		};
 
-		led-2 {
+		blueled {
 			label = "blue:heartbeat";
 			pwms = <&pwm 2 2000000 0>;
 			pwm-names = "pwm2";
@@ -35,10 +35,9 @@
 		};
 	};
 
-	led-controller-2 {
+	gpioleds {
 		compatible = "gpio-leds";
-
-		led-3 {
+		redled {
 			label = "red:microSD";
 			gpios = <&gpx2 3 GPIO_ACTIVE_HIGH>;
 			default-state = "off";

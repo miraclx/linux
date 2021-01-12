@@ -68,9 +68,12 @@ static int mst_node_check_hash(const struct ubifs_info *c,
 	u8 calc[UBIFS_MAX_HASH_LEN];
 	const void *node = mst;
 
-	crypto_shash_tfm_digest(c->hash_tfm, node + sizeof(struct ubifs_ch),
-				UBIFS_MST_NODE_SZ - sizeof(struct ubifs_ch),
-				calc);
+	SHASH_DESC_ON_STACK(shash, c->hash_tfm);
+
+	shash->tfm = c->hash_tfm;
+
+	crypto_shash_digest(shash, node + sizeof(struct ubifs_ch),
+			    UBIFS_MST_NODE_SZ - sizeof(struct ubifs_ch), calc);
 
 	if (ubifs_check_hash(c, expected, calc))
 		return -EPERM;
@@ -314,7 +317,7 @@ static int validate_master(const struct ubifs_info *c)
 
 out:
 	ubifs_err(c, "bad master node at offset %d error %d", c->mst_offs, err);
-	ubifs_dump_node(c, c->mst_node, c->mst_node_alsz);
+	ubifs_dump_node(c, c->mst_node);
 	return -EINVAL;
 }
 
@@ -392,7 +395,7 @@ int ubifs_read_master(struct ubifs_info *c)
 		if (c->leb_cnt < old_leb_cnt ||
 		    c->leb_cnt < UBIFS_MIN_LEB_CNT) {
 			ubifs_err(c, "bad leb_cnt on master node");
-			ubifs_dump_node(c, c->mst_node, c->mst_node_alsz);
+			ubifs_dump_node(c, c->mst_node);
 			return -EINVAL;
 		}
 

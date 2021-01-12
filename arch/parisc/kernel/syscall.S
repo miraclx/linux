@@ -571,8 +571,8 @@ lws_compare_and_swap:
 	ldil	L%lws_lock_start, %r20
 	ldo	R%lws_lock_start(%r20), %r28
 
-	/* Extract eight bits from r26 and hash lock (Bits 3-11) */
-	extru  %r26, 28, 8, %r20
+	/* Extract four bits from r26 and hash lock (Bits 4-7) */
+	extru  %r26, 27, 4, %r20
 
 	/* Find lock to use, the hash is either one of 0 to
 	   15, multiplied by 16 (keep it 16-byte aligned)
@@ -640,7 +640,11 @@ cas_action:
 	sub,<>	%r28, %r25, %r0
 2:	stw	%r24, 0(%r26)
 	/* Free lock */
-	stw,ma	%r20, 0(%sr2,%r20)
+#ifdef CONFIG_SMP
+98:	LDCW	0(%sr2,%r20), %r1			/* Barrier */
+99:	ALTERNATIVE(98b, 99b, ALT_COND_NO_SMP, INSN_NOP)
+#endif
+	stw	%r20, 0(%sr2,%r20)
 #if ENABLE_LWS_DEBUG
 	/* Clear thread register indicator */
 	stw	%r0, 4(%sr2,%r20)
@@ -654,7 +658,11 @@ cas_action:
 3:		
 	/* Error occurred on load or store */
 	/* Free lock */
-	stw,ma	%r20, 0(%sr2,%r20)
+#ifdef CONFIG_SMP
+98:	LDCW	0(%sr2,%r20), %r1			/* Barrier */
+99:	ALTERNATIVE(98b, 99b, ALT_COND_NO_SMP, INSN_NOP)
+#endif
+	stw	%r20, 0(%sr2,%r20)
 #if ENABLE_LWS_DEBUG
 	stw	%r0, 4(%sr2,%r20)
 #endif
@@ -761,8 +769,8 @@ cas2_lock_start:
 	ldil	L%lws_lock_start, %r20
 	ldo	R%lws_lock_start(%r20), %r28
 
-	/* Extract eight bits from r26 and hash lock (Bits 3-11) */
-	extru  %r26, 28, 8, %r20
+	/* Extract four bits from r26 and hash lock (Bits 4-7) */
+	extru  %r26, 27, 4, %r20
 
 	/* Find lock to use, the hash is either one of 0 to
 	   15, multiplied by 16 (keep it 16-byte aligned)
@@ -855,7 +863,11 @@ cas2_action:
 
 cas2_end:
 	/* Free lock */
-	stw,ma	%r20, 0(%sr2,%r20)
+#ifdef CONFIG_SMP
+98:	LDCW	0(%sr2,%r20), %r1			/* Barrier */
+99:	ALTERNATIVE(98b, 99b, ALT_COND_NO_SMP, INSN_NOP)
+#endif
+	stw	%r20, 0(%sr2,%r20)
 	/* Enable interrupts */
 	ssm	PSW_SM_I, %r0
 	/* Return to userspace, set no error */
@@ -865,7 +877,11 @@ cas2_end:
 22:
 	/* Error occurred on load or store */
 	/* Free lock */
-	stw,ma	%r20, 0(%sr2,%r20)
+#ifdef CONFIG_SMP
+98:	LDCW	0(%sr2,%r20), %r1			/* Barrier */
+99:	ALTERNATIVE(98b, 99b, ALT_COND_NO_SMP, INSN_NOP)
+#endif
+	stw	%r20, 0(%sr2,%r20)
 	ssm	PSW_SM_I, %r0
 	ldo	1(%r0),%r28
 	b	lws_exit
@@ -950,7 +966,7 @@ END(sys_call_table64)
 	.align	L1_CACHE_BYTES
 ENTRY(lws_lock_start)
 	/* lws locks */
-	.rept 256
+	.rept 16
 	/* Keep locks aligned at 16-bytes */
 	.word 1
 	.word 0 

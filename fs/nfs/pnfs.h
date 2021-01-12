@@ -51,8 +51,6 @@ struct nfs4_pnfs_ds_addr {
 	size_t			da_addrlen;
 	struct list_head	da_node;  /* nfs4_pnfs_dev_hlist dev_dslist */
 	char			*da_remotestr;	/* human readable addr+port */
-	const char		*da_netid;
-	int			da_transport;
 };
 
 struct nfs4_pnfs_ds {
@@ -268,7 +266,6 @@ struct pnfs_layout_segment *pnfs_layout_process(struct nfs4_layoutget *lgp);
 void pnfs_layoutget_free(struct nfs4_layoutget *lgp);
 void pnfs_free_lseg_list(struct list_head *tmp_list);
 void pnfs_destroy_layout(struct nfs_inode *);
-void pnfs_destroy_layout_final(struct nfs_inode *);
 void pnfs_destroy_all_layouts(struct nfs_client *);
 int pnfs_destroy_layouts_byfsid(struct nfs_client *clp,
 		struct nfs_fsid *fsid,
@@ -314,7 +311,7 @@ int _pnfs_return_layout(struct inode *);
 int pnfs_commit_and_return_layout(struct inode *);
 void pnfs_ld_write_done(struct nfs_pgio_header *);
 void pnfs_ld_read_done(struct nfs_pgio_header *);
-void pnfs_read_resend_pnfs(struct nfs_pgio_header *, unsigned int mirror_idx);
+void pnfs_read_resend_pnfs(struct nfs_pgio_header *);
 struct pnfs_layout_segment *pnfs_update_layout(struct inode *ino,
 					       struct nfs_open_context *ctx,
 					       loff_t pos,
@@ -710,10 +707,6 @@ static inline void pnfs_destroy_all_layouts(struct nfs_client *clp)
 }
 
 static inline void pnfs_destroy_layout(struct nfs_inode *nfsi)
-{
-}
-
-static inline void pnfs_destroy_layout_final(struct nfs_inode *nfsi)
 {
 }
 

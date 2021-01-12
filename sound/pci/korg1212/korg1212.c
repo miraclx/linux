@@ -2149,9 +2149,7 @@ static int snd_korg1212_create(struct snd_card *card, struct pci_dev *pci,
 {
         int err, rc;
         unsigned int i;
-	unsigned iomem_size;
-	__maybe_unused unsigned ioport_size;
-	__maybe_unused unsigned iomem2_size;
+	unsigned ioport_size, iomem_size, iomem2_size;
         struct snd_korg1212 * korg1212;
 	const struct firmware *dsp_code;
 

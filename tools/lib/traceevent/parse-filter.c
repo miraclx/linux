@@ -38,8 +38,8 @@ static void show_error(char *error_buf, const char *fmt, ...)
 	int len;
 	int i;
 
-	input = get_input_buf();
-	index = get_input_buf_ptr();
+	input = tep_get_input_buf();
+	index = tep_get_input_buf_ptr();
 	len = input ? strlen(input) : 0;
 
 	if (len) {
@@ -57,20 +57,25 @@ static void show_error(char *error_buf, const char *fmt, ...)
 	va_end(ap);
 }
 
-static enum tep_event_type filter_read_token(char **tok)
+static void free_token(char *token)
+{
+	tep_free_token(token);
+}
+
+static enum tep_event_type read_token(char **tok)
 {
 	enum tep_event_type type;
 	char *token = NULL;
 
 	do {
 		free_token(token);
-		type = read_token(&token);
+		type = tep_read_token(&token);
 	} while (type == TEP_EVENT_NEWLINE || type == TEP_EVENT_SPACE);
 
 	/* If token is = or ! check to see if the next char is ~ */
 	if (token &&
 	    (strcmp(token, "=") == 0 || strcmp(token, "!") == 0) &&
-	    peek_char() == '~') {
+	    tep_peek_char() == '~') {
 		/* append it */
 		*tok = malloc(3);
 		if (*tok == NULL) {
@@ -80,7 +85,7 @@ static enum tep_event_type filter_read_token(char **tok)
 		sprintf(*tok, "%c%c", *token, '~');
 		free_token(token);
 		/* Now remove the '~' from the buffer */
-		read_token(&token);
+		tep_read_token(&token);
 		free_token(token);
 	} else
 		*tok = token;
@@ -954,7 +959,7 @@ process_filter(struct tep_event *event, struct tep_filter_arg **parg,
 
 	do {
 		free(token);
-		type = filter_read_token(&token);
+		type = read_token(&token);
 		switch (type) {
 		case TEP_EVENT_SQUOTE:
 		case TEP_EVENT_DQUOTE:
@@ -1180,7 +1185,7 @@ process_event(struct tep_event *event, const char *filter_str,
 {
 	int ret;
 
-	init_input_buf(filter_str, strlen(filter_str));
+	tep_buffer_init(filter_str, strlen(filter_str));
 
 	ret = process_filter(event, parg, error_str, 0);
 	if (ret < 0)
@@ -1238,7 +1243,7 @@ filter_event(struct tep_event_filter *filter, struct tep_event *event,
 static void filter_init_error_buf(struct tep_event_filter *filter)
 {
 	/* clear buffer to reset show error */
-	init_input_buf("", 0);
+	tep_buffer_init("", 0);
 	filter->error_buffer[0] = '\0';
 }
 
@@ -1953,8 +1958,7 @@ static char *op_to_str(struct tep_event_filter *filter, struct tep_filter_arg *a
 				default:
 					break;
 				}
-				if (asprintf(&str, val ? "TRUE" : "FALSE") < 0)
-					str = NULL;
+				asprintf(&str, val ? "TRUE" : "FALSE");
 				break;
 			}
 		}
@@ -1972,8 +1976,7 @@ static char *op_to_str(struct tep_event_filter *filter, struct tep_filter_arg *a
 			break;
 		}
 
-		if (asprintf(&str, "(%s) %s (%s)", left, op, right) < 0)
-			str = NULL;
+		asprintf(&str, "(%s) %s (%s)", left, op, right);
 		break;
 
 	case TEP_FILTER_OP_NOT:
@@ -1989,12 +1992,10 @@ static char *op_to_str(struct tep_event_filter *filter, struct tep_filter_arg *a
 			right_val = 0;
 		if (right_val >= 0) {
 			/* just return the opposite */
-			if (asprintf(&str, right_val ? "FALSE" : "TRUE") < 0)
-				str = NULL;
+			asprintf(&str, right_val ? "FALSE" : "TRUE");
 			break;
 		}
-		if (asprintf(&str, "%s(%s)", op, right) < 0)
-			str = NULL;
+		asprintf(&str, "%s(%s)", op, right);
 		break;
 
 	default:
@@ -2010,8 +2011,7 @@ static char *val_to_str(struct tep_event_filter *filter, struct tep_filter_arg *
 {
 	char *str = NULL;
 
-	if (asprintf(&str, "%lld", arg->value.val) < 0)
-		str = NULL;
+	asprintf(&str, "%lld", arg->value.val);
 
 	return str;
 }
@@ -2069,8 +2069,7 @@ static char *exp_to_str(struct tep_event_filter *filter, struct tep_filter_arg *
 		break;
 	}
 
-	if (asprintf(&str, "%s %s %s", lstr, op, rstr) < 0)
-		str = NULL;
+	asprintf(&str, "%s %s %s", lstr, op, rstr);
 out:
 	free(lstr);
 	free(rstr);
@@ -2114,8 +2113,7 @@ static char *num_to_str(struct tep_event_filter *filter, struct tep_filter_arg *
 		if (!op)
 			op = "<=";
 
-		if (asprintf(&str, "%s %s %s", lstr, op, rstr) < 0)
-			str = NULL;
+		asprintf(&str, "%s %s %s", lstr, op, rstr);
 		break;
 
 	default:
@@ -2150,9 +2148,8 @@ static char *str_to_str(struct tep_event_filter *filter, struct tep_filter_arg *
 		if (!op)
 			op = "!~";
 
-		if (asprintf(&str, "%s %s \"%s\"",
-			 arg->str.field->name, op, arg->str.val) < 0)
-			str = NULL;
+		asprintf(&str, "%s %s \"%s\"",
+			 arg->str.field->name, op, arg->str.val);
 		break;
 
 	default:
@@ -2168,8 +2165,7 @@ static char *arg_to_str(struct tep_event_filter *filter, struct tep_filter_arg *
 
 	switch (arg->type) {
 	case TEP_FILTER_ARG_BOOLEAN:
-		if (asprintf(&str, arg->boolean.value ? "TRUE" : "FALSE") < 0)
-			str = NULL;
+		asprintf(&str, arg->boolean.value ? "TRUE" : "FALSE");
 		return str;
 
 	case TEP_FILTER_ARG_OP:

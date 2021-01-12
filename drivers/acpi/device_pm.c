@@ -186,7 +186,7 @@ int acpi_device_set_power(struct acpi_device *device, int state)
 		 * possibly drop references to the power resources in use.
 		 */
 		state = ACPI_STATE_D3_HOT;
-		/* If D3cold is not supported, use D3hot as the target state. */
+		/* If _PR3 is not available, use D3hot as the target state. */
 		if (!device->power.states[ACPI_STATE_D3_COLD].flags.valid)
 			target_state = state;
 	} else if (!device->power.states[state].flags.valid) {
@@ -749,7 +749,7 @@ static void acpi_pm_notify_work_func(struct acpi_device_wakeup_context *context)
 static DEFINE_MUTEX(acpi_wakeup_lock);
 
 static int __acpi_device_wakeup_enable(struct acpi_device *adev,
-				       u32 target_state)
+				       u32 target_state, int max_count)
 {
 	struct acpi_device_wakeup *wakeup = &adev->wakeup;
 	acpi_status status;
@@ -757,26 +757,15 @@ static int __acpi_device_wakeup_enable(struct acpi_device *adev,
 
 	mutex_lock(&acpi_wakeup_lock);
 
-	/*
-	 * If the device wakeup power is already enabled, disable it and enable
-	 * it again in case it depends on the configuration of subordinate
-	 * devices and the conditions have changed since it was enabled last
-	 * time.
-	 */
-	if (wakeup->enable_count > 0)
-		acpi_disable_wakeup_device_power(adev);
-
-	error = acpi_enable_wakeup_device_power(adev, target_state);
-	if (error) {
-		if (wakeup->enable_count > 0) {
-			acpi_disable_gpe(wakeup->gpe_device, wakeup->gpe_number);
-			wakeup->enable_count = 0;
-		}
+	if (wakeup->enable_count >= max_count)
 		goto out;
-	}
 
 	if (wakeup->enable_count > 0)
 		goto inc;
+
+	error = acpi_enable_wakeup_device_power(adev, target_state);
+	if (error)
+		goto out;
 
 	status = acpi_enable_gpe(wakeup->gpe_device, wakeup->gpe_number);
 	if (ACPI_FAILURE(status)) {
@@ -789,10 +778,7 @@ static int __acpi_device_wakeup_enable(struct acpi_device *adev,
 			  (unsigned int)wakeup->gpe_number);
 
 inc:
-	if (wakeup->enable_count < INT_MAX)
-		wakeup->enable_count++;
-	else
-		acpi_handle_info(adev->handle, "Wakeup enable count out of bounds!\n");
+	wakeup->enable_count++;
 
 out:
 	mutex_unlock(&acpi_wakeup_lock);
@@ -813,7 +799,7 @@ out:
  */
 static int acpi_device_wakeup_enable(struct acpi_device *adev, u32 target_state)
 {
-	return __acpi_device_wakeup_enable(adev, target_state);
+	return __acpi_device_wakeup_enable(adev, target_state, 1);
 }
 
 /**
@@ -843,12 +829,8 @@ out:
 	mutex_unlock(&acpi_wakeup_lock);
 }
 
-/**
- * acpi_pm_set_device_wakeup - Enable/disable remote wakeup for given device.
- * @dev: Device to enable/disable to generate wakeup events.
- * @enable: Whether to enable or disable the wakeup functionality.
- */
-int acpi_pm_set_device_wakeup(struct device *dev, bool enable)
+static int __acpi_pm_set_device_wakeup(struct device *dev, bool enable,
+				       int max_count)
 {
 	struct acpi_device *adev;
 	int error;
@@ -868,13 +850,35 @@ int acpi_pm_set_device_wakeup(struct device *dev, bool enable)
 		return 0;
 	}
 
-	error = __acpi_device_wakeup_enable(adev, acpi_target_system_state());
+	error = __acpi_device_wakeup_enable(adev, acpi_target_system_state(),
+					    max_count);
 	if (!error)
 		dev_dbg(dev, "Wakeup enabled by ACPI\n");
 
 	return error;
 }
+
+/**
+ * acpi_pm_set_device_wakeup - Enable/disable remote wakeup for given device.
+ * @dev: Device to enable/disable to generate wakeup events.
+ * @enable: Whether to enable or disable the wakeup functionality.
+ */
+int acpi_pm_set_device_wakeup(struct device *dev, bool enable)
+{
+	return __acpi_pm_set_device_wakeup(dev, enable, 1);
+}
 EXPORT_SYMBOL_GPL(acpi_pm_set_device_wakeup);
+
+/**
+ * acpi_pm_set_bridge_wakeup - Enable/disable remote wakeup for given bridge.
+ * @dev: Bridge device to enable/disable to generate wakeup events.
+ * @enable: Whether to enable or disable the wakeup functionality.
+ */
+int acpi_pm_set_bridge_wakeup(struct device *dev, bool enable)
+{
+	return __acpi_pm_set_device_wakeup(dev, enable, INT_MAX);
+}
+EXPORT_SYMBOL_GPL(acpi_pm_set_bridge_wakeup);
 
 /**
  * acpi_dev_pm_low_power - Put ACPI device into a low-power state.
@@ -1080,7 +1084,7 @@ int acpi_subsys_suspend_late(struct device *dev)
 {
 	int ret;
 
-	if (dev_pm_skip_suspend(dev))
+	if (dev_pm_smart_suspend_and_suspended(dev))
 		return 0;
 
 	ret = pm_generic_suspend_late(dev);
@@ -1096,8 +1100,10 @@ int acpi_subsys_suspend_noirq(struct device *dev)
 {
 	int ret;
 
-	if (dev_pm_skip_suspend(dev))
+	if (dev_pm_smart_suspend_and_suspended(dev)) {
+		dev->power.may_skip_resume = true;
 		return 0;
+	}
 
 	ret = pm_generic_suspend_noirq(dev);
 	if (ret)
@@ -1110,8 +1116,8 @@ int acpi_subsys_suspend_noirq(struct device *dev)
 	 * acpi_subsys_complete() to take care of fixing up the device's state
 	 * anyway, if need be.
 	 */
-	if (device_can_wakeup(dev) && !device_may_wakeup(dev))
-		dev->power.may_skip_resume = false;
+	dev->power.may_skip_resume = device_may_wakeup(dev) ||
+					!device_can_wakeup(dev);
 
 	return 0;
 }
@@ -1123,8 +1129,16 @@ EXPORT_SYMBOL_GPL(acpi_subsys_suspend_noirq);
  */
 static int acpi_subsys_resume_noirq(struct device *dev)
 {
-	if (dev_pm_skip_resume(dev))
+	if (dev_pm_may_skip_resume(dev))
 		return 0;
+
+	/*
+	 * Devices with DPM_FLAG_SMART_SUSPEND may be left in runtime suspend
+	 * during system suspend, so update their runtime PM status to "active"
+	 * as they will be put into D0 going forward.
+	 */
+	if (dev_pm_smart_suspend_and_suspended(dev))
+		pm_runtime_set_active(dev);
 
 	return pm_generic_resume_noirq(dev);
 }
@@ -1139,12 +1153,7 @@ static int acpi_subsys_resume_noirq(struct device *dev)
  */
 static int acpi_subsys_resume_early(struct device *dev)
 {
-	int ret;
-
-	if (dev_pm_skip_resume(dev))
-		return 0;
-
-	ret = acpi_dev_resume(dev);
+	int ret = acpi_dev_resume(dev);
 	return ret ? ret : pm_generic_resume_early(dev);
 }
 
@@ -1209,7 +1218,7 @@ static int acpi_subsys_poweroff_late(struct device *dev)
 {
 	int ret;
 
-	if (dev_pm_skip_suspend(dev))
+	if (dev_pm_smart_suspend_and_suspended(dev))
 		return 0;
 
 	ret = pm_generic_poweroff_late(dev);
@@ -1225,7 +1234,7 @@ static int acpi_subsys_poweroff_late(struct device *dev)
  */
 static int acpi_subsys_poweroff_noirq(struct device *dev)
 {
-	if (dev_pm_skip_suspend(dev))
+	if (dev_pm_smart_suspend_and_suspended(dev))
 		return 0;
 
 	return pm_generic_poweroff_noirq(dev);

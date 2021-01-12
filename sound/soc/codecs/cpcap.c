@@ -1216,7 +1216,7 @@ static int cpcap_hifi_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	return regmap_update_bits(cpcap->regmap, reg, mask, val);
 }
 
-static int cpcap_hifi_set_mute(struct snd_soc_dai *dai, int mute, int direction)
+static int cpcap_hifi_set_mute(struct snd_soc_dai *dai, int mute)
 {
 	struct snd_soc_component *component = dai->component;
 	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
@@ -1237,8 +1237,7 @@ static const struct snd_soc_dai_ops cpcap_dai_hifi_ops = {
 	.hw_params	= cpcap_hifi_hw_params,
 	.set_sysclk	= cpcap_hifi_set_dai_sysclk,
 	.set_fmt	= cpcap_hifi_set_dai_fmt,
-	.mute_stream	= cpcap_hifi_set_mute,
-	.no_capture_mute = 1,
+	.digital_mute	= cpcap_hifi_set_mute,
 };
 
 static int cpcap_voice_hw_params(struct snd_pcm_substream *substream,
@@ -1371,8 +1370,7 @@ static int cpcap_voice_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	return 0;
 }
 
-static int cpcap_voice_set_mute(struct snd_soc_dai *dai,
-				int mute, int direction)
+static int cpcap_voice_set_mute(struct snd_soc_dai *dai, int mute)
 {
 	struct snd_soc_component *component = dai->component;
 	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
@@ -1393,8 +1391,7 @@ static const struct snd_soc_dai_ops cpcap_dai_voice_ops = {
 	.hw_params	= cpcap_voice_hw_params,
 	.set_sysclk	= cpcap_voice_set_dai_sysclk,
 	.set_fmt	= cpcap_voice_set_dai_fmt,
-	.mute_stream	= cpcap_voice_set_mute,
-	.no_capture_mute = 1,
+	.digital_mute	= cpcap_voice_set_mute,
 };
 
 static struct snd_soc_dai_driver cpcap_dai[] = {

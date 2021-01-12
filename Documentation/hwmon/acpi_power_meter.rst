@@ -9,7 +9,7 @@ Supported systems:
 
     Prefix: 'power_meter'
 
-    Datasheet: https://uefi.org/specifications, section 10.4.
+    Datasheet: http://acpi.info/, section 10.4.
 
 Author: Darrick J. Wong
 

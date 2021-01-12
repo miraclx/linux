@@ -186,7 +186,6 @@ static int __init nmdk_timer_init(void __iomem *base, int irq,
 {
 	unsigned long rate;
 	int ret;
-	int min_ticks;
 
 	mtu_base = base;
 
@@ -195,8 +194,7 @@ static int __init nmdk_timer_init(void __iomem *base, int irq,
 
 	/*
 	 * Tick rate is 2.4MHz for Nomadik and 2.4Mhz, 100MHz or 133 MHz
-	 * for ux500, and in one specific Ux500 case 32768 Hz.
-	 *
+	 * for ux500.
 	 * Use a divide-by-16 counter if the tick rate is more than 32MHz.
 	 * At 32 MHz, the timer (with 32 bit counter) can be programmed
 	 * to wake-up at a max 127s a head in time. Dividing a 2.4 MHz timer
@@ -232,12 +230,7 @@ static int __init nmdk_timer_init(void __iomem *base, int irq,
 		pr_err("%s: request_irq() failed\n", "Nomadik Timer Tick");
 	nmdk_clkevt.cpumask = cpumask_of(0);
 	nmdk_clkevt.irq = irq;
-	if (rate < 100000)
-		min_ticks = 5;
-	else
-		min_ticks = 2;
-	clockevents_config_and_register(&nmdk_clkevt, rate, min_ticks,
-					0xffffffffU);
+	clockevents_config_and_register(&nmdk_clkevt, rate, 2, 0xffffffffU);
 
 	mtu_delay_timer.read_current_timer = &nmdk_timer_read_current_timer;
 	mtu_delay_timer.freq = rate;

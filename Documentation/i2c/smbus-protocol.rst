@@ -57,7 +57,7 @@ SMBus Quick Command
 
 This sends a single bit to the device, at the place of the Rd/Wr bit::
 
-  S Addr Rd/Wr [A] P
+  A Addr Rd/Wr [A] P
 
 Functionality flag: I2C_FUNC_SMBUS_QUICK
 

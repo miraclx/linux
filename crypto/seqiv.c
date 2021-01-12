@@ -33,7 +33,7 @@ static void seqiv_aead_encrypt_complete2(struct aead_request *req, int err)
 	memcpy(req->iv, subreq->iv, crypto_aead_ivsize(geniv));
 
 out:
-	kfree_sensitive(subreq->iv);
+	kzfree(subreq->iv);
 }
 
 static void seqiv_aead_encrypt_complete(struct crypto_async_request *base,
@@ -138,7 +138,7 @@ static int seqiv_aead_create(struct crypto_template *tmpl, struct rtattr **tb)
 	struct aead_instance *inst;
 	int err;
 
-	inst = aead_geniv_alloc(tmpl, tb);
+	inst = aead_geniv_alloc(tmpl, tb, 0, 0);
 
 	if (IS_ERR(inst))
 		return PTR_ERR(inst);
@@ -164,9 +164,23 @@ free_inst:
 	return err;
 }
 
+static int seqiv_create(struct crypto_template *tmpl, struct rtattr **tb)
+{
+	struct crypto_attr_type *algt;
+
+	algt = crypto_get_attr_type(tb);
+	if (IS_ERR(algt))
+		return PTR_ERR(algt);
+
+	if ((algt->type ^ CRYPTO_ALG_TYPE_AEAD) & CRYPTO_ALG_TYPE_MASK)
+		return -EINVAL;
+
+	return seqiv_aead_create(tmpl, tb);
+}
+
 static struct crypto_template seqiv_tmpl = {
 	.name = "seqiv",
-	.create = seqiv_aead_create,
+	.create = seqiv_create,
 	.module = THIS_MODULE,
 };
 

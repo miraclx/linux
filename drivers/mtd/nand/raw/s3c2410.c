@@ -30,6 +30,7 @@
 
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/rawnand.h>
+#include <linux/mtd/nand_ecc.h>
 #include <linux/mtd/partitions.h>
 
 #include <linux/platform_data/mtd-nand-s3c2410.h>
@@ -133,8 +134,7 @@ enum s3c_nand_clk_state {
 
 /**
  * struct s3c2410_nand_info - NAND controller state.
- * @controller: Base controller structure.
- * @mtds: An array of MTD instances on this controller.
+ * @mtds: An array of MTD instances on this controoler.
  * @platform: The platform data for this board.
  * @device: The platform device we bound to.
  * @clk: The clock resource for this controller.
@@ -146,7 +146,6 @@ enum s3c_nand_clk_state {
  * @clk_rate: The clock rate from @clk.
  * @clk_state: The current clock state.
  * @cpu_type: The exact type of this controller.
- * @freq_transition: CPUFreq notifier block
  */
 struct s3c2410_nand_info {
 	/* mtd info */
@@ -292,7 +291,7 @@ static int s3c2410_nand_setrate(struct s3c2410_nand_info *info)
 	int tacls_max = (info->cpu_type == TYPE_S3C2412) ? 8 : 4;
 	int tacls, twrph0, twrph1;
 	unsigned long clkrate = clk_get_rate(info->clk);
-	unsigned long set, cfg, mask;
+	unsigned long uninitialized_var(set), cfg, uninitialized_var(mask);
 	unsigned long flags;
 
 	/* calculate the timing information for the controller */
@@ -780,8 +779,7 @@ static int s3c24xx_nand_remove(struct platform_device *pdev)
 
 		for (mtdno = 0; mtdno < info->mtd_count; mtdno++, ptr++) {
 			pr_debug("releasing mtd %d (%p)\n", mtdno, ptr);
-			WARN_ON(mtd_device_unregister(nand_to_mtd(&ptr->chip)));
-			nand_cleanup(&ptr->chip);
+			nand_release(&ptr->chip);
 		}
 	}
 
@@ -809,8 +807,8 @@ static int s3c2410_nand_add_partition(struct s3c2410_nand_info *info,
 	return -ENODEV;
 }
 
-static int s3c2410_nand_setup_interface(struct nand_chip *chip, int csline,
-					const struct nand_interface_config *conf)
+static int s3c2410_nand_setup_data_interface(struct nand_chip *chip, int csline,
+					const struct nand_data_interface *conf)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct s3c2410_nand_info *info = s3c2410_nand_mtd_toinfo(mtd);
@@ -905,7 +903,7 @@ static void s3c2410_nand_init_chip(struct s3c2410_nand_info *info,
 	nmtd->info	   = info;
 	nmtd->set	   = set;
 
-	chip->ecc.engine_type = info->platform->engine_type;
+	chip->ecc.mode = info->platform->ecc_mode;
 
 	/*
 	 * If you use u-boot BBT creation code, specifying this flag will
@@ -930,24 +928,24 @@ static int s3c2410_nand_attach_chip(struct nand_chip *chip)
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct s3c2410_nand_info *info = s3c2410_nand_mtd_toinfo(mtd);
 
-	switch (chip->ecc.engine_type) {
+	switch (chip->ecc.mode) {
 
-	case NAND_ECC_ENGINE_TYPE_NONE:
+	case NAND_ECC_NONE:
 		dev_info(info->device, "ECC disabled\n");
 		break;
 
-	case NAND_ECC_ENGINE_TYPE_SOFT:
+	case NAND_ECC_SOFT:
 		/*
-		 * This driver expects Hamming based ECC when engine_type is set
-		 * to NAND_ECC_ENGINE_TYPE_SOFT. Force ecc.algo to
-		 * NAND_ECC_ALGO_HAMMING to avoid adding an extra ecc_algo field
-		 * to s3c2410_platform_nand.
+		 * This driver expects Hamming based ECC when ecc_mode is set
+		 * to NAND_ECC_SOFT. Force ecc.algo to NAND_ECC_HAMMING to
+		 * avoid adding an extra ecc_algo field to
+		 * s3c2410_platform_nand.
 		 */
-		chip->ecc.algo = NAND_ECC_ALGO_HAMMING;
+		chip->ecc.algo = NAND_ECC_HAMMING;
 		dev_info(info->device, "soft ECC\n");
 		break;
 
-	case NAND_ECC_ENGINE_TYPE_ON_HOST:
+	case NAND_ECC_HW:
 		chip->ecc.calculate = s3c2410_nand_calculate_ecc;
 		chip->ecc.correct   = s3c2410_nand_correct_data;
 		chip->ecc.strength  = 1;
@@ -1000,7 +998,7 @@ static int s3c2410_nand_attach_chip(struct nand_chip *chip)
 
 static const struct nand_controller_ops s3c24xx_nand_controller_ops = {
 	.attach_chip = s3c2410_nand_attach_chip,
-	.setup_interface = s3c2410_nand_setup_interface,
+	.setup_data_interface = s3c2410_nand_setup_data_interface,
 };
 
 static const struct of_device_id s3c24xx_nand_dt_ids[] = {

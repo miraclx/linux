@@ -39,7 +39,6 @@
 #include <linux/ktime.h>
 #include <linux/rwsem.h>
 #include <linux/wait.h>
-#include <linux/topology.h>
 
 #include <acpi/cppc_acpi.h>
 
@@ -351,7 +350,7 @@ static void cppc_chan_tx_done(struct mbox_client *cl, void *msg, int ret)
 				*(u16 *)msg, ret);
 }
 
-static struct mbox_client cppc_mbox_cl = {
+struct mbox_client cppc_mbox_cl = {
 	.tx_done = cppc_chan_tx_done,
 	.knows_txdone = true,
 };
@@ -414,88 +413,109 @@ end:
 	return result;
 }
 
-bool acpi_cpc_valid(void)
-{
-	struct cpc_desc *cpc_ptr;
-	int cpu;
-
-	for_each_possible_cpu(cpu) {
-		cpc_ptr = per_cpu(cpc_desc_ptr, cpu);
-		if (!cpc_ptr)
-			return false;
-	}
-
-	return true;
-}
-EXPORT_SYMBOL_GPL(acpi_cpc_valid);
-
 /**
- * acpi_get_psd_map - Map the CPUs in the freq domain of a given cpu
- * @cpu: Find all CPUs that share a domain with cpu.
- * @cpu_data: Pointer to CPU specific CPPC data including PSD info.
+ * acpi_get_psd_map - Map the CPUs in a common freq domain.
+ * @all_cpu_data: Ptrs to CPU specific CPPC data including PSD info.
  *
  *	Return: 0 for success or negative value for err.
  */
-int acpi_get_psd_map(unsigned int cpu, struct cppc_cpudata *cpu_data)
+int acpi_get_psd_map(struct cppc_cpudata **all_cpu_data)
 {
-	struct cpc_desc *cpc_ptr, *match_cpc_ptr;
-	struct acpi_psd_package *match_pdomain;
+	int count_target;
+	int retval = 0;
+	unsigned int i, j;
+	cpumask_var_t covered_cpus;
+	struct cppc_cpudata *pr, *match_pr;
 	struct acpi_psd_package *pdomain;
-	int count_target, i;
+	struct acpi_psd_package *match_pdomain;
+	struct cpc_desc *cpc_ptr, *match_cpc_ptr;
+
+	if (!zalloc_cpumask_var(&covered_cpus, GFP_KERNEL))
+		return -ENOMEM;
 
 	/*
 	 * Now that we have _PSD data from all CPUs, let's setup P-state
 	 * domain info.
 	 */
-	cpc_ptr = per_cpu(cpc_desc_ptr, cpu);
-	if (!cpc_ptr)
-		return -EFAULT;
-
-	pdomain = &(cpc_ptr->domain_info);
-	cpumask_set_cpu(cpu, cpu_data->shared_cpu_map);
-	if (pdomain->num_processors <= 1)
-		return 0;
-
-	/* Validate the Domain info */
-	count_target = pdomain->num_processors;
-	if (pdomain->coord_type == DOMAIN_COORD_TYPE_SW_ALL)
-		cpu_data->shared_type = CPUFREQ_SHARED_TYPE_ALL;
-	else if (pdomain->coord_type == DOMAIN_COORD_TYPE_HW_ALL)
-		cpu_data->shared_type = CPUFREQ_SHARED_TYPE_HW;
-	else if (pdomain->coord_type == DOMAIN_COORD_TYPE_SW_ANY)
-		cpu_data->shared_type = CPUFREQ_SHARED_TYPE_ANY;
-
 	for_each_possible_cpu(i) {
-		if (i == cpu)
+		if (cpumask_test_cpu(i, covered_cpus))
 			continue;
 
-		match_cpc_ptr = per_cpu(cpc_desc_ptr, i);
-		if (!match_cpc_ptr)
-			goto err_fault;
+		pr = all_cpu_data[i];
+		cpc_ptr = per_cpu(cpc_desc_ptr, i);
+		if (!cpc_ptr) {
+			retval = -EFAULT;
+			goto err_ret;
+		}
 
-		match_pdomain = &(match_cpc_ptr->domain_info);
-		if (match_pdomain->domain != pdomain->domain)
+		pdomain = &(cpc_ptr->domain_info);
+		cpumask_set_cpu(i, pr->shared_cpu_map);
+		cpumask_set_cpu(i, covered_cpus);
+		if (pdomain->num_processors <= 1)
 			continue;
 
-		/* Here i and cpu are in the same domain */
-		if (match_pdomain->num_processors != count_target)
-			goto err_fault;
+		/* Validate the Domain info */
+		count_target = pdomain->num_processors;
+		if (pdomain->coord_type == DOMAIN_COORD_TYPE_SW_ALL)
+			pr->shared_type = CPUFREQ_SHARED_TYPE_ALL;
+		else if (pdomain->coord_type == DOMAIN_COORD_TYPE_HW_ALL)
+			pr->shared_type = CPUFREQ_SHARED_TYPE_HW;
+		else if (pdomain->coord_type == DOMAIN_COORD_TYPE_SW_ANY)
+			pr->shared_type = CPUFREQ_SHARED_TYPE_ANY;
 
-		if (pdomain->coord_type != match_pdomain->coord_type)
-			goto err_fault;
+		for_each_possible_cpu(j) {
+			if (i == j)
+				continue;
 
-		cpumask_set_cpu(i, cpu_data->shared_cpu_map);
+			match_cpc_ptr = per_cpu(cpc_desc_ptr, j);
+			if (!match_cpc_ptr) {
+				retval = -EFAULT;
+				goto err_ret;
+			}
+
+			match_pdomain = &(match_cpc_ptr->domain_info);
+			if (match_pdomain->domain != pdomain->domain)
+				continue;
+
+			/* Here i and j are in the same domain */
+			if (match_pdomain->num_processors != count_target) {
+				retval = -EFAULT;
+				goto err_ret;
+			}
+
+			if (pdomain->coord_type != match_pdomain->coord_type) {
+				retval = -EFAULT;
+				goto err_ret;
+			}
+
+			cpumask_set_cpu(j, covered_cpus);
+			cpumask_set_cpu(j, pr->shared_cpu_map);
+		}
+
+		for_each_cpu(j, pr->shared_cpu_map) {
+			if (i == j)
+				continue;
+
+			match_pr = all_cpu_data[j];
+			match_pr->shared_type = pr->shared_type;
+			cpumask_copy(match_pr->shared_cpu_map,
+				     pr->shared_cpu_map);
+		}
 	}
+	goto out;
 
-	return 0;
+err_ret:
+	for_each_possible_cpu(i) {
+		pr = all_cpu_data[i];
 
-err_fault:
-	/* Assume no coordination on any error parsing domain info */
-	cpumask_clear(cpu_data->shared_cpu_map);
-	cpumask_set_cpu(cpu, cpu_data->shared_cpu_map);
-	cpu_data->shared_type = CPUFREQ_SHARED_TYPE_NONE;
-
-	return -EFAULT;
+		/* Assume no coordination on any error parsing domain info */
+		cpumask_clear(pr->shared_cpu_map);
+		cpumask_set_cpu(i, pr->shared_cpu_map);
+		pr->shared_type = CPUFREQ_SHARED_TYPE_ALL;
+	}
+out:
+	free_cpumask_var(covered_cpus);
+	return retval;
 }
 EXPORT_SYMBOL_GPL(acpi_get_psd_map);
 
@@ -577,7 +597,7 @@ bool __weak cpc_ffh_supported(void)
  *
  * Return: 0 for success, errno for failure
  */
-static int pcc_data_alloc(int pcc_ss_id)
+int pcc_data_alloc(int pcc_ss_id)
 {
 	if (pcc_ss_id < 0 || pcc_ss_id >= MAX_PCC_SUBSPACES)
 		return -EINVAL;
@@ -667,10 +687,6 @@ static bool is_cppc_supported(int revision, int num_ent)
  *		)
  *	}
  */
-
-#ifndef init_freq_invariance_cppc
-static inline void init_freq_invariance_cppc(void) { }
-#endif
 
 /**
  * acpi_cppc_processor_probe - Search for per CPU _CPC objects.
@@ -830,11 +846,8 @@ int acpi_cppc_processor_probe(struct acpi_processor *pr)
 			"acpi_cppc");
 	if (ret) {
 		per_cpu(cpc_desc_ptr, pr->id) = NULL;
-		kobject_put(&cpc_ptr->kobj);
 		goto out_free;
 	}
-
-	init_freq_invariance_cppc();
 
 	kfree(output.pointer);
 	return 0;

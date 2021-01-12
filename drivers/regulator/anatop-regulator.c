@@ -139,7 +139,7 @@ static struct regulator_ops anatop_rops = {
 	.map_voltage = regulator_map_voltage_linear,
 };
 
-static const struct regulator_ops anatop_core_rops = {
+static struct regulator_ops anatop_core_rops = {
 	.enable = anatop_regmap_enable,
 	.disable = anatop_regmap_disable,
 	.is_enabled = anatop_regmap_is_enabled,

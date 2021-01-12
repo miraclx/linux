@@ -288,7 +288,8 @@ void SetHalODMVar(
 	bool					bSet);
 
 #ifdef CONFIG_BACKGROUND_NOISE_MONITOR
-struct noise_info {
+struct noise_info
+{
 	u8 bPauseDIG;
 	u8 IGIValue;
 	u32 max_time;/* ms */

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0
 /*
  * soc-acpi-intel-kbl-match.c - tables and support for KBL ACPI enumeration.
  *

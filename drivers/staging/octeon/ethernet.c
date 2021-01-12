@@ -13,7 +13,6 @@
 #include <linux/phy.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
-#include <linux/of_mdio.h>
 #include <linux/of_net.h>
 #include <linux/if_ether.h>
 #include <linux/if_vlan.h>
@@ -690,6 +689,8 @@ static int cvm_oct_probe(struct platform_device *pdev)
 	mtu_overhead += VLAN_HLEN;
 #endif
 
+	octeon_mdiobus_force_mod_depencency();
+
 	pip = pdev->dev.of_node;
 	if (!pip) {
 		pr_err("Error: No 'pip' in /aliases\n");
@@ -893,14 +894,6 @@ static int cvm_oct_probe(struct platform_device *pdev)
 				break;
 			}
 
-			if (priv->of_node && of_phy_is_fixed_link(priv->of_node)) {
-				if (of_phy_register_fixed_link(priv->of_node)) {
-					netdev_err(dev, "Failed to register fixed link for interface %d, port %d\n",
-						   interface, priv->port);
-					dev->netdev_ops = NULL;
-				}
-			}
-
 			if (!dev->netdev_ops) {
 				free_netdev(dev);
 			} else if (register_netdev(dev) < 0) {
@@ -994,7 +987,6 @@ static struct platform_driver cvm_oct_driver = {
 
 module_platform_driver(cvm_oct_driver);
 
-MODULE_SOFTDEP("pre: mdio-cavium");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Cavium Networks <support@caviumnetworks.com>");
 MODULE_DESCRIPTION("Cavium Networks Octeon ethernet driver.");

@@ -25,6 +25,10 @@
 #include <asm/hpet.h>
 #include <asm/time.h>
 
+#ifdef CONFIG_X86_64
+__visible volatile unsigned long jiffies __cacheline_aligned_in_smp = INITIAL_JIFFIES;
+#endif
+
 unsigned long profile_pc(struct pt_regs *regs)
 {
 	unsigned long pc = instruction_pointer(regs);
@@ -99,9 +103,6 @@ static __init void x86_late_time_init(void)
 	 */
 	x86_init.irqs.intr_mode_init();
 	tsc_init();
-
-	if (static_cpu_has(X86_FEATURE_WAITPKG))
-		use_tpause_delay();
 }
 
 /*

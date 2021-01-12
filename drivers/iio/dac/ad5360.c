@@ -67,7 +67,6 @@ struct ad5360_chip_info {
  * @chip_info:		chip model specific constants, available modes etc
  * @vref_reg:		vref supply regulators
  * @ctrl:		control register cache
- * @lock:		lock to protect the data buffer during SPI ops
  * @data:		spi transfer buffers
  */
 
@@ -76,7 +75,6 @@ struct ad5360_state {
 	const struct ad5360_chip_info	*chip_info;
 	struct regulator_bulk_data	vref_reg[3];
 	unsigned int			ctrl;
-	struct mutex			lock;
 
 	/*
 	 * DMA (thus cache coherency maintenance) requires the
@@ -207,11 +205,10 @@ static int ad5360_write(struct iio_dev *indio_dev, unsigned int cmd,
 	unsigned int addr, unsigned int val, unsigned int shift)
 {
 	int ret;
-	struct ad5360_state *st = iio_priv(indio_dev);
 
-	mutex_lock(&st->lock);
+	mutex_lock(&indio_dev->mlock);
 	ret = ad5360_write_unlocked(indio_dev, cmd, addr, val, shift);
-	mutex_unlock(&st->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret;
 }
@@ -232,7 +229,7 @@ static int ad5360_read(struct iio_dev *indio_dev, unsigned int type,
 		},
 	};
 
-	mutex_lock(&st->lock);
+	mutex_lock(&indio_dev->mlock);
 
 	st->data[0].d32 = cpu_to_be32(AD5360_CMD(AD5360_CMD_SPECIAL_FUNCTION) |
 		AD5360_ADDR(AD5360_REG_SF_READBACK) |
@@ -243,7 +240,7 @@ static int ad5360_read(struct iio_dev *indio_dev, unsigned int type,
 	if (ret >= 0)
 		ret = be32_to_cpu(st->data[1].d32) & 0xffff;
 
-	mutex_unlock(&st->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret;
 }
@@ -264,7 +261,7 @@ static int ad5360_update_ctrl(struct iio_dev *indio_dev, unsigned int set,
 	struct ad5360_state *st = iio_priv(indio_dev);
 	unsigned int ret;
 
-	mutex_lock(&st->lock);
+	mutex_lock(&indio_dev->mlock);
 
 	st->ctrl |= set;
 	st->ctrl &= ~clr;
@@ -272,7 +269,7 @@ static int ad5360_update_ctrl(struct iio_dev *indio_dev, unsigned int set,
 	ret = ad5360_write_unlocked(indio_dev, AD5360_CMD_SPECIAL_FUNCTION,
 			AD5360_REG_SF_CTRL, st->ctrl, 0);
 
-	mutex_unlock(&st->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret;
 }
@@ -476,12 +473,11 @@ static int ad5360_probe(struct spi_device *spi)
 	st->chip_info = &ad5360_chip_info_tbl[type];
 	st->spi = spi;
 
+	indio_dev->dev.parent = &spi->dev;
 	indio_dev->name = spi_get_device_id(spi)->name;
 	indio_dev->info = &ad5360_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->num_channels = st->chip_info->num_channels;
-
-	mutex_init(&st->lock);
 
 	ret = ad5360_alloc_channels(indio_dev);
 	if (ret) {

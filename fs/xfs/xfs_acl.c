@@ -16,7 +16,6 @@
 #include "xfs_acl.h"
 #include "xfs_da_format.h"
 #include "xfs_da_btree.h"
-#include "xfs_trans.h"
 
 #include <linux/posix_acl_xattr.h>
 
@@ -193,7 +192,7 @@ __xfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 
 	if (acl) {
 		args.valuelen = XFS_ACL_SIZE(acl->a_count);
-		args.value = kvzalloc(args.valuelen, GFP_KERNEL);
+		args.value = kmem_zalloc_large(args.valuelen, 0);
 		if (!args.value)
 			return -ENOMEM;
 		xfs_acl_to_disk(args.value, acl);
@@ -213,28 +212,21 @@ __xfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 }
 
 static int
-xfs_acl_set_mode(
-	struct inode		*inode,
-	umode_t			mode)
+xfs_set_mode(struct inode *inode, umode_t mode)
 {
-	struct xfs_inode	*ip = XFS_I(inode);
-	struct xfs_mount	*mp = ip->i_mount;
-	struct xfs_trans	*tp;
-	int			error;
+	int error = 0;
 
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_ichange, 0, 0, 0, &tp);
-	if (error)
-		return error;
+	if (mode != inode->i_mode) {
+		struct iattr iattr;
 
-	xfs_ilock(ip, XFS_ILOCK_EXCL);
-	xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
-	inode->i_mode = mode;
-	inode->i_ctime = current_time(inode);
-	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+		iattr.ia_valid = ATTR_MODE | ATTR_CTIME;
+		iattr.ia_mode = mode;
+		iattr.ia_ctime = current_time(inode);
 
-	if (mp->m_flags & XFS_MOUNT_WSYNC)
-		xfs_trans_set_sync(tp);
-	return xfs_trans_commit(tp);
+		error = xfs_setattr_nonsize(XFS_I(inode), &iattr, XFS_ATTR_NOACL);
+	}
+
+	return error;
 }
 
 int
@@ -259,14 +251,18 @@ xfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 	}
 
  set_acl:
+	error =  __xfs_set_acl(inode, acl, type);
+	if (error)
+		return error;
+
 	/*
 	 * We set the mode after successfully updating the ACL xattr because the
 	 * xattr update can fail at ENOSPC and we don't want to change the mode
 	 * if the ACL update hasn't been applied.
 	 */
-	error =  __xfs_set_acl(inode, acl, type);
-	if (!error && set_mode && mode != inode->i_mode)
-		error = xfs_acl_set_mode(inode, mode);
+	if (set_mode)
+		error = xfs_set_mode(inode, mode);
+
 	return error;
 }
 

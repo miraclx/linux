@@ -114,13 +114,13 @@ bad:
  * Ignore any fields we don't care about (there are quite a few of
  * them).
  */
-struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end, bool msgr2)
+struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end)
 {
 	struct ceph_mdsmap *m;
 	const void *start = *p;
 	int i, j, n;
 	int err;
-	u8 mdsmap_v;
+	u8 mdsmap_v, mdsmap_cv;
 	u16 mdsmap_ev;
 
 	m = kzalloc(sizeof(*m), GFP_NOFS);
@@ -129,7 +129,7 @@ struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end, bool msgr2)
 
 	ceph_decode_need(p, end, 1 + 1, bad);
 	mdsmap_v = ceph_decode_8(p);
-	*p += sizeof(u8);			/* mdsmap_cv */
+	mdsmap_cv = ceph_decode_8(p);
 	if (mdsmap_v >= 4) {
 	       u32 mdsmap_len;
 	       ceph_decode_32_safe(p, end, mdsmap_len, bad);
@@ -174,6 +174,7 @@ struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end, bool msgr2)
 		u64 global_id;
 		u32 namelen;
 		s32 mds, inc, state;
+		u64 state_seq;
 		u8 info_v;
 		void *info_end = NULL;
 		struct ceph_entity_addr addr;
@@ -188,8 +189,9 @@ struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end, bool msgr2)
 		info_v= ceph_decode_8(p);
 		if (info_v >= 4) {
 			u32 info_len;
+			u8 info_cv;
 			ceph_decode_need(p, end, 1 + sizeof(u32), bad);
-			*p += sizeof(u8);	/* info_cv */
+			info_cv = ceph_decode_8(p);
 			info_len = ceph_decode_32(p);
 			info_end = *p + info_len;
 			if (info_end > end)
@@ -201,19 +203,18 @@ struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end, bool msgr2)
 		namelen = ceph_decode_32(p);  /* skip mds name */
 		*p += namelen;
 
-		ceph_decode_32_safe(p, end, mds, bad);
-		ceph_decode_32_safe(p, end, inc, bad);
-		ceph_decode_32_safe(p, end, state, bad);
-		*p += sizeof(u64);		/* state_seq */
-		if (info_v >= 8)
-			err = ceph_decode_entity_addrvec(p, end, msgr2, &addr);
-		else
-			err = ceph_decode_entity_addr(p, end, &addr);
+		ceph_decode_need(p, end,
+				 4*sizeof(u32) + sizeof(u64) +
+				 sizeof(addr) + sizeof(struct ceph_timespec),
+				 bad);
+		mds = ceph_decode_32(p);
+		inc = ceph_decode_32(p);
+		state = ceph_decode_32(p);
+		state_seq = ceph_decode_64(p);
+		err = ceph_decode_entity_addr(p, end, &addr);
 		if (err)
 			goto corrupt;
-
-		ceph_decode_copy_safe(p, end, &laggy_since, sizeof(laggy_since),
-				      bad);
+		ceph_decode_copy(p, &laggy_since, sizeof(laggy_since));
 		laggy = laggy_since.tv_sec != 0 || laggy_since.tv_nsec != 0;
 		*p += sizeof(u32);
 		ceph_decode_32_safe(p, end, namelen, bad);
@@ -244,8 +245,8 @@ struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end, bool msgr2)
 		}
 
 		if (state <= 0) {
-			dout("mdsmap_decode got incorrect state(%s)\n",
-			     ceph_mds_state_name(state));
+			pr_warn("mdsmap_decode got incorrect state(%s)\n",
+				ceph_mds_state_name(state));
 			continue;
 		}
 

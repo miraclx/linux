@@ -206,6 +206,7 @@ static const struct drm_display_mode default_mode = {
 	.vsync_start = 800 + 15,
 	.vsync_end = 800 + 15 + 15,
 	.vtotal = 800 + 15 + 15 + 15,
+	.vrefresh = 60,
 };
 
 static int lg4573_get_modes(struct drm_panel *panel,
@@ -217,7 +218,7 @@ static int lg4573_get_modes(struct drm_panel *panel,
 	if (!mode) {
 		dev_err(panel->dev, "failed to add mode %ux%ux@%u\n",
 			default_mode.hdisplay, default_mode.vdisplay,
-			drm_mode_vrefresh(&default_mode));
+			default_mode.vrefresh);
 		return -ENOMEM;
 	}
 
@@ -261,9 +262,7 @@ static int lg4573_probe(struct spi_device *spi)
 	drm_panel_init(&ctx->panel, &spi->dev, &lg4573_drm_funcs,
 		       DRM_MODE_CONNECTOR_DPI);
 
-	drm_panel_add(&ctx->panel);
-
-	return 0;
+	return drm_panel_add(&ctx->panel);
 }
 
 static int lg4573_remove(struct spi_device *spi)

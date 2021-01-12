@@ -90,11 +90,10 @@ struct hash_pte {
 
 typedef struct {
 	unsigned long id;
-	void __user *vdso;
+	unsigned long vdso_base;
 } mm_context_t;
 
 void update_bats(void);
-static inline void cleanup_cpu_mmu_context(void) { };
 
 /* patch sites */
 extern s32 patch__hash_page_A0, patch__hash_page_A1, patch__hash_page_A2;

@@ -33,16 +33,10 @@
 	power-led {
 		compatible = "gpio-leds";
 
-		blue_led: led-0 {
+		blue {
 			gpios = <&gpio3 21 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
 		};
-	};
-
-	sdio_pwrseq: sdio-pwrseq {
-		compatible = "mmc-pwrseq-simple";
-		reset-gpios = <&gpio2 26 GPIO_ACTIVE_LOW>,
-		              <&gpio2 29 GPIO_ACTIVE_LOW>;
 	};
 
 	vcc_host: vcc-host-regulator {
@@ -137,6 +131,7 @@
 
 &emmc {
 	cap-mmc-highspeed;
+	disable-wp;
 	non-removable;
 	status = "okay";
 };
@@ -204,16 +199,6 @@
 };
 
 &pwm2 {
-	status = "okay";
-};
-
-&sdio {
-	bus-width = <4>;
-	cap-sd-highspeed;
-	cap-sdio-irq;
-	mmc-pwrseq = <&sdio_pwrseq>;
-	non-removable;
-	vqmmc-supply = <&vccio_1v8>;
 	status = "okay";
 };
 

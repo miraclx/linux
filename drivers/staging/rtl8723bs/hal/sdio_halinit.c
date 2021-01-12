@@ -544,8 +544,12 @@ static void _InitRetryFunction(struct adapter *padapter)
 
 static void HalRxAggr8723BSdio(struct adapter *padapter)
 {
+	struct registry_priv *pregistrypriv;
 	u8 valueDMATimeout;
 	u8 valueDMAPageCount;
+
+
+	pregistrypriv = &padapter->registrypriv;
 
 	valueDMATimeout = 0x06;
 	valueDMAPageCount = 0x06;
@@ -1231,8 +1235,19 @@ static void Hal_EfuseParseMACAddr_8723BS(
 	}
 /* 	NicIFSetMacAddress(padapter, padapter->PermanentAddress); */
 
-	RT_TRACE(_module_hci_hal_init_c_, _drv_notice_,
-		 ("Hal_EfuseParseMACAddr_8723BS: Permanent Address = %pM\n", pEEPROM->mac_addr));
+	RT_TRACE(
+		_module_hci_hal_init_c_,
+		_drv_notice_,
+		(
+			"Hal_EfuseParseMACAddr_8723BS: Permanent Address = %02x-%02x-%02x-%02x-%02x-%02x\n",
+			pEEPROM->mac_addr[0],
+			pEEPROM->mac_addr[1],
+			pEEPROM->mac_addr[2],
+			pEEPROM->mac_addr[3],
+			pEEPROM->mac_addr[4],
+			pEEPROM->mac_addr[5]
+		)
+	);
 }
 
 static void Hal_EfuseParseBoardType_8723BS(
@@ -1802,7 +1817,7 @@ static u8 GetHalDefVar8723BSDIO(
 	case HW_VAR_MAX_RX_AMPDU_FACTOR:
 		/*  Stanley@BB.SD3 suggests 16K can get stable performance */
 		/*  coding by Lucas@20130730 */
-		*(u32 *)pValue = IEEE80211_HT_MAX_AMPDU_16K;
+		*(u32 *)pValue = MAX_AMPDU_FACTOR_16K;
 		break;
 	default:
 		bResult = GetHalDefVar8723B(Adapter, eVariable, pValue);

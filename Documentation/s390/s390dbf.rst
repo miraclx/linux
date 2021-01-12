@@ -67,7 +67,7 @@ corresponding component. The debugfs normally should be mounted to
 The content of the directories are files which represent different views
 to the debug log. Each component can decide which views should be
 used through registering them with the function :c:func:`debug_register_view()`.
-Predefined views for hex/ascii and sprintf data are provided.
+Predefined views for hex/ascii, sprintf and raw binary data are provided.
 It is also possible to define other views. The content of
 a view can be inspected simply by reading the corresponding debugfs file.
 
@@ -119,6 +119,8 @@ Predefined views:
 
   extern struct debug_view debug_hex_ascii_view;
 
+  extern struct debug_view debug_raw_view;
+
   extern struct debug_view debug_sprintf_view;
 
 Examples
@@ -127,7 +129,7 @@ Examples
 .. code-block:: c
 
   /*
-   * hex_ascii-view Example
+   * hex_ascii- + raw-view Example
    */
 
   #include <linux/init.h>
@@ -141,6 +143,7 @@ Examples
 
       debug_info = debug_register("test", 1, 4, 4 );
       debug_register_view(debug_info, &debug_hex_ascii_view);
+      debug_register_view(debug_info, &debug_raw_view);
 
       debug_text_event(debug_info, 4 , "one ");
       debug_int_exception(debug_info, 4, 4711);
@@ -198,7 +201,7 @@ debugfs-files:
 Example::
 
   > ls /sys/kernel/debug/s390dbf/dasd
-  flush  hex_ascii  level pages
+  flush  hex_ascii  level pages raw
   > cat /sys/kernel/debug/s390dbf/dasd/hex_ascii | sort -k2,2 -s
   00 00974733272:680099 2 - 02 0006ad7e  07 ea 4a 90 | ....
   00 00974733272:682210 2 - 02 0006ade6  46 52 45 45 | FREE
@@ -295,9 +298,10 @@ order to see the debug entries well formatted.
 Predefined Views
 ----------------
 
-There are two predefined views: hex_ascii and sprintf.
+There are three predefined views: hex_ascii, raw and sprintf.
 The hex_ascii view shows the data field in hex and ascii representation
 (e.g. ``45 43 4b 44 | ECKD``).
+The raw view returns a bytestream as the debug areas are stored in memory.
 
 The sprintf view formats the debug entries in the same way as the sprintf
 function would do. The sprintf event/exception functions write to the
@@ -329,6 +333,11 @@ The format of the hex_ascii and sprintf view is as follows:
 - Cpu-Number of calling task
 - Return Address to caller
 - data field
+
+The format of the raw view is:
+
+- Header as described in debug.h
+- datafield
 
 A typical line of the hex_ascii view will look like the following (first line
 is only for explanation and will not be displayed when 'cating' the view)::

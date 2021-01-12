@@ -9,7 +9,7 @@ Supported chips:
 
     Addresses scanned: PCI space
 
-    Datasheet: https://www.amd.com/system/files/TechDocs/32559.pdf
+    Datasheet: http://www.amd.com/system/files/TechDocs/32559.pdf
 
 Author: Rudolf Marek
 

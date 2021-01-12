@@ -899,11 +899,11 @@ xrep_find_ag_btree_roots(
 void
 xrep_force_quotacheck(
 	struct xfs_scrub	*sc,
-	xfs_dqtype_t		type)
+	uint			dqtype)
 {
 	uint			flag;
 
-	flag = xfs_quota_chkd_flag(type);
+	flag = xfs_quota_chkd_flag(dqtype);
 	if (!(flag & sc->mp->m_qflags))
 		return;
 
@@ -939,11 +939,11 @@ xrep_ino_dqattach(
 "inode %llu repair encountered quota error %d, quotacheck forced.",
 				(unsigned long long)sc->ip->i_ino, error);
 		if (XFS_IS_UQUOTA_ON(sc->mp) && !sc->ip->i_udquot)
-			xrep_force_quotacheck(sc, XFS_DQTYPE_USER);
+			xrep_force_quotacheck(sc, XFS_DQ_USER);
 		if (XFS_IS_GQUOTA_ON(sc->mp) && !sc->ip->i_gdquot)
-			xrep_force_quotacheck(sc, XFS_DQTYPE_GROUP);
+			xrep_force_quotacheck(sc, XFS_DQ_GROUP);
 		if (XFS_IS_PQUOTA_ON(sc->mp) && !sc->ip->i_pdquot)
-			xrep_force_quotacheck(sc, XFS_DQTYPE_PROJ);
+			xrep_force_quotacheck(sc, XFS_DQ_PROJ);
 		/* fall through */
 	case -ESRCH:
 		error = 0;

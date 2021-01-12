@@ -6,7 +6,6 @@
 #include <linux/pci.h>
 #include <linux/dmi.h>
 #include "dwmac-intel.h"
-#include "dwmac4.h"
 #include "stmmac.h"
 
 struct intel_priv_data {
@@ -84,9 +83,13 @@ static int intel_serdes_powerup(struct net_device *ndev, void *priv_data)
 	serdes_phy_addr = intel_priv->mdio_adhoc_addr;
 
 	/* assert clk_req */
-	data = mdiobus_read(priv->mii, serdes_phy_addr, SERDES_GCR0);
+	data = mdiobus_read(priv->mii, serdes_phy_addr,
+			    SERDES_GCR0);
+
 	data |= SERDES_PLL_CLK;
-	mdiobus_write(priv->mii, serdes_phy_addr, SERDES_GCR0, data);
+
+	mdiobus_write(priv->mii, serdes_phy_addr,
+		      SERDES_GCR0, data);
 
 	/* check for clk_ack assertion */
 	data = serdes_status_poll(priv, serdes_phy_addr,
@@ -100,9 +103,13 @@ static int intel_serdes_powerup(struct net_device *ndev, void *priv_data)
 	}
 
 	/* assert lane reset */
-	data = mdiobus_read(priv->mii, serdes_phy_addr, SERDES_GCR0);
+	data = mdiobus_read(priv->mii, serdes_phy_addr,
+			    SERDES_GCR0);
+
 	data |= SERDES_RST;
-	mdiobus_write(priv->mii, serdes_phy_addr, SERDES_GCR0, data);
+
+	mdiobus_write(priv->mii, serdes_phy_addr,
+		      SERDES_GCR0, data);
 
 	/* check for assert lane reset reflection */
 	data = serdes_status_poll(priv, serdes_phy_addr,
@@ -116,12 +123,14 @@ static int intel_serdes_powerup(struct net_device *ndev, void *priv_data)
 	}
 
 	/*  move power state to P0 */
-	data = mdiobus_read(priv->mii, serdes_phy_addr, SERDES_GCR0);
+	data = mdiobus_read(priv->mii, serdes_phy_addr,
+			    SERDES_GCR0);
 
 	data &= ~SERDES_PWR_ST_MASK;
 	data |= SERDES_PWR_ST_P0 << SERDES_PWR_ST_SHIFT;
 
-	mdiobus_write(priv->mii, serdes_phy_addr, SERDES_GCR0, data);
+	mdiobus_write(priv->mii, serdes_phy_addr,
+		      SERDES_GCR0, data);
 
 	/* Check for P0 state */
 	data = serdes_status_poll(priv, serdes_phy_addr,
@@ -150,12 +159,14 @@ static void intel_serdes_powerdown(struct net_device *ndev, void *intel_data)
 	serdes_phy_addr = intel_priv->mdio_adhoc_addr;
 
 	/*  move power state to P3 */
-	data = mdiobus_read(priv->mii, serdes_phy_addr, SERDES_GCR0);
+	data = mdiobus_read(priv->mii, serdes_phy_addr,
+			    SERDES_GCR0);
 
 	data &= ~SERDES_PWR_ST_MASK;
 	data |= SERDES_PWR_ST_P3 << SERDES_PWR_ST_SHIFT;
 
-	mdiobus_write(priv->mii, serdes_phy_addr, SERDES_GCR0, data);
+	mdiobus_write(priv->mii, serdes_phy_addr,
+		      SERDES_GCR0, data);
 
 	/* Check for P3 state */
 	data = serdes_status_poll(priv, serdes_phy_addr,
@@ -169,9 +180,13 @@ static void intel_serdes_powerdown(struct net_device *ndev, void *intel_data)
 	}
 
 	/* de-assert clk_req */
-	data = mdiobus_read(priv->mii, serdes_phy_addr, SERDES_GCR0);
+	data = mdiobus_read(priv->mii, serdes_phy_addr,
+			    SERDES_GCR0);
+
 	data &= ~SERDES_PLL_CLK;
-	mdiobus_write(priv->mii, serdes_phy_addr, SERDES_GCR0, data);
+
+	mdiobus_write(priv->mii, serdes_phy_addr,
+		      SERDES_GCR0, data);
 
 	/* check for clk_ack de-assert */
 	data = serdes_status_poll(priv, serdes_phy_addr,
@@ -185,9 +200,13 @@ static void intel_serdes_powerdown(struct net_device *ndev, void *intel_data)
 	}
 
 	/* de-assert lane reset */
-	data = mdiobus_read(priv->mii, serdes_phy_addr, SERDES_GCR0);
+	data = mdiobus_read(priv->mii, serdes_phy_addr,
+			    SERDES_GCR0);
+
 	data &= ~SERDES_RST;
-	mdiobus_write(priv->mii, serdes_phy_addr, SERDES_GCR0, data);
+
+	mdiobus_write(priv->mii, serdes_phy_addr,
+		      SERDES_GCR0, data);
 
 	/* check for de-assert lane reset reflection */
 	data = serdes_status_poll(priv, serdes_phy_addr,
@@ -233,10 +252,8 @@ static void common_default_data(struct plat_stmmacenet_data *plat)
 static int intel_mgbe_common_data(struct pci_dev *pdev,
 				  struct plat_stmmacenet_data *plat)
 {
-	int ret;
 	int i;
 
-	plat->phy_addr = -1;
 	plat->clk_csr = 5;
 	plat->has_gmac = 0;
 	plat->has_gmac4 = 1;
@@ -297,7 +314,6 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	plat->axi->axi_blen[2] = 16;
 
 	plat->ptp_max_adj = plat->clk_ptp_rate;
-	plat->eee_usecs_rate = plat->clk_ptp_rate;
 
 	/* Set system clock */
 	plat->stmmac_clk = clk_register_fixed_rate(&pdev->dev,
@@ -308,12 +324,7 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 		dev_warn(&pdev->dev, "Fail to register stmmac-clk\n");
 		plat->stmmac_clk = NULL;
 	}
-
-	ret = clk_prepare_enable(plat->stmmac_clk);
-	if (ret) {
-		clk_unregister_fixed_rate(plat->stmmac_clk);
-		return ret;
-	}
+	clk_prepare_enable(plat->stmmac_clk);
 
 	/* Set default value for multicast hash bins */
 	plat->multicast_filter_bins = HASH_TABLE_SIZE;
@@ -324,28 +335,29 @@ static int intel_mgbe_common_data(struct pci_dev *pdev,
 	/* Set the maxmtu to a default of JUMBO_LEN */
 	plat->maxmtu = JUMBO_LEN;
 
-	plat->vlan_fail_q_en = true;
-
-	/* Use the last Rx queue */
-	plat->vlan_fail_q = plat->rx_queues_to_use - 1;
-
 	return 0;
 }
 
 static int ehl_common_data(struct pci_dev *pdev,
 			   struct plat_stmmacenet_data *plat)
 {
+	int ret;
+
 	plat->rx_queues_to_use = 8;
 	plat->tx_queues_to_use = 8;
 	plat->clk_ptp_rate = 200000000;
+	ret = intel_mgbe_common_data(pdev, plat);
+	if (ret)
+		return ret;
 
-	return intel_mgbe_common_data(pdev, plat);
+	return 0;
 }
 
 static int ehl_sgmii_data(struct pci_dev *pdev,
 			  struct plat_stmmacenet_data *plat)
 {
 	plat->bus_id = 1;
+	plat->phy_addr = 0;
 	plat->phy_interface = PHY_INTERFACE_MODE_SGMII;
 
 	plat->serdes_powerup = intel_serdes_powerup;
@@ -354,7 +366,7 @@ static int ehl_sgmii_data(struct pci_dev *pdev,
 	return ehl_common_data(pdev, plat);
 }
 
-static struct stmmac_pci_info ehl_sgmii1g_info = {
+static struct stmmac_pci_info ehl_sgmii1g_pci_info = {
 	.setup = ehl_sgmii_data,
 };
 
@@ -362,12 +374,13 @@ static int ehl_rgmii_data(struct pci_dev *pdev,
 			  struct plat_stmmacenet_data *plat)
 {
 	plat->bus_id = 1;
+	plat->phy_addr = 0;
 	plat->phy_interface = PHY_INTERFACE_MODE_RGMII;
 
 	return ehl_common_data(pdev, plat);
 }
 
-static struct stmmac_pci_info ehl_rgmii1g_info = {
+static struct stmmac_pci_info ehl_rgmii1g_pci_info = {
 	.setup = ehl_rgmii_data,
 };
 
@@ -375,6 +388,7 @@ static int ehl_pse0_common_data(struct pci_dev *pdev,
 				struct plat_stmmacenet_data *plat)
 {
 	plat->bus_id = 2;
+	plat->phy_addr = 1;
 	return ehl_common_data(pdev, plat);
 }
 
@@ -385,7 +399,7 @@ static int ehl_pse0_rgmii1g_data(struct pci_dev *pdev,
 	return ehl_pse0_common_data(pdev, plat);
 }
 
-static struct stmmac_pci_info ehl_pse0_rgmii1g_info = {
+static struct stmmac_pci_info ehl_pse0_rgmii1g_pci_info = {
 	.setup = ehl_pse0_rgmii1g_data,
 };
 
@@ -398,7 +412,7 @@ static int ehl_pse0_sgmii1g_data(struct pci_dev *pdev,
 	return ehl_pse0_common_data(pdev, plat);
 }
 
-static struct stmmac_pci_info ehl_pse0_sgmii1g_info = {
+static struct stmmac_pci_info ehl_pse0_sgmii1g_pci_info = {
 	.setup = ehl_pse0_sgmii1g_data,
 };
 
@@ -406,6 +420,7 @@ static int ehl_pse1_common_data(struct pci_dev *pdev,
 				struct plat_stmmacenet_data *plat)
 {
 	plat->bus_id = 3;
+	plat->phy_addr = 1;
 	return ehl_common_data(pdev, plat);
 }
 
@@ -416,7 +431,7 @@ static int ehl_pse1_rgmii1g_data(struct pci_dev *pdev,
 	return ehl_pse1_common_data(pdev, plat);
 }
 
-static struct stmmac_pci_info ehl_pse1_rgmii1g_info = {
+static struct stmmac_pci_info ehl_pse1_rgmii1g_pci_info = {
 	.setup = ehl_pse1_rgmii1g_data,
 };
 
@@ -429,31 +444,37 @@ static int ehl_pse1_sgmii1g_data(struct pci_dev *pdev,
 	return ehl_pse1_common_data(pdev, plat);
 }
 
-static struct stmmac_pci_info ehl_pse1_sgmii1g_info = {
+static struct stmmac_pci_info ehl_pse1_sgmii1g_pci_info = {
 	.setup = ehl_pse1_sgmii1g_data,
 };
 
 static int tgl_common_data(struct pci_dev *pdev,
 			   struct plat_stmmacenet_data *plat)
 {
+	int ret;
+
 	plat->rx_queues_to_use = 6;
 	plat->tx_queues_to_use = 4;
 	plat->clk_ptp_rate = 200000000;
+	ret = intel_mgbe_common_data(pdev, plat);
+	if (ret)
+		return ret;
 
-	return intel_mgbe_common_data(pdev, plat);
+	return 0;
 }
 
 static int tgl_sgmii_data(struct pci_dev *pdev,
 			  struct plat_stmmacenet_data *plat)
 {
 	plat->bus_id = 1;
+	plat->phy_addr = 0;
 	plat->phy_interface = PHY_INTERFACE_MODE_SGMII;
 	plat->serdes_powerup = intel_serdes_powerup;
 	plat->serdes_powerdown = intel_serdes_powerdown;
 	return tgl_common_data(pdev, plat);
 }
 
-static struct stmmac_pci_info tgl_sgmii1g_info = {
+static struct stmmac_pci_info tgl_sgmii1g_pci_info = {
 	.setup = tgl_sgmii_data,
 };
 
@@ -556,7 +577,7 @@ static int quark_default_data(struct pci_dev *pdev,
 	return 0;
 }
 
-static const struct stmmac_pci_info quark_info = {
+static const struct stmmac_pci_info quark_pci_info = {
 	.setup = quark_default_data,
 };
 
@@ -579,9 +600,11 @@ static int intel_eth_pci_probe(struct pci_dev *pdev,
 	struct intel_priv_data *intel_priv;
 	struct plat_stmmacenet_data *plat;
 	struct stmmac_resources res;
+	int i;
 	int ret;
 
-	intel_priv = devm_kzalloc(&pdev->dev, sizeof(*intel_priv), GFP_KERNEL);
+	intel_priv = devm_kzalloc(&pdev->dev, sizeof(*intel_priv),
+				  GFP_KERNEL);
 	if (!intel_priv)
 		return -ENOMEM;
 
@@ -608,9 +631,15 @@ static int intel_eth_pci_probe(struct pci_dev *pdev,
 		return ret;
 	}
 
-	ret = pcim_iomap_regions(pdev, BIT(0), pci_name(pdev));
-	if (ret)
-		return ret;
+	/* Get the base address of device */
+	for (i = 0; i < PCI_STD_NUM_BARS; i++) {
+		if (pci_resource_len(pdev, i) == 0)
+			continue;
+		ret = pcim_iomap_regions(pdev, BIT(i), pci_name(pdev));
+		if (ret)
+			return ret;
+		break;
+	}
 
 	pci_set_master(pdev);
 
@@ -621,30 +650,14 @@ static int intel_eth_pci_probe(struct pci_dev *pdev,
 	if (ret)
 		return ret;
 
-	ret = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
-	if (ret < 0)
-		return ret;
+	pci_enable_msi(pdev);
 
 	memset(&res, 0, sizeof(res));
-	res.addr = pcim_iomap_table(pdev)[0];
-	res.wol_irq = pci_irq_vector(pdev, 0);
-	res.irq = pci_irq_vector(pdev, 0);
+	res.addr = pcim_iomap_table(pdev)[i];
+	res.wol_irq = pdev->irq;
+	res.irq = pdev->irq;
 
-	if (plat->eee_usecs_rate > 0) {
-		u32 tx_lpi_usec;
-
-		tx_lpi_usec = (plat->eee_usecs_rate / 1000000) - 1;
-		writel(tx_lpi_usec, res.addr + GMAC_1US_TIC_COUNTER);
-	}
-
-	ret = stmmac_dvr_probe(&pdev->dev, plat, &res);
-	if (ret) {
-		pci_free_irq_vectors(pdev);
-		clk_disable_unprepare(plat->stmmac_clk);
-		clk_unregister_fixed_rate(plat->stmmac_clk);
-	}
-
-	return ret;
+	return stmmac_dvr_probe(&pdev->dev, plat, &res);
 }
 
 /**
@@ -658,14 +671,19 @@ static void intel_eth_pci_remove(struct pci_dev *pdev)
 {
 	struct net_device *ndev = dev_get_drvdata(&pdev->dev);
 	struct stmmac_priv *priv = netdev_priv(ndev);
+	int i;
 
 	stmmac_dvr_remove(&pdev->dev);
 
-	pci_free_irq_vectors(pdev);
+	if (priv->plat->stmmac_clk)
+		clk_unregister_fixed_rate(priv->plat->stmmac_clk);
 
-	clk_unregister_fixed_rate(priv->plat->stmmac_clk);
-
-	pcim_iounmap_regions(pdev, BIT(0));
+	for (i = 0; i < PCI_STD_NUM_BARS; i++) {
+		if (pci_resource_len(pdev, i) == 0)
+			continue;
+		pcim_iounmap_regions(pdev, BIT(i));
+		break;
+	}
 
 	pci_disable_device(pdev);
 }
@@ -724,19 +742,26 @@ static SIMPLE_DEV_PM_OPS(intel_eth_pm_ops, intel_eth_pci_suspend,
 #define PCI_DEVICE_ID_INTEL_TGL_SGMII1G_ID		0xa0ac
 
 static const struct pci_device_id intel_eth_pci_id_table[] = {
-	{ PCI_DEVICE_DATA(INTEL, QUARK_ID, &quark_info) },
-	{ PCI_DEVICE_DATA(INTEL, EHL_RGMII1G_ID, &ehl_rgmii1g_info) },
-	{ PCI_DEVICE_DATA(INTEL, EHL_SGMII1G_ID, &ehl_sgmii1g_info) },
-	{ PCI_DEVICE_DATA(INTEL, EHL_SGMII2G5_ID, &ehl_sgmii1g_info) },
-	{ PCI_DEVICE_DATA(INTEL, EHL_PSE0_RGMII1G_ID, &ehl_pse0_rgmii1g_info) },
-	{ PCI_DEVICE_DATA(INTEL, EHL_PSE0_SGMII1G_ID, &ehl_pse0_sgmii1g_info) },
-	{ PCI_DEVICE_DATA(INTEL, EHL_PSE0_SGMII2G5_ID, &ehl_pse0_sgmii1g_info) },
-	{ PCI_DEVICE_DATA(INTEL, EHL_PSE1_RGMII1G_ID, &ehl_pse1_rgmii1g_info) },
-	{ PCI_DEVICE_DATA(INTEL, EHL_PSE1_SGMII1G_ID, &ehl_pse1_sgmii1g_info) },
-	{ PCI_DEVICE_DATA(INTEL, EHL_PSE1_SGMII2G5_ID, &ehl_pse1_sgmii1g_info) },
-	{ PCI_DEVICE_DATA(INTEL, TGL_SGMII1G_ID, &tgl_sgmii1g_info) },
+	{ PCI_DEVICE_DATA(INTEL, QUARK_ID, &quark_pci_info) },
+	{ PCI_DEVICE_DATA(INTEL, EHL_RGMII1G_ID, &ehl_rgmii1g_pci_info) },
+	{ PCI_DEVICE_DATA(INTEL, EHL_SGMII1G_ID, &ehl_sgmii1g_pci_info) },
+	{ PCI_DEVICE_DATA(INTEL, EHL_SGMII2G5_ID, &ehl_sgmii1g_pci_info) },
+	{ PCI_DEVICE_DATA(INTEL, EHL_PSE0_RGMII1G_ID,
+			  &ehl_pse0_rgmii1g_pci_info) },
+	{ PCI_DEVICE_DATA(INTEL, EHL_PSE0_SGMII1G_ID,
+			  &ehl_pse0_sgmii1g_pci_info) },
+	{ PCI_DEVICE_DATA(INTEL, EHL_PSE0_SGMII2G5_ID,
+			  &ehl_pse0_sgmii1g_pci_info) },
+	{ PCI_DEVICE_DATA(INTEL, EHL_PSE1_RGMII1G_ID,
+			  &ehl_pse1_rgmii1g_pci_info) },
+	{ PCI_DEVICE_DATA(INTEL, EHL_PSE1_SGMII1G_ID,
+			  &ehl_pse1_sgmii1g_pci_info) },
+	{ PCI_DEVICE_DATA(INTEL, EHL_PSE1_SGMII2G5_ID,
+			  &ehl_pse1_sgmii1g_pci_info) },
+	{ PCI_DEVICE_DATA(INTEL, TGL_SGMII1G_ID, &tgl_sgmii1g_pci_info) },
 	{}
 };
+
 MODULE_DEVICE_TABLE(pci, intel_eth_pci_id_table);
 
 static struct pci_driver intel_eth_pci_driver = {

@@ -322,6 +322,7 @@ int usnic_ib_query_device(struct ib_device *ibdev,
 	props->max_mcast_grp = 0;
 	props->max_mcast_qp_attach = 0;
 	props->max_total_mcast_qp_attach = 0;
+	props->max_map_per_fmr = 0;
 	/* Owned by Userspace
 	 * max_qp_wr, max_sge, max_sge_rd, max_cqe */
 	mutex_unlock(&us_ibdev->usdev_lock);
@@ -367,6 +368,7 @@ int usnic_ib_query_port(struct ib_device *ibdev, u8 port,
 
 	props->port_cap_flags = 0;
 	props->gid_tbl_len = 1;
+	props->pkey_tbl_len = 1;
 	props->bad_pkey_cntr = 0;
 	props->qkey_viol_cntr = 0;
 	props->max_mtu = IB_MTU_4096;
@@ -436,6 +438,16 @@ int usnic_ib_query_gid(struct ib_device *ibdev, u8 port, int index,
 	return 0;
 }
 
+int usnic_ib_query_pkey(struct ib_device *ibdev, u8 port, u16 index,
+				u16 *pkey)
+{
+	if (index > 0)
+		return -EINVAL;
+
+	*pkey = 0xffff;
+	return 0;
+}
+
 int usnic_ib_alloc_pd(struct ib_pd *ibpd, struct ib_udata *udata)
 {
 	struct usnic_ib_pd *pd = to_upd(ibpd);
@@ -449,10 +461,9 @@ int usnic_ib_alloc_pd(struct ib_pd *ibpd, struct ib_udata *udata)
 	return 0;
 }
 
-int usnic_ib_dealloc_pd(struct ib_pd *pd, struct ib_udata *udata)
+void usnic_ib_dealloc_pd(struct ib_pd *pd, struct ib_udata *udata)
 {
 	usnic_uiom_dealloc_pd((to_upd(pd))->umem_pd);
-	return 0;
 }
 
 struct ib_qp *usnic_ib_create_qp(struct ib_pd *pd,
@@ -474,7 +485,7 @@ struct ib_qp *usnic_ib_create_qp(struct ib_pd *pd,
 	us_ibdev = to_usdev(pd->device);
 
 	if (init_attr->create_flags)
-		return ERR_PTR(-EOPNOTSUPP);
+		return ERR_PTR(-EINVAL);
 
 	err = ib_copy_from_udata(&cmd, udata, sizeof(cmd));
 	if (err) {
@@ -557,9 +568,6 @@ int usnic_ib_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 	int status;
 	usnic_dbg("\n");
 
-	if (attr_mask & ~IB_QP_ATTR_STANDARD_BITS)
-		return -EOPNOTSUPP;
-
 	qp_grp = to_uqp_grp(ibqp);
 
 	mutex_lock(&qp_grp->vf->pf->usdev_lock);
@@ -584,14 +592,14 @@ int usnic_ib_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 		       struct ib_udata *udata)
 {
 	if (attr->flags)
-		return -EOPNOTSUPP;
+		return -EINVAL;
 
 	return 0;
 }
 
-int usnic_ib_destroy_cq(struct ib_cq *cq, struct ib_udata *udata)
+void usnic_ib_destroy_cq(struct ib_cq *cq, struct ib_udata *udata)
 {
-	return 0;
+	return;
 }
 
 struct ib_mr *usnic_ib_reg_mr(struct ib_pd *pd, u64 start, u64 length,

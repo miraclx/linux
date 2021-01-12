@@ -20,7 +20,7 @@
 #define get_fs()  (current_thread_info()->addr_limit)
 #define set_fs(x) (current_thread_info()->addr_limit = (x))
 
-#define uaccess_kernel()	(get_fs().seg == KERNEL_DS.seg)
+#define segment_eq(a, b)	((a).seg == (b).seg)
 
 /*
  * Is a address valid? This does a straightforward calculation rather

@@ -70,10 +70,13 @@ static void dnotify_recalc_inode_mask(struct fsnotify_mark *fsn_mark)
  * destroy the dnotify struct if it was not registered to receive multiple
  * events.
  */
-static int dnotify_handle_event(struct fsnotify_mark *inode_mark, u32 mask,
-				struct inode *inode, struct inode *dir,
-				const struct qstr *name, u32 cookie)
+static int dnotify_handle_event(struct fsnotify_group *group,
+				struct inode *inode,
+				u32 mask, const void *data, int data_type,
+				const struct qstr *file_name, u32 cookie,
+				struct fsnotify_iter_info *iter_info)
 {
+	struct fsnotify_mark *inode_mark = fsnotify_iter_inode_mark(iter_info);
 	struct dnotify_mark *dn_mark;
 	struct dnotify_struct *dn;
 	struct dnotify_struct **prev;
@@ -81,7 +84,10 @@ static int dnotify_handle_event(struct fsnotify_mark *inode_mark, u32 mask,
 	__u32 test_mask = mask & ~FS_EVENT_ON_CHILD;
 
 	/* not a dir, dnotify doesn't care */
-	if (!dir && !(mask & FS_ISDIR))
+	if (!S_ISDIR(inode->i_mode))
+		return 0;
+
+	if (WARN_ON(fsnotify_iter_vfsmount_mark(iter_info)))
 		return 0;
 
 	dn_mark = container_of(inode_mark, struct dnotify_mark, fsn_mark);
@@ -121,7 +127,7 @@ static void dnotify_free_mark(struct fsnotify_mark *fsn_mark)
 }
 
 static const struct fsnotify_ops dnotify_fsnotify_ops = {
-	.handle_inode_event = dnotify_handle_event,
+	.handle_event = dnotify_handle_event,
 	.free_mark = dnotify_free_mark,
 };
 
@@ -327,7 +333,7 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned long arg)
 	}
 
 	rcu_read_lock();
-	f = lookup_fd_rcu(fd);
+	f = fcheck(fd);
 	rcu_read_unlock();
 
 	/* if (f != filp) means that we lost a race and another task/thread

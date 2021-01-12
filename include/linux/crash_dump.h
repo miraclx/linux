@@ -5,10 +5,9 @@
 #include <linux/kexec.h>
 #include <linux/proc_fs.h>
 #include <linux/elf.h>
-#include <linux/pgtable.h>
 #include <uapi/linux/vmcore.h>
 
-#include <linux/pgtable.h> /* for pgprot_t */
+#include <asm/pgtable.h> /* for pgprot_t */
 
 #ifdef CONFIG_CRASH_DUMP
 #define ELFCORE_ADDR_MAX	(-1ULL)
@@ -97,6 +96,8 @@ extern void unregister_oldmem_pfn_is_ram(void);
 #else /* !CONFIG_CRASH_DUMP */
 static inline bool is_kdump_kernel(void) { return 0; }
 #endif /* CONFIG_CRASH_DUMP */
+
+extern unsigned long saved_max_pfn;
 
 /* Device Dump information to be filled by drivers */
 struct vmcoredd_data {

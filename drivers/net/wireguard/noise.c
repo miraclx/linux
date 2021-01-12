@@ -87,12 +87,15 @@ static void handshake_zero(struct noise_handshake *handshake)
 
 void wg_noise_handshake_clear(struct noise_handshake *handshake)
 {
-	down_write(&handshake->lock);
 	wg_index_hashtable_remove(
 			handshake->entry.peer->device->index_hashtable,
 			&handshake->entry);
+	down_write(&handshake->lock);
 	handshake_zero(handshake);
 	up_write(&handshake->lock);
+	wg_index_hashtable_remove(
+			handshake->entry.peer->device->index_hashtable,
+			&handshake->entry);
 }
 
 static struct noise_keypair *keypair_create(struct wg_peer *peer)
@@ -111,7 +114,7 @@ static struct noise_keypair *keypair_create(struct wg_peer *peer)
 
 static void keypair_free_rcu(struct rcu_head *rcu)
 {
-	kfree_sensitive(container_of(rcu, struct noise_keypair, rcu));
+	kzfree(container_of(rcu, struct noise_keypair, rcu));
 }
 
 static void keypair_free_kref(struct kref *kref)
@@ -614,8 +617,8 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 	memcpy(handshake->hash, hash, NOISE_HASH_LEN);
 	memcpy(handshake->chaining_key, chaining_key, NOISE_HASH_LEN);
 	handshake->remote_index = src->sender_index;
-	initiation_consumption = ktime_get_coarse_boottime_ns();
-	if ((s64)(handshake->last_initiation_consumption - initiation_consumption) < 0)
+	if ((s64)(handshake->last_initiation_consumption -
+	    (initiation_consumption = ktime_get_coarse_boottime_ns())) < 0)
 		handshake->last_initiation_consumption = initiation_consumption;
 	handshake->state = HANDSHAKE_CONSUMED_INITIATION;
 	up_write(&handshake->lock);
@@ -818,7 +821,7 @@ bool wg_noise_handshake_begin_session(struct noise_handshake *handshake,
 			handshake->entry.peer->device->index_hashtable,
 			&handshake->entry, &new_keypair->entry);
 	} else {
-		kfree_sensitive(new_keypair);
+		kzfree(new_keypair);
 	}
 	rcu_read_unlock_bh();
 

@@ -15,8 +15,6 @@
 #include <linux/rcupdate.h>
 #include <linux/mutex.h>
 
-#ifdef CONFIG_CGROUP_DEVICE
-
 static DEFINE_MUTEX(devcgroup_mutex);
 
 enum devcg_behavior {
@@ -354,8 +352,7 @@ static bool match_exception_partial(struct list_head *exceptions, short type,
 {
 	struct dev_exception_item *ex;
 
-	list_for_each_entry_rcu(ex, exceptions, list,
-				lockdep_is_held(&devcgroup_mutex)) {
+	list_for_each_entry_rcu(ex, exceptions, list) {
 		if ((type & DEVCG_DEV_BLOCK) && !(ex->type & DEVCG_DEV_BLOCK))
 			continue;
 		if ((type & DEVCG_DEV_CHAR) && !(ex->type & DEVCG_DEV_CHAR))
@@ -795,7 +792,7 @@ struct cgroup_subsys devices_cgrp_subsys = {
 };
 
 /**
- * devcgroup_legacy_check_permission - checks if an inode operation is permitted
+ * __devcgroup_check_permission - checks if an inode operation is permitted
  * @dev_cgroup: the dev cgroup to be tested against
  * @type: device type
  * @major: device major number
@@ -804,7 +801,7 @@ struct cgroup_subsys devices_cgrp_subsys = {
  *
  * returns 0 on success, -EPERM case the operation is not permitted
  */
-static int devcgroup_legacy_check_permission(short type, u32 major, u32 minor,
+static int __devcgroup_check_permission(short type, u32 major, u32 minor,
 					short access)
 {
 	struct dev_cgroup *dev_cgroup;
@@ -828,10 +825,6 @@ static int devcgroup_legacy_check_permission(short type, u32 major, u32 minor,
 	return 0;
 }
 
-#endif /* CONFIG_CGROUP_DEVICE */
-
-#if defined(CONFIG_CGROUP_DEVICE) || defined(CONFIG_CGROUP_BPF)
-
 int devcgroup_check_permission(short type, u32 major, u32 minor, short access)
 {
 	int rc = BPF_CGROUP_RUN_PROG_DEVICE_CGROUP(type, major, minor, access);
@@ -839,13 +832,6 @@ int devcgroup_check_permission(short type, u32 major, u32 minor, short access)
 	if (rc)
 		return -EPERM;
 
-	#ifdef CONFIG_CGROUP_DEVICE
-	return devcgroup_legacy_check_permission(type, major, minor, access);
-
-	#else /* CONFIG_CGROUP_DEVICE */
-	return 0;
-
-	#endif /* CONFIG_CGROUP_DEVICE */
+	return __devcgroup_check_permission(type, major, minor, access);
 }
 EXPORT_SYMBOL(devcgroup_check_permission);
-#endif /* defined(CONFIG_CGROUP_DEVICE) || defined(CONFIG_CGROUP_BPF) */

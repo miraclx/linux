@@ -289,7 +289,7 @@ static int davinci_i2s_set_dai_fmt(struct snd_soc_dai *cpu_dai,
 		 * rate is lowered.
 		 */
 		inv_fs = true;
-		fallthrough;
+		/* fall through */
 	case SND_SOC_DAIFMT_DSP_A:
 		dev->mode = MOD_DSP_A;
 		break;
@@ -747,7 +747,7 @@ static int davinci_i2s_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct of_device_id davinci_i2s_match[] __maybe_unused = {
+static const struct of_device_id davinci_i2s_match[] = {
 	{ .compatible = "ti,da850-mcbsp" },
 	{},
 };

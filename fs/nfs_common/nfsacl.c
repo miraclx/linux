@@ -237,7 +237,7 @@ posix_acl_from_nfsacl(struct posix_acl *acl)
 				break;
 			case ACL_MASK:
 				mask = pa;
-				fallthrough;
+				/* fall through */
 			case ACL_OTHER:
 				break;
 		}

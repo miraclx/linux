@@ -62,7 +62,8 @@ static int tilcdc_plane_atomic_check(struct drm_plane *plane,
 		return -EINVAL;
 	}
 
-	if (old_state->fb && state->fb->format != old_state->fb->format) {
+	if (state->fb && old_state->fb &&
+	    state->fb->format != old_state->fb->format) {
 		dev_dbg(plane->dev->dev,
 			"%s(): pixel format change requires mode_change\n",
 			__func__);
@@ -83,11 +84,9 @@ static void tilcdc_plane_atomic_update(struct drm_plane *plane,
 	if (WARN_ON(!state->fb || !state->crtc->state))
 		return;
 
-	if (tilcdc_crtc_update_fb(state->crtc,
-				  state->fb,
-				  state->crtc->state->event) == 0) {
-		state->crtc->state->event = NULL;
-	}
+	tilcdc_crtc_update_fb(state->crtc,
+			      state->fb,
+			      state->crtc->state->event);
 }
 
 static const struct drm_plane_helper_funcs plane_helper_funcs = {

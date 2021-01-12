@@ -8,6 +8,7 @@
  */
 #ifndef __ASM_SH_WATCHDOG_H
 #define __ASM_SH_WATCHDOG_H
+#ifdef __KERNEL__
 
 #include <linux/types.h>
 #include <linux/io.h>
@@ -156,4 +157,5 @@ static inline void sh_wdt_write_csr(__u8 val)
 	__raw_writew((WTCSR_HIGH << 8) | (__u16)val, WTCSR);
 }
 #endif /* CONFIG_CPU_SUBTYPE_SH7785 || CONFIG_CPU_SUBTYPE_SH7780 */
+#endif /* __KERNEL__ */
 #endif /* __ASM_SH_WATCHDOG_H */

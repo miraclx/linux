@@ -886,7 +886,7 @@ static int sunsab_console_setup(struct console *con, char *options)
 	 * though...
 	 */
 	if (up->port.type != PORT_SUNSAB)
-		return -EINVAL;
+		return -1;
 
 	printk("Console: ttyS%d (SAB82532)\n",
 	       (sunsab_reg.minor - 64) + con->index);

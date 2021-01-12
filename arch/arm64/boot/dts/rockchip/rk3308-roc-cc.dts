@@ -28,14 +28,14 @@
 	leds {
 		compatible = "gpio-leds";
 
-		power_led: led-0 {
+		power {
 			label = "firefly:red:power";
 			linux,default-trigger = "ir-power-click";
 			default-state = "on";
 			gpios = <&gpio0 RK_PA6 GPIO_ACTIVE_HIGH>;
 		};
 
-		user_led: led-1 {
+		user {
 			label = "firefly:blue:user";
 			linux,default-trigger = "ir-user-click";
 			default-state = "off";
@@ -123,7 +123,9 @@
 };
 
 &emmc {
+	bus-width = <8>;
 	cap-mmc-highspeed;
+	disable-wp;
 	mmc-hs200-1_8v;
 	non-removable;
 	status = "okay";
@@ -169,6 +171,7 @@
 };
 
 &sdmmc {
+	bus-width = <4>;
 	cap-mmc-highspeed;
 	cap-sd-highspeed;
 	card-detect-delay = <300>;

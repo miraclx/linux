@@ -43,7 +43,7 @@ static int set_user_ckpt_msr(struct task_struct *task, unsigned long msr)
 
 static int set_user_ckpt_trap(struct task_struct *task, unsigned long trap)
 {
-	set_trap(&task->thread.ckpt_regs, trap);
+	task->thread.ckpt_regs.trap = trap & 0xfff0;
 	return 0;
 }
 
@@ -70,7 +70,10 @@ int tm_cgpr_active(struct task_struct *target, const struct user_regset *regset)
  * tm_cgpr_get - get CGPR registers
  * @target:	The target task.
  * @regset:	The user regset structure.
- * @to:		Destination of copy.
+ * @pos:	The buffer position.
+ * @count:	Number of bytes to copy.
+ * @kbuf:	Kernel buffer to copy from.
+ * @ubuf:	User buffer to copy into.
  *
  * This function gets transaction checkpointed GPR registers.
  *
@@ -84,12 +87,9 @@ int tm_cgpr_active(struct task_struct *target, const struct user_regset *regset)
  * };
  */
 int tm_cgpr_get(struct task_struct *target, const struct user_regset *regset,
-		struct membuf to)
+		unsigned int pos, unsigned int count, void *kbuf, void __user *ubuf)
 {
-	struct membuf to_msr = membuf_at(&to, offsetof(struct pt_regs, msr));
-#ifdef CONFIG_PPC64
-	struct membuf to_softe = membuf_at(&to, offsetof(struct pt_regs, softe));
-#endif
+	int ret;
 
 	if (!cpu_has_feature(CPU_FTR_TM))
 		return -ENODEV;
@@ -101,14 +101,31 @@ int tm_cgpr_get(struct task_struct *target, const struct user_regset *regset,
 	flush_fp_to_thread(target);
 	flush_altivec_to_thread(target);
 
-	membuf_write(&to, &target->thread.ckpt_regs, sizeof(struct user_pt_regs));
+	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				  &target->thread.ckpt_regs,
+				  0, offsetof(struct pt_regs, msr));
+	if (!ret) {
+		unsigned long msr = get_user_ckpt_msr(target);
 
-	membuf_store(&to_msr, get_user_ckpt_msr(target));
-#ifdef CONFIG_PPC64
-	membuf_store(&to_softe, 0x1ul);
-#endif
-	return membuf_zero(&to, ELF_NGREG * sizeof(unsigned long) -
-			sizeof(struct user_pt_regs));
+		ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, &msr,
+					  offsetof(struct pt_regs, msr),
+					  offsetof(struct pt_regs, msr) +
+					  sizeof(msr));
+	}
+
+	BUILD_BUG_ON(offsetof(struct pt_regs, orig_gpr3) !=
+		     offsetof(struct pt_regs, msr) + sizeof(long));
+
+	if (!ret)
+		ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+					  &target->thread.ckpt_regs.orig_gpr3,
+					  offsetof(struct pt_regs, orig_gpr3),
+					  sizeof(struct user_pt_regs));
+	if (!ret)
+		ret = user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf,
+					       sizeof(struct user_pt_regs), -1);
+
+	return ret;
 }
 
 /*
@@ -212,7 +229,10 @@ int tm_cfpr_active(struct task_struct *target, const struct user_regset *regset)
  * tm_cfpr_get - get CFPR registers
  * @target:	The target task.
  * @regset:	The user regset structure.
- * @to:		Destination of copy.
+ * @pos:	The buffer position.
+ * @count:	Number of bytes to copy.
+ * @kbuf:	Kernel buffer to copy from.
+ * @ubuf:	User buffer to copy into.
  *
  * This function gets in transaction checkpointed FPR registers.
  *
@@ -227,7 +247,7 @@ int tm_cfpr_active(struct task_struct *target, const struct user_regset *regset)
  *};
  */
 int tm_cfpr_get(struct task_struct *target, const struct user_regset *regset,
-		struct membuf to)
+		unsigned int pos, unsigned int count, void *kbuf, void __user *ubuf)
 {
 	u64 buf[33];
 	int i;
@@ -246,7 +266,7 @@ int tm_cfpr_get(struct task_struct *target, const struct user_regset *regset,
 	for (i = 0; i < 32 ; i++)
 		buf[i] = target->thread.TS_CKFPR(i);
 	buf[32] = target->thread.ckfp_state.fpscr;
-	return membuf_write(&to, buf, sizeof(buf));
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, buf, 0, -1);
 }
 
 /**
@@ -324,7 +344,10 @@ int tm_cvmx_active(struct task_struct *target, const struct user_regset *regset)
  * tm_cvmx_get - get CMVX registers
  * @target:	The target task.
  * @regset:	The user regset structure.
- * @to:		Destination of copy.
+ * @pos:	The buffer position.
+ * @count:	Number of bytes to copy.
+ * @kbuf:	Kernel buffer to copy from.
+ * @ubuf:	User buffer to copy into.
  *
  * This function gets in transaction checkpointed VMX registers.
  *
@@ -340,12 +363,10 @@ int tm_cvmx_active(struct task_struct *target, const struct user_regset *regset)
  *};
  */
 int tm_cvmx_get(struct task_struct *target, const struct user_regset *regset,
-		struct membuf to)
+		unsigned int pos, unsigned int count, void *kbuf, void __user *ubuf)
 {
-	union {
-		elf_vrreg_t reg;
-		u32 word;
-	} vrsave;
+	int ret;
+
 	BUILD_BUG_ON(TVSO(vscr) != TVSO(vr[32]));
 
 	if (!cpu_has_feature(CPU_FTR_TM))
@@ -359,13 +380,23 @@ int tm_cvmx_get(struct task_struct *target, const struct user_regset *regset,
 	flush_fp_to_thread(target);
 	flush_altivec_to_thread(target);
 
-	membuf_write(&to, &target->thread.ckvr_state, 33 * sizeof(vector128));
-	/*
-	 * Copy out only the low-order word of vrsave.
-	 */
-	memset(&vrsave, 0, sizeof(vrsave));
-	vrsave.word = target->thread.ckvrsave;
-	return membuf_write(&to, &vrsave, sizeof(vrsave));
+	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, &target->thread.ckvr_state,
+				  0, 33 * sizeof(vector128));
+	if (!ret) {
+		/*
+		 * Copy out only the low-order word of vrsave.
+		 */
+		union {
+			elf_vrreg_t reg;
+			u32 word;
+		} vrsave;
+		memset(&vrsave, 0, sizeof(vrsave));
+		vrsave.word = target->thread.ckvrsave;
+		ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf, &vrsave,
+					  33 * sizeof(vector128), -1);
+	}
+
+	return ret;
 }
 
 /**
@@ -453,7 +484,10 @@ int tm_cvsx_active(struct task_struct *target, const struct user_regset *regset)
  * tm_cvsx_get - get CVSX registers
  * @target:	The target task.
  * @regset:	The user regset structure.
- * @to:		Destination of copy.
+ * @pos:	The buffer position.
+ * @count:	Number of bytes to copy.
+ * @kbuf:	Kernel buffer to copy from.
+ * @ubuf:	User buffer to copy into.
  *
  * This function gets in transaction checkpointed VSX registers.
  *
@@ -467,10 +501,10 @@ int tm_cvsx_active(struct task_struct *target, const struct user_regset *regset)
  *};
  */
 int tm_cvsx_get(struct task_struct *target, const struct user_regset *regset,
-		struct membuf to)
+		unsigned int pos, unsigned int count, void *kbuf, void __user *ubuf)
 {
 	u64 buf[32];
-	int i;
+	int ret, i;
 
 	if (!cpu_has_feature(CPU_FTR_TM))
 		return -ENODEV;
@@ -486,7 +520,10 @@ int tm_cvsx_get(struct task_struct *target, const struct user_regset *regset,
 
 	for (i = 0; i < 32 ; i++)
 		buf[i] = target->thread.ckfp_state.fpr[i][TS_VSRLOWOFFSET];
-	return membuf_write(&to, buf, 32 * sizeof(double));
+	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				  buf, 0, 32 * sizeof(double));
+
+	return ret;
 }
 
 /**
@@ -560,7 +597,10 @@ int tm_spr_active(struct task_struct *target, const struct user_regset *regset)
  * tm_spr_get - get the TM related SPR registers
  * @target:	The target task.
  * @regset:	The user regset structure.
- * @to:		Destination of copy.
+ * @pos:	The buffer position.
+ * @count:	Number of bytes to copy.
+ * @kbuf:	Kernel buffer to copy from.
+ * @ubuf:	User buffer to copy into.
  *
  * This function gets transactional memory related SPR registers.
  * The userspace interface buffer layout is as follows.
@@ -572,8 +612,10 @@ int tm_spr_active(struct task_struct *target, const struct user_regset *regset)
  * };
  */
 int tm_spr_get(struct task_struct *target, const struct user_regset *regset,
-	       struct membuf to)
+	       unsigned int pos, unsigned int count, void *kbuf, void __user *ubuf)
 {
+	int ret;
+
 	/* Build tests */
 	BUILD_BUG_ON(TSO(tm_tfhar) + sizeof(u64) != TSO(tm_texasr));
 	BUILD_BUG_ON(TSO(tm_texasr) + sizeof(u64) != TSO(tm_tfiar));
@@ -588,11 +630,21 @@ int tm_spr_get(struct task_struct *target, const struct user_regset *regset,
 	flush_altivec_to_thread(target);
 
 	/* TFHAR register */
-	membuf_write(&to, &target->thread.tm_tfhar, sizeof(u64));
+	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				  &target->thread.tm_tfhar, 0, sizeof(u64));
+
 	/* TEXASR register */
-	membuf_write(&to, &target->thread.tm_texasr, sizeof(u64));
+	if (!ret)
+		ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+					  &target->thread.tm_texasr, sizeof(u64),
+					  2 * sizeof(u64));
+
 	/* TFIAR register */
-	return membuf_write(&to, &target->thread.tm_tfiar, sizeof(u64));
+	if (!ret)
+		ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+					  &target->thread.tm_tfiar,
+					  2 * sizeof(u64), 3 * sizeof(u64));
+	return ret;
 }
 
 /**
@@ -662,15 +714,19 @@ int tm_tar_active(struct task_struct *target, const struct user_regset *regset)
 }
 
 int tm_tar_get(struct task_struct *target, const struct user_regset *regset,
-	       struct membuf to)
+	       unsigned int pos, unsigned int count, void *kbuf, void __user *ubuf)
 {
+	int ret;
+
 	if (!cpu_has_feature(CPU_FTR_TM))
 		return -ENODEV;
 
 	if (!MSR_TM_ACTIVE(target->thread.regs->msr))
 		return -ENODATA;
 
-	return membuf_write(&to, &target->thread.tm_tar, sizeof(u64));
+	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				  &target->thread.tm_tar, 0, sizeof(u64));
+	return ret;
 }
 
 int tm_tar_set(struct task_struct *target, const struct user_regset *regset,
@@ -703,15 +759,19 @@ int tm_ppr_active(struct task_struct *target, const struct user_regset *regset)
 
 
 int tm_ppr_get(struct task_struct *target, const struct user_regset *regset,
-	       struct membuf to)
+	       unsigned int pos, unsigned int count, void *kbuf, void __user *ubuf)
 {
+	int ret;
+
 	if (!cpu_has_feature(CPU_FTR_TM))
 		return -ENODEV;
 
 	if (!MSR_TM_ACTIVE(target->thread.regs->msr))
 		return -ENODATA;
 
-	return membuf_write(&to, &target->thread.tm_ppr, sizeof(u64));
+	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				  &target->thread.tm_ppr, 0, sizeof(u64));
+	return ret;
 }
 
 int tm_ppr_set(struct task_struct *target, const struct user_regset *regset,
@@ -743,15 +803,19 @@ int tm_dscr_active(struct task_struct *target, const struct user_regset *regset)
 }
 
 int tm_dscr_get(struct task_struct *target, const struct user_regset *regset,
-		struct membuf to)
+		unsigned int pos, unsigned int count, void *kbuf, void __user *ubuf)
 {
+	int ret;
+
 	if (!cpu_has_feature(CPU_FTR_TM))
 		return -ENODEV;
 
 	if (!MSR_TM_ACTIVE(target->thread.regs->msr))
 		return -ENODATA;
 
-	return membuf_write(&to, &target->thread.tm_dscr, sizeof(u64));
+	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				  &target->thread.tm_dscr, 0, sizeof(u64));
+	return ret;
 }
 
 int tm_dscr_set(struct task_struct *target, const struct user_regset *regset,
@@ -772,11 +836,10 @@ int tm_dscr_set(struct task_struct *target, const struct user_regset *regset,
 }
 
 int tm_cgpr32_get(struct task_struct *target, const struct user_regset *regset,
-		  struct membuf to)
+		  unsigned int pos, unsigned int count, void *kbuf, void __user *ubuf)
 {
-	gpr32_get_common(target, regset, to,
+	return gpr32_get_common(target, regset, pos, count, kbuf, ubuf,
 				&target->thread.ckpt_regs.gpr[0]);
-	return membuf_zero(&to, ELF_NGREG * sizeof(u32));
 }
 
 int tm_cgpr32_set(struct task_struct *target, const struct user_regset *regset,

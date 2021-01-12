@@ -195,9 +195,8 @@
 	pinctrl-names = "default";
 };
 
-&usb {
+&usb0 {
 	status = "okay";
-	dr_mode = "host";
 };
 
 &usb2_phy0 {

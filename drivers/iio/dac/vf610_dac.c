@@ -36,7 +36,6 @@ struct vf610_dac {
 	struct device *dev;
 	enum vf610_conversion_mode_sel conv_mode;
 	void __iomem *regs;
-	struct mutex lock;
 };
 
 static void vf610_dac_init(struct vf610_dac *info)
@@ -65,7 +64,7 @@ static int vf610_set_conversion_mode(struct iio_dev *indio_dev,
 	struct vf610_dac *info = iio_priv(indio_dev);
 	int val;
 
-	mutex_lock(&info->lock);
+	mutex_lock(&indio_dev->mlock);
 	info->conv_mode = mode;
 	val = readl(info->regs + VF610_DACx_STATCTRL);
 	if (mode)
@@ -73,7 +72,7 @@ static int vf610_set_conversion_mode(struct iio_dev *indio_dev,
 	else
 		val &= ~VF610_DAC_LPEN;
 	writel(val, info->regs + VF610_DACx_STATCTRL);
-	mutex_unlock(&info->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return 0;
 }
@@ -148,9 +147,9 @@ static int vf610_write_raw(struct iio_dev *indio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
-		mutex_lock(&info->lock);
+		mutex_lock(&indio_dev->mlock);
 		writel(VF610_DAC_DAT0(val), info->regs);
-		mutex_unlock(&info->lock);
+		mutex_unlock(&indio_dev->mlock);
 		return 0;
 
 	default:
@@ -199,12 +198,12 @@ static int vf610_dac_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, indio_dev);
 
 	indio_dev->name = dev_name(&pdev->dev);
+	indio_dev->dev.parent = &pdev->dev;
+	indio_dev->dev.of_node = pdev->dev.of_node;
 	indio_dev->info = &vf610_dac_iio_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = vf610_dac_iio_channels;
 	indio_dev->num_channels = ARRAY_SIZE(vf610_dac_iio_channels);
-
-	mutex_init(&info->lock);
 
 	ret = clk_prepare_enable(info->clk);
 	if (ret) {

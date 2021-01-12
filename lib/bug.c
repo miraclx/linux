@@ -47,7 +47,6 @@
 #include <linux/bug.h>
 #include <linux/sched.h>
 #include <linux/rculist.h>
-#include <linux/ftrace.h>
 
 extern struct bug_entry __start___bug_table[], __stop___bug_table[];
 
@@ -153,8 +152,6 @@ enum bug_trap_type report_bug(unsigned long bugaddr, struct pt_regs *regs)
 	bug = find_bug(bugaddr);
 	if (!bug)
 		return BUG_TRAP_TYPE_NONE;
-
-	disable_trace_on_warning();
 
 	file = NULL;
 	line = 0;

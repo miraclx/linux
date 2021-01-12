@@ -32,7 +32,7 @@ static int fbcon_rotate_font(struct fb_info *info, struct vc_data *vc)
 
 	src = ops->fontdata = vc->vc_font.data;
 	ops->cur_rotate = ops->p->con_rotate;
-	len = vc->vc_font.charcount;
+	len = (!ops->p->userfont) ? 256 : FNTCHARCNT(src);
 	s_cellsize = ((vc->vc_font.width + 7)/8) *
 		vc->vc_font.height;
 	d_cellsize = s_cellsize;
@@ -109,3 +109,4 @@ void fbcon_set_rotate(struct fbcon_ops *ops)
 		break;
 	}
 }
+EXPORT_SYMBOL(fbcon_set_rotate);

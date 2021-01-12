@@ -16,6 +16,7 @@
 #include <asm/bootinfo.h>
 #include <asm/cpu.h>
 #include <asm/io.h>
+#include <asm/pgtable.h>
 #include <asm/sgialib.h>
 #include <asm/time.h>
 #include <asm/sn/agent.h>

@@ -95,6 +95,7 @@ static const struct tty_operations ssl_ops = {
 	.open 	 		= line_open,
 	.close 	 		= line_close,
 	.write 	 		= line_write,
+	.put_char 		= line_put_char,
 	.write_room		= line_write_room,
 	.chars_in_buffer 	= line_chars_in_buffer,
 	.flush_buffer 		= line_flush_buffer,

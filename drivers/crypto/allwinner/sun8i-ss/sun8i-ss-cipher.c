@@ -8,7 +8,7 @@
  * This file add support for AES cipher with 128,192,256 bits keysize in
  * CBC and ECB mode.
  *
- * You could find a link for the datasheet in Documentation/arm/sunxi.rst
+ * You could find a link for the datasheet in Documentation/arm/sunxi/README
  */
 
 #include <linux/crypto.h>
@@ -73,6 +73,7 @@ static int sun8i_ss_cipher_fallback(struct skcipher_request *areq)
 	struct sun8i_cipher_req_ctx *rctx = skcipher_request_ctx(areq);
 	int err;
 
+	SYNC_SKCIPHER_REQUEST_ON_STACK(subreq, op->fallback_tfm);
 #ifdef CONFIG_CRYPTO_DEV_SUN8I_SS_DEBUG
 	struct skcipher_alg *alg = crypto_skcipher_alg(tfm);
 	struct sun8i_ss_alg_template *algt;
@@ -80,15 +81,15 @@ static int sun8i_ss_cipher_fallback(struct skcipher_request *areq)
 	algt = container_of(alg, struct sun8i_ss_alg_template, alg.skcipher);
 	algt->stat_fb++;
 #endif
-	skcipher_request_set_tfm(&rctx->fallback_req, op->fallback_tfm);
-	skcipher_request_set_callback(&rctx->fallback_req, areq->base.flags,
-				      areq->base.complete, areq->base.data);
-	skcipher_request_set_crypt(&rctx->fallback_req, areq->src, areq->dst,
+	skcipher_request_set_sync_tfm(subreq, op->fallback_tfm);
+	skcipher_request_set_callback(subreq, areq->base.flags, NULL, NULL);
+	skcipher_request_set_crypt(subreq, areq->src, areq->dst,
 				   areq->cryptlen, areq->iv);
 	if (rctx->op_dir & SS_DECRYPTION)
-		err = crypto_skcipher_decrypt(&rctx->fallback_req);
+		err = crypto_skcipher_decrypt(subreq);
 	else
-		err = crypto_skcipher_encrypt(&rctx->fallback_req);
+		err = crypto_skcipher_encrypt(subreq);
+	skcipher_request_zero(subreq);
 	return err;
 }
 
@@ -248,7 +249,8 @@ theend_iv:
 			offset = areq->cryptlen - ivsize;
 			if (rctx->op_dir & SS_DECRYPTION) {
 				memcpy(areq->iv, backup_iv, ivsize);
-				kfree_sensitive(backup_iv);
+				memzero_explicit(backup_iv, ivsize);
+				kzfree(backup_iv);
 			} else {
 				scatterwalk_map_and_copy(areq->iv, areq->dst, offset,
 							 ivsize, 0);
@@ -332,20 +334,18 @@ int sun8i_ss_cipher_init(struct crypto_tfm *tfm)
 	algt = container_of(alg, struct sun8i_ss_alg_template, alg.skcipher);
 	op->ss = algt->ss;
 
-	op->fallback_tfm = crypto_alloc_skcipher(name, 0, CRYPTO_ALG_NEED_FALLBACK);
+	sktfm->reqsize = sizeof(struct sun8i_cipher_req_ctx);
+
+	op->fallback_tfm = crypto_alloc_sync_skcipher(name, 0, CRYPTO_ALG_NEED_FALLBACK);
 	if (IS_ERR(op->fallback_tfm)) {
 		dev_err(op->ss->dev, "ERROR: Cannot allocate fallback for %s %ld\n",
 			name, PTR_ERR(op->fallback_tfm));
 		return PTR_ERR(op->fallback_tfm);
 	}
 
-	sktfm->reqsize = sizeof(struct sun8i_cipher_req_ctx) +
-			 crypto_skcipher_reqsize(op->fallback_tfm);
-
-
 	dev_info(op->ss->dev, "Fallback for %s is %s\n",
 		 crypto_tfm_alg_driver_name(&sktfm->base),
-		 crypto_tfm_alg_driver_name(crypto_skcipher_tfm(op->fallback_tfm)));
+		 crypto_tfm_alg_driver_name(crypto_skcipher_tfm(&op->fallback_tfm->base)));
 
 	op->enginectx.op.do_one_request = sun8i_ss_handle_cipher_request;
 	op->enginectx.op.prepare_request = NULL;
@@ -359,7 +359,7 @@ int sun8i_ss_cipher_init(struct crypto_tfm *tfm)
 
 	return 0;
 error_pm:
-	crypto_free_skcipher(op->fallback_tfm);
+	crypto_free_sync_skcipher(op->fallback_tfm);
 	return err;
 }
 
@@ -367,8 +367,11 @@ void sun8i_ss_cipher_exit(struct crypto_tfm *tfm)
 {
 	struct sun8i_cipher_tfm_ctx *op = crypto_tfm_ctx(tfm);
 
-	kfree_sensitive(op->key);
-	crypto_free_skcipher(op->fallback_tfm);
+	if (op->key) {
+		memzero_explicit(op->key, op->keylen);
+		kfree(op->key);
+	}
+	crypto_free_sync_skcipher(op->fallback_tfm);
 	pm_runtime_put_sync(op->ss->dev);
 }
 
@@ -389,16 +392,19 @@ int sun8i_ss_aes_setkey(struct crypto_skcipher *tfm, const u8 *key,
 		dev_dbg(ss->dev, "ERROR: Invalid keylen %u\n", keylen);
 		return -EINVAL;
 	}
-	kfree_sensitive(op->key);
+	if (op->key) {
+		memzero_explicit(op->key, op->keylen);
+		kfree(op->key);
+	}
 	op->keylen = keylen;
 	op->key = kmemdup(key, keylen, GFP_KERNEL | GFP_DMA);
 	if (!op->key)
 		return -ENOMEM;
 
-	crypto_skcipher_clear_flags(op->fallback_tfm, CRYPTO_TFM_REQ_MASK);
-	crypto_skcipher_set_flags(op->fallback_tfm, tfm->base.crt_flags & CRYPTO_TFM_REQ_MASK);
+	crypto_sync_skcipher_clear_flags(op->fallback_tfm, CRYPTO_TFM_REQ_MASK);
+	crypto_sync_skcipher_set_flags(op->fallback_tfm, tfm->base.crt_flags & CRYPTO_TFM_REQ_MASK);
 
-	return crypto_skcipher_setkey(op->fallback_tfm, key, keylen);
+	return crypto_sync_skcipher_setkey(op->fallback_tfm, key, keylen);
 }
 
 int sun8i_ss_des3_setkey(struct crypto_skcipher *tfm, const u8 *key,
@@ -412,14 +418,17 @@ int sun8i_ss_des3_setkey(struct crypto_skcipher *tfm, const u8 *key,
 		return -EINVAL;
 	}
 
-	kfree_sensitive(op->key);
+	if (op->key) {
+		memzero_explicit(op->key, op->keylen);
+		kfree(op->key);
+	}
 	op->keylen = keylen;
 	op->key = kmemdup(key, keylen, GFP_KERNEL | GFP_DMA);
 	if (!op->key)
 		return -ENOMEM;
 
-	crypto_skcipher_clear_flags(op->fallback_tfm, CRYPTO_TFM_REQ_MASK);
-	crypto_skcipher_set_flags(op->fallback_tfm, tfm->base.crt_flags & CRYPTO_TFM_REQ_MASK);
+	crypto_sync_skcipher_clear_flags(op->fallback_tfm, CRYPTO_TFM_REQ_MASK);
+	crypto_sync_skcipher_set_flags(op->fallback_tfm, tfm->base.crt_flags & CRYPTO_TFM_REQ_MASK);
 
-	return crypto_skcipher_setkey(op->fallback_tfm, key, keylen);
+	return crypto_sync_skcipher_setkey(op->fallback_tfm, key, keylen);
 }

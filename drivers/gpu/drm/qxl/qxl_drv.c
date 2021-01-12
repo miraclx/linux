@@ -81,22 +81,19 @@ qxl_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		return -EINVAL; /* TODO: ENODEV ? */
 	}
 
-	qdev = devm_drm_dev_alloc(&pdev->dev, &qxl_driver,
-				  struct qxl_device, ddev);
-	if (IS_ERR(qdev)) {
-		pr_err("Unable to init drm dev");
+	qdev = kzalloc(sizeof(struct qxl_device), GFP_KERNEL);
+	if (!qdev)
 		return -ENOMEM;
-	}
 
 	ret = pci_enable_device(pdev);
 	if (ret)
-		return ret;
+		goto free_dev;
 
 	ret = drm_fb_helper_remove_conflicting_pci_framebuffers(pdev, "qxl");
 	if (ret)
 		goto disable_pci;
 
-	if (is_vga(pdev) && pdev->revision < 5) {
+	if (is_vga(pdev)) {
 		ret = vga_get_interruptible(pdev, VGA_RSRC_LEGACY_IO);
 		if (ret) {
 			DRM_ERROR("can't get legacy vga ioports\n");
@@ -104,7 +101,7 @@ qxl_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		}
 	}
 
-	ret = qxl_device_init(qdev, pdev);
+	ret = qxl_device_init(qdev, &qxl_driver, pdev);
 	if (ret)
 		goto put_vga;
 
@@ -127,17 +124,18 @@ modeset_cleanup:
 unload:
 	qxl_device_fini(qdev);
 put_vga:
-	if (is_vga(pdev) && pdev->revision < 5)
+	if (is_vga(pdev))
 		vga_put(pdev, VGA_RSRC_LEGACY_IO);
 disable_pci:
 	pci_disable_device(pdev);
-
+free_dev:
+	kfree(qdev);
 	return ret;
 }
 
 static void qxl_drm_release(struct drm_device *dev)
 {
-	struct qxl_device *qdev = to_qxl(dev);
+	struct qxl_device *qdev = dev->dev_private;
 
 	/*
 	 * TODO: qxl_device_fini() call should be in qxl_pci_remove(),
@@ -146,6 +144,8 @@ static void qxl_drm_release(struct drm_device *dev)
 	 */
 	qxl_modeset_fini(qdev);
 	qxl_device_fini(qdev);
+	dev->dev_private = NULL;
+	kfree(qdev);
 }
 
 static void
@@ -155,8 +155,9 @@ qxl_pci_remove(struct pci_dev *pdev)
 
 	drm_dev_unregister(dev);
 	drm_atomic_helper_shutdown(dev);
-	if (is_vga(pdev) && pdev->revision < 5)
+	if (is_vga(pdev))
 		vga_put(pdev, VGA_RSRC_LEGACY_IO);
+	drm_dev_put(dev);
 }
 
 DEFINE_DRM_GEM_FOPS(qxl_fops);
@@ -164,7 +165,7 @@ DEFINE_DRM_GEM_FOPS(qxl_fops);
 static int qxl_drm_freeze(struct drm_device *dev)
 {
 	struct pci_dev *pdev = dev->pdev;
-	struct qxl_device *qdev = to_qxl(dev);
+	struct qxl_device *qdev = dev->dev_private;
 	int ret;
 
 	ret = drm_mode_config_helper_suspend(dev);
@@ -186,7 +187,7 @@ static int qxl_drm_freeze(struct drm_device *dev)
 
 static int qxl_drm_resume(struct drm_device *dev, bool thaw)
 {
-	struct qxl_device *qdev = to_qxl(dev);
+	struct qxl_device *qdev = dev->dev_private;
 
 	qdev->ram_header->int_mask = QXL_INTERRUPT_MASK;
 	if (!thaw) {
@@ -245,7 +246,7 @@ static int qxl_pm_restore(struct device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct drm_device *drm_dev = pci_get_drvdata(pdev);
-	struct qxl_device *qdev = to_qxl(drm_dev);
+	struct qxl_device *qdev = drm_dev->dev_private;
 
 	qxl_io_reset(qdev);
 	return qxl_drm_resume(drm_dev, false);

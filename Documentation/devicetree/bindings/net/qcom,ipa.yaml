@@ -20,10 +20,7 @@ description:
   The GSI is an integral part of the IPA, but it is logically isolated
   and has a distinct interrupt and a separately-defined address space.
 
-  See also soc/qcom/qcom,smp2p.txt and interconnect/interconnect.txt.  See
-  iommu/iommu.txt and iommu/arm,smmu.yaml for more information about SMMU
-  bindings.
-
+  See also soc/qcom/qcom,smp2p.txt and interconnect/interconnect.txt.
 
   - |
     --------             ---------
@@ -43,7 +40,7 @@ description:
 
 properties:
   compatible:
-    const: "qcom,sdm845-ipa"
+      const: "qcom,sdm845-ipa"
 
   reg:
     items:
@@ -57,14 +54,11 @@ properties:
       - const: ipa-shared
       - const: gsi
 
-  iommus:
-    maxItems: 1
-
   clocks:
     maxItems: 1
 
   clock-names:
-    const: core
+      const: core
 
   interrupts:
     items:
@@ -93,14 +87,16 @@ properties:
       - const: config
 
   qcom,smem-states:
-    $ref: /schemas/types.yaml#/definitions/phandle-array
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/phandle-array
     description: State bits used in by the AP to signal the modem.
     items:
-      - description: Whether the "ipa-clock-enabled" state bit is valid
-      - description: Whether the IPA clock is enabled (if valid)
+    - description: Whether the "ipa-clock-enabled" state bit is valid
+    - description: Whether the IPA clock is enabled (if valid)
 
   qcom,smem-state-names:
-    $ref: /schemas/types.yaml#/definitions/string-array
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/string-array
     description: The names of the state bits used for SMP2P output
     items:
       - const: ipa-clock-enabled-valid
@@ -114,13 +110,14 @@ properties:
       validating firwmare used by the GSI.
 
   modem-remoteproc:
-    $ref: /schemas/types.yaml#/definitions/phandle
+    $ref: /schemas/types.yaml#definitions/phandle
     description:
       This defines the phandle to the remoteproc node representing
       the modem subsystem.  This is requied so the IPA driver can
       receive and act on notifications of modem up/down events.
 
   memory-region:
+    $ref: /schemas/types.yaml#/definitions/phandle-array
     maxItems: 1
     description:
       If present, a phandle for a reserved memory area that holds
@@ -129,7 +126,6 @@ properties:
 
 required:
   - compatible
-  - iommus
   - reg
   - clocks
   - interrupts
@@ -139,11 +135,9 @@ required:
 
 oneOf:
   - required:
-      - modem-init
+    - modem-init
   - required:
-      - memory-region
-
-additionalProperties: false
+    - memory-region
 
 examples:
   - |
@@ -170,10 +164,9 @@ examples:
                 modem-init;
                 modem-remoteproc = <&mss_pil>;
 
-                iommus = <&apps_smmu 0x720 0x3>;
-                reg = <0x1e40000 0x7000>,
-                        <0x1e47000 0x2000>,
-                        <0x1e04000 0x2c000>;
+                reg = <0 0x1e40000 0 0x7000>,
+                        <0 0x1e47000 0 0x2000>,
+                        <0 0x1e04000 0 0x2c000>;
                 reg-names = "ipa-reg",
                             "ipa-shared",
                             "gsi";

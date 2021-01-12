@@ -22,7 +22,7 @@ struct numa_topology_node {
 
 struct numa_topology {
 	u32				nr;
-	struct numa_topology_node	nodes[];
+	struct numa_topology_node	nodes[0];
 };
 
 struct cpu_topology *cpu_topology__new(void);

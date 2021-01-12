@@ -17,7 +17,6 @@
 	};
 
 	memory {
-		device_type = "memory";
 		reg = <0x00000000 0x08000000
 		       0x88000000 0x18000000>;
 	};
@@ -51,21 +50,4 @@
 
 &spi_nor {
 	status = "okay";
-};
-
-&srab {
-	status = "okay";
-
-	ports {
-		port@0 {
-			reg = <0>;
-			label = "lan";
-		};
-
-		port@5 {
-			reg = <5>;
-			label = "cpu";
-			ethernet = <&gmac0>;
-		};
-	};
 };

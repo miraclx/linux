@@ -25,7 +25,6 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/kthread.h>
-#include <linux/init_syscalls.h>
 #include <uapi/linux/mount.h>
 #include "base.h"
 
@@ -360,7 +359,7 @@ int __init devtmpfs_mount(void)
 	if (!thread)
 		return 0;
 
-	err = init_mount("devtmpfs", "dev", "devtmpfs", MS_SILENT, NULL);
+	err = do_mount("devtmpfs", "dev", "devtmpfs", MS_SILENT, NULL);
 	if (err)
 		printk(KERN_INFO "devtmpfs: error mounting %i\n", err);
 	else
@@ -379,8 +378,30 @@ static int handle(const char *name, umode_t mode, kuid_t uid, kgid_t gid,
 		return handle_remove(name, dev);
 }
 
-static void __noreturn devtmpfs_work_loop(void)
+static int devtmpfs_setup(void *p)
 {
+	int err;
+
+	err = ksys_unshare(CLONE_NEWNS);
+	if (err)
+		goto out;
+	err = do_mount("devtmpfs", "/", "devtmpfs", MS_SILENT, NULL);
+	if (err)
+		goto out;
+	ksys_chdir("/.."); /* will traverse into overmounted root */
+	ksys_chroot(".");
+out:
+	*(int *)p = err;
+	complete(&setup_done);
+	return err;
+}
+
+static int devtmpfsd(void *p)
+{
+	int err = devtmpfs_setup(p);
+
+	if (err)
+		return err;
 	while (1) {
 		spin_lock(&req_lock);
 		while (requests) {
@@ -400,38 +421,6 @@ static void __noreturn devtmpfs_work_loop(void)
 		spin_unlock(&req_lock);
 		schedule();
 	}
-}
-
-static int __init devtmpfs_setup(void *p)
-{
-	int err;
-
-	err = ksys_unshare(CLONE_NEWNS);
-	if (err)
-		goto out;
-	err = init_mount("devtmpfs", "/", "devtmpfs", MS_SILENT, NULL);
-	if (err)
-		goto out;
-	init_chdir("/.."); /* will traverse into overmounted root */
-	init_chroot(".");
-out:
-	*(int *)p = err;
-	complete(&setup_done);
-	return err;
-}
-
-/*
- * The __ref is because devtmpfs_setup needs to be __init for the routines it
- * calls.  That call is done while devtmpfs_init, which is marked __init,
- * synchronously waits for it to complete.
- */
-static int __ref devtmpfsd(void *p)
-{
-	int err = devtmpfs_setup(p);
-
-	if (err)
-		return err;
-	devtmpfs_work_loop();
 	return 0;
 }
 

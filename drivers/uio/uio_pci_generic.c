@@ -74,19 +74,23 @@ static int probe(struct pci_dev *pdev,
 	struct uio_pci_generic_dev *gdev;
 	int err;
 
-	err = pcim_enable_device(pdev);
+	err = pci_enable_device(pdev);
 	if (err) {
 		dev_err(&pdev->dev, "%s: pci_enable_device failed: %d\n",
 			__func__, err);
 		return err;
 	}
 
-	if (pdev->irq && !pci_intx_mask_supported(pdev))
-		return -ENOMEM;
+	if (pdev->irq && !pci_intx_mask_supported(pdev)) {
+		err = -ENODEV;
+		goto err_verify;
+	}
 
-	gdev = devm_kzalloc(&pdev->dev, sizeof(struct uio_pci_generic_dev), GFP_KERNEL);
-	if (!gdev)
-		return -ENOMEM;
+	gdev = kzalloc(sizeof(struct uio_pci_generic_dev), GFP_KERNEL);
+	if (!gdev) {
+		err = -ENOMEM;
+		goto err_alloc;
+	}
 
 	gdev->info.name = "uio_pci_generic";
 	gdev->info.version = DRIVER_VERSION;
@@ -101,13 +105,34 @@ static int probe(struct pci_dev *pdev,
 			 "no support for interrupts?\n");
 	}
 
-	return devm_uio_register_device(&pdev->dev, &gdev->info);
+	err = uio_register_device(&pdev->dev, &gdev->info);
+	if (err)
+		goto err_register;
+	pci_set_drvdata(pdev, gdev);
+
+	return 0;
+err_register:
+	kfree(gdev);
+err_alloc:
+err_verify:
+	pci_disable_device(pdev);
+	return err;
+}
+
+static void remove(struct pci_dev *pdev)
+{
+	struct uio_pci_generic_dev *gdev = pci_get_drvdata(pdev);
+
+	uio_unregister_device(&gdev->info);
+	pci_disable_device(pdev);
+	kfree(gdev);
 }
 
 static struct pci_driver uio_pci_driver = {
 	.name = "uio_pci_generic",
 	.id_table = NULL, /* only dynamic id's */
 	.probe = probe,
+	.remove = remove,
 };
 
 module_pci_driver(uio_pci_driver);

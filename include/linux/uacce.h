@@ -68,21 +68,19 @@ enum uacce_q_state {
  * @uacce: pointer to uacce
  * @priv: private pointer
  * @wait: wait queue head
- * @list: index into uacce queues list
+ * @list: index into uacce_mm
+ * @uacce_mm: the corresponding mm
  * @qfrs: pointer of qfr regions
  * @state: queue state machine
- * @pasid: pasid associated to the mm
- * @handle: iommu_sva handle returned by iommu_sva_bind_device()
  */
 struct uacce_queue {
 	struct uacce_device *uacce;
 	void *priv;
 	wait_queue_head_t wait;
 	struct list_head list;
+	struct uacce_mm *uacce_mm;
 	struct uacce_qfile_region *qfrs[UACCE_MAX_REGION];
 	enum uacce_q_state state;
-	u32 pasid;
-	struct iommu_sva *handle;
 };
 
 /**
@@ -98,8 +96,8 @@ struct uacce_queue {
  * @cdev: cdev of the uacce
  * @dev: dev of the uacce
  * @priv: private pointer of the uacce
- * @queues: list of queues
- * @queues_lock: lock for queues list
+ * @mm_list: list head of uacce_mm->list
+ * @mm_lock: lock for mm_list
  * @inode: core vfs
  */
 struct uacce_device {
@@ -114,9 +112,27 @@ struct uacce_device {
 	struct cdev *cdev;
 	struct device dev;
 	void *priv;
-	struct list_head queues;
-	struct mutex queues_lock;
+	struct list_head mm_list;
+	struct mutex mm_lock;
 	struct inode *inode;
+};
+
+/**
+ * struct uacce_mm - keep track of queues bound to a process
+ * @list: index into uacce_device
+ * @queues: list of queues
+ * @mm: the mm struct
+ * @lock: protects the list of queues
+ * @pasid: pasid of the uacce_mm
+ * @handle: iommu_sva handle return from iommu_sva_bind_device
+ */
+struct uacce_mm {
+	struct list_head list;
+	struct list_head queues;
+	struct mm_struct *mm;
+	struct mutex lock;
+	int pasid;
+	struct iommu_sva *handle;
 };
 
 #if IS_ENABLED(CONFIG_UACCE)

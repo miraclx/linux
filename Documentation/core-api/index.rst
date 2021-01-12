@@ -18,7 +18,6 @@ it.
 
    kernel-api
    workqueue
-   printk-basics
    printk-formats
    symbol-namespaces
 
@@ -31,16 +30,12 @@ Library functionality that is used throughout the kernel.
    :maxdepth: 1
 
    kobject
-   kref
    assoc_array
    xarray
    idr
    circular-buffers
-   rbtree
    generic-radix-tree
    packing
-   bus-virt-phys-mapping
-   this_cpu_ops
    timekeeping
    errseq
 
@@ -55,7 +50,6 @@ How Linux keeps everything from happening at the same time.  See
 
    atomic_ops
    refcount-vs-atomic
-   irq/index
    local_ops
    padata
    ../RCU/index
@@ -84,11 +78,6 @@ more memory-management documentation in :doc:`/vm/index`.
    :maxdepth: 1
 
    memory-allocation
-   unaligned-memory-access
-   dma-api
-   dma-api-howto
-   dma-attributes
-   dma-isa-lpc
    mm-api
    genalloc
    pin_user_pages
@@ -103,7 +92,6 @@ Interfaces for kernel debugging
 
    debug-objects
    tracepoint
-   debugging-via-ohci1394
 
 Everything else
 ===============

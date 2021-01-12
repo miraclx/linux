@@ -815,16 +815,15 @@ typedef u8 acpi_adr_space_type;
 #define ACPI_ADR_SPACE_GPIO             (acpi_adr_space_type) 8
 #define ACPI_ADR_SPACE_GSBUS            (acpi_adr_space_type) 9
 #define ACPI_ADR_SPACE_PLATFORM_COMM    (acpi_adr_space_type) 10
-#define ACPI_ADR_SPACE_PLATFORM_RT      (acpi_adr_space_type) 11
 
-#define ACPI_NUM_PREDEFINED_REGIONS     12
+#define ACPI_NUM_PREDEFINED_REGIONS     11
 
 /*
  * Special Address Spaces
  *
  * Note: A Data Table region is a special type of operation region
  * that has its own AML opcode. However, internally, the AML
- * interpreter simply creates an operation region with an address
+ * interpreter simply creates an operation region with an an address
  * space type of ACPI_ADR_SPACE_DATA_TABLE.
  */
 #define ACPI_ADR_SPACE_DATA_TABLE       (acpi_adr_space_type) 0x7E	/* Internal to ACPICA only */
@@ -1146,7 +1145,7 @@ struct acpi_pnp_device_id {
 struct acpi_pnp_device_id_list {
 	u32 count;		/* Number of IDs in Ids array */
 	u32 list_size;		/* Size of list, including ID strings */
-	struct acpi_pnp_device_id ids[];	/* ID array */
+	struct acpi_pnp_device_id ids[1];	/* ID array */
 };
 
 /*
@@ -1201,18 +1200,12 @@ struct acpi_pci_id {
 	u16 function;
 };
 
-struct acpi_mem_mapping {
-	acpi_physical_address physical_address;
-	u8 *logical_address;
-	acpi_size length;
-	struct acpi_mem_mapping *next_mm;
-};
-
 struct acpi_mem_space_context {
 	u32 length;
 	acpi_physical_address address;
-	struct acpi_mem_mapping *cur_mm;
-	struct acpi_mem_mapping *first_mm;
+	acpi_physical_address mapped_physical_address;
+	u8 *mapped_logical_address;
+	acpi_size mapped_length;
 };
 
 /*

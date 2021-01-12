@@ -8,7 +8,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 
-#include <linux/dma-map-ops.h>
+#include <linux/dma-noncoherent.h>
 #include <linux/dmar.h>
 #include <linux/efi.h>
 #include <linux/elf.h>
@@ -73,7 +73,8 @@ __ia64_sync_icache_dcache (pte_t pte)
  * DMA can be marked as "clean" so that lazy_mmu_prot_update() doesn't have to
  * flush them when they get mapped into an executable vm-area.
  */
-void arch_dma_mark_clean(phys_addr_t paddr, size_t size)
+void arch_sync_dma_for_cpu(phys_addr_t paddr, size_t size,
+		enum dma_data_direction dir)
 {
 	unsigned long pfn = PHYS_PFN(paddr);
 
@@ -117,13 +118,13 @@ ia64_init_addr_space (void)
 		vma->vm_end = vma->vm_start + PAGE_SIZE;
 		vma->vm_flags = VM_DATA_DEFAULT_FLAGS|VM_GROWSUP|VM_ACCOUNT;
 		vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
-		mmap_write_lock(current->mm);
+		down_write(&current->mm->mmap_sem);
 		if (insert_vm_struct(current->mm, vma)) {
-			mmap_write_unlock(current->mm);
+			up_write(&current->mm->mmap_sem);
 			vm_area_free(vma);
 			return;
 		}
-		mmap_write_unlock(current->mm);
+		up_write(&current->mm->mmap_sem);
 	}
 
 	/* map NaT-page at address zero to speed up speculative dereferencing of NULL: */
@@ -135,13 +136,13 @@ ia64_init_addr_space (void)
 			vma->vm_page_prot = __pgprot(pgprot_val(PAGE_READONLY) | _PAGE_MA_NAT);
 			vma->vm_flags = VM_READ | VM_MAYREAD | VM_IO |
 					VM_DONTEXPAND | VM_DONTDUMP;
-			mmap_write_lock(current->mm);
+			down_write(&current->mm->mmap_sem);
 			if (insert_vm_struct(current->mm, vma)) {
-				mmap_write_unlock(current->mm);
+				up_write(&current->mm->mmap_sem);
 				vm_area_free(vma);
 				return;
 			}
-			mmap_write_unlock(current->mm);
+			up_write(&current->mm->mmap_sem);
 		}
 	}
 }
@@ -207,7 +208,6 @@ static struct page * __init
 put_kernel_page (struct page *page, unsigned long address, pgprot_t pgprot)
 {
 	pgd_t *pgd;
-	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
@@ -215,10 +215,7 @@ put_kernel_page (struct page *page, unsigned long address, pgprot_t pgprot)
 	pgd = pgd_offset_k(address);		/* note: this is NOT pgd_offset()! */
 
 	{
-		p4d = p4d_alloc(&init_mm, pgd, address);
-		if (!p4d)
-			goto out;
-		pud = pud_alloc(&init_mm, p4d, address);
+		pud = pud_alloc(&init_mm, pgd, address);
 		if (!pud)
 			goto out;
 		pmd = pmd_alloc(&init_mm, pud, address);
@@ -385,7 +382,6 @@ int vmemmap_find_next_valid_pfn(int node, int i)
 
 	do {
 		pgd_t *pgd;
-		p4d_t *p4d;
 		pud_t *pud;
 		pmd_t *pmd;
 		pte_t *pte;
@@ -396,13 +392,7 @@ int vmemmap_find_next_valid_pfn(int node, int i)
 			continue;
 		}
 
-		p4d = p4d_offset(pgd, end_address);
-		if (p4d_none(*p4d)) {
-			end_address += P4D_SIZE;
-			continue;
-		}
-
-		pud = pud_offset(p4d, end_address);
+		pud = pud_offset(pgd, end_address);
 		if (pud_none(*pud)) {
 			end_address += PUD_SIZE;
 			continue;
@@ -440,7 +430,6 @@ int __init create_mem_map_page_table(u64 start, u64 end, void *arg)
 	struct page *map_start, *map_end;
 	int node;
 	pgd_t *pgd;
-	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
@@ -455,20 +444,12 @@ int __init create_mem_map_page_table(u64 start, u64 end, void *arg)
 	for (address = start_page; address < end_page; address += PAGE_SIZE) {
 		pgd = pgd_offset_k(address);
 		if (pgd_none(*pgd)) {
-			p4d = memblock_alloc_node(PAGE_SIZE, PAGE_SIZE, node);
-			if (!p4d)
-				goto err_alloc;
-			pgd_populate(&init_mm, pgd, p4d);
-		}
-		p4d = p4d_offset(pgd, address);
-
-		if (p4d_none(*p4d)) {
 			pud = memblock_alloc_node(PAGE_SIZE, PAGE_SIZE, node);
 			if (!pud)
 				goto err_alloc;
-			p4d_populate(&init_mm, p4d, pud);
+			pgd_populate(&init_mm, pgd, pud);
 		}
-		pud = pud_offset(p4d, address);
+		pud = pud_offset(pgd, address);
 
 		if (pud_none(*pud)) {
 			pmd = memblock_alloc_node(PAGE_SIZE, PAGE_SIZE, node);
@@ -536,8 +517,8 @@ virtual_memmap_init(u64 start, u64 end, void *arg)
 
 	if (map_start < map_end)
 		memmap_init_zone((unsigned long)(map_end - map_start),
-				 args->nid, args->zone, page_to_pfn(map_start), page_to_pfn(map_end),
-				 MEMINIT_EARLY, NULL, MIGRATE_MOVABLE);
+				 args->nid, args->zone, page_to_pfn(map_start),
+				 MEMMAP_EARLY, NULL);
 	return 0;
 }
 
@@ -546,8 +527,8 @@ memmap_init (unsigned long size, int nid, unsigned long zone,
 	     unsigned long start_pfn)
 {
 	if (!vmem_map) {
-		memmap_init_zone(size, nid, zone, start_pfn, start_pfn + size,
-				 MEMINIT_EARLY, NULL, MIGRATE_MOVABLE);
+		memmap_init_zone(size, nid, zone, start_pfn, MEMMAP_EARLY,
+				NULL);
 	} else {
 		struct page *start;
 		struct memmap_init_callback_data args;
@@ -573,6 +554,20 @@ ia64_pfn_valid (unsigned long pfn)
 			|| (__get_user(byte, (char __user *) (pg + 1) - 1) == 0));
 }
 EXPORT_SYMBOL(ia64_pfn_valid);
+
+int __init find_largest_hole(u64 start, u64 end, void *arg)
+{
+	u64 *max_gap = arg;
+
+	static u64 last_end = PAGE_OFFSET;
+
+	/* NOTE: this algorithm assumes efi memmap table is ordered */
+
+	if (*max_gap < (start - last_end))
+		*max_gap = start - last_end;
+	last_end = end;
+	return 0;
+}
 
 #endif /* CONFIG_VIRTUAL_MEM_MAP */
 

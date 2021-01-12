@@ -17,10 +17,7 @@ OUTPUT_ARCH(arm)
 
 SECTIONS
 {
-	PROVIDE_HIDDEN(_vdso_data = . - __VVAR_PAGES * PAGE_SIZE);
-#ifdef CONFIG_TIME_NS
-	PROVIDE_HIDDEN(_timens_data = _vdso_data + PAGE_SIZE);
-#endif
+	PROVIDE_HIDDEN(_vdso_data = . - PAGE_SIZE);
 	. = VDSO_LBASE + SIZEOF_HEADERS;
 
 	.hash		: { *(.hash) }			:text
@@ -67,7 +64,19 @@ VERSION
 		__vdso_clock_gettime;
 		__vdso_gettimeofday;
 		__vdso_clock_getres;
+		__kernel_sigreturn_arm;
+		__kernel_sigreturn_thumb;
+		__kernel_rt_sigreturn_arm;
+		__kernel_rt_sigreturn_thumb;
 		__vdso_clock_gettime64;
 	local: *;
 	};
 }
+
+/*
+ * Make the sigreturn code visible to the kernel.
+ */
+VDSO_compat_sigreturn_arm	= __kernel_sigreturn_arm;
+VDSO_compat_sigreturn_thumb	= __kernel_sigreturn_thumb;
+VDSO_compat_rt_sigreturn_arm	= __kernel_rt_sigreturn_arm;
+VDSO_compat_rt_sigreturn_thumb	= __kernel_rt_sigreturn_thumb;

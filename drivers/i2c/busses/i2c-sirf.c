@@ -271,6 +271,7 @@ static int i2c_sirfsoc_probe(struct platform_device *pdev)
 {
 	struct sirfsoc_i2c *siic;
 	struct i2c_adapter *adap;
+	struct resource *mem_res;
 	struct clk *clk;
 	int bitrate;
 	int ctrl_speed;
@@ -308,7 +309,8 @@ static int i2c_sirfsoc_probe(struct platform_device *pdev)
 	adap = &siic->adapter;
 	adap->class = I2C_CLASS_DEPRECATED;
 
-	siic->base = devm_platform_ioremap_resource(pdev, 0);
+	mem_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	siic->base = devm_ioremap_resource(&pdev->dev, mem_res);
 	if (IS_ERR(siic->base)) {
 		err = PTR_ERR(siic->base);
 		goto out;
@@ -470,6 +472,6 @@ static struct platform_driver i2c_sirfsoc_driver = {
 module_platform_driver(i2c_sirfsoc_driver);
 
 MODULE_DESCRIPTION("SiRF SoC I2C master controller driver");
-MODULE_AUTHOR("Zhiwu Song <Zhiwu.Song@csr.com>");
-MODULE_AUTHOR("Xiangzhen Ye <Xiangzhen.Ye@csr.com>");
+MODULE_AUTHOR("Zhiwu Song <Zhiwu.Song@csr.com>, "
+	"Xiangzhen Ye <Xiangzhen.Ye@csr.com>");
 MODULE_LICENSE("GPL v2");

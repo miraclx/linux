@@ -26,7 +26,8 @@ patternProperties:
   "^(reg11|reg18|usb33)$":
     type: object
 
-    $ref: "regulator.yaml#"
+    allOf:
+      - $ref: "regulator.yaml#"
 
 required:
   - compatible

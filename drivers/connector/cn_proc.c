@@ -18,7 +18,6 @@
 #include <linux/pid_namespace.h>
 
 #include <linux/cn_proc.h>
-#include <linux/local_lock.h>
 
 /*
  * Size of a cn_msg followed by a proc_event structure.  Since the
@@ -39,31 +38,25 @@ static inline struct cn_msg *buffer_to_cn_msg(__u8 *buffer)
 static atomic_t proc_event_num_listeners = ATOMIC_INIT(0);
 static struct cb_id cn_proc_event_id = { CN_IDX_PROC, CN_VAL_PROC };
 
-/* local_event.count is used as the sequence number of the netlink message */
-struct local_event {
-	local_lock_t lock;
-	__u32 count;
-};
-static DEFINE_PER_CPU(struct local_event, local_event) = {
-	.lock = INIT_LOCAL_LOCK(lock),
-};
+/* proc_event_counts is used as the sequence number of the netlink message */
+static DEFINE_PER_CPU(__u32, proc_event_counts) = { 0 };
 
 static inline void send_msg(struct cn_msg *msg)
 {
-	local_lock(&local_event.lock);
+	preempt_disable();
 
-	msg->seq = __this_cpu_inc_return(local_event.count) - 1;
+	msg->seq = __this_cpu_inc_return(proc_event_counts) - 1;
 	((struct proc_event *)msg->data)->cpu = smp_processor_id();
 
 	/*
-	 * local_lock() disables preemption during send to ensure the messages
-	 * are ordered according to their sequence numbers.
+	 * Preemption remains disabled during send to ensure the messages are
+	 * ordered according to their sequence numbers.
 	 *
 	 * If cn_netlink_send() fails, the data is not sent.
 	 */
 	cn_netlink_send(msg, 0, CN_IDX_PROC, GFP_NOWAIT);
 
-	local_unlock(&local_event.lock);
+	preempt_enable();
 }
 
 void proc_fork_connector(struct task_struct *task)

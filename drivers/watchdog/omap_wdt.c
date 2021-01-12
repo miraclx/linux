@@ -273,7 +273,6 @@ static int omap_wdt_probe(struct platform_device *pdev)
 
 	ret = watchdog_register_device(&wdev->wdog);
 	if (ret) {
-		pm_runtime_put(wdev->dev);
 		pm_runtime_disable(wdev->dev);
 		return ret;
 	}

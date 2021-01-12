@@ -35,12 +35,6 @@ typedef struct svc_fh {
 
 	bool			fh_locked;	/* inode locked by us */
 	bool			fh_want_write;	/* remount protection taken */
-	bool			fh_no_wcc;	/* no wcc data needed */
-	bool			fh_no_atomic_attr;
-						/*
-						 * wcc data is not atomic with
-						 * operation
-						 */
 	int			fh_flags;	/* FH flags */
 #ifdef CONFIG_NFSD_V3
 	bool			fh_post_saved;	/* post-op attrs saved */
@@ -60,6 +54,7 @@ typedef struct svc_fh {
 	struct kstat		fh_post_attr;	/* full attrs after operation */
 	u64			fh_post_change; /* nfsv4 change; see above */
 #endif /* CONFIG_NFSD_V3 */
+
 } svc_fh;
 #define NFSD4_FH_FOREIGN (1<<0)
 #define SET_FH_FLAG(c, f) ((c)->fh_flags |= (f))
@@ -264,16 +259,13 @@ fh_clear_wcc(struct svc_fh *fhp)
 static inline u64 nfsd4_change_attribute(struct kstat *stat,
 					 struct inode *inode)
 {
-	if (IS_I_VERSION(inode)) {
-		u64 chattr;
+	u64 chattr;
 
-		chattr =  stat->ctime.tv_sec;
-		chattr <<= 30;
-		chattr += stat->ctime.tv_nsec;
-		chattr += inode_query_iversion(inode);
-		return chattr;
-	} else
-		return time_to_chattr(&stat->ctime);
+	chattr =  stat->ctime.tv_sec;
+	chattr <<= 30;
+	chattr += stat->ctime.tv_nsec;
+	chattr += inode_query_iversion(inode);
+	return chattr;
 }
 
 extern void fill_pre_wcc(struct svc_fh *fhp);

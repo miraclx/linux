@@ -25,7 +25,6 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-mem2mem.h>
-#include <media/v4l2-rect.h>
 #include <media/videobuf2-v4l2.h>
 #include <media/videobuf2-dma-contig.h>
 #include <media/drv-intf/exynos-fimc.h>
@@ -409,7 +408,7 @@ static void buffer_queue(struct vb2_buffer *vb)
 	unsigned long flags;
 
 	spin_lock_irqsave(&fimc->slock, flags);
-	buf->addr = vb2_dma_contig_plane_dma_addr(vb, 0);
+	buf->paddr = vb2_dma_contig_plane_dma_addr(vb, 0);
 
 	buf->index = fimc->buf_index++;
 	if (fimc->buf_index >= fimc->reqbufs_count)
@@ -471,7 +470,7 @@ static int fimc_lite_open(struct file *file)
 	set_bit(ST_FLITE_IN_USE, &fimc->state);
 	ret = pm_runtime_get_sync(&fimc->pdev->dev);
 	if (ret < 0)
-		goto err_pm;
+		goto unlock;
 
 	ret = v4l2_fh_open(file);
 	if (ret < 0)
@@ -869,6 +868,19 @@ static int fimc_lite_reqbufs(struct file *file, void *priv,
 	return ret;
 }
 
+/* Return 1 if rectangle a is enclosed in rectangle b, or 0 otherwise. */
+static int enclosed_rectangle(struct v4l2_rect *a, struct v4l2_rect *b)
+{
+	if (a->left < b->left || a->top < b->top)
+		return 0;
+	if (a->left + a->width > b->left + b->width)
+		return 0;
+	if (a->top + a->height > b->top + b->height)
+		return 0;
+
+	return 1;
+}
+
 static int fimc_lite_g_selection(struct file *file, void *fh,
 				 struct v4l2_selection *sel)
 {
@@ -910,11 +922,11 @@ static int fimc_lite_s_selection(struct file *file, void *fh,
 	fimc_lite_try_compose(fimc, &rect);
 
 	if ((sel->flags & V4L2_SEL_FLAG_LE) &&
-	    !v4l2_rect_enclosed(&rect, &sel->r))
+	    !enclosed_rectangle(&rect, &sel->r))
 		return -ERANGE;
 
 	if ((sel->flags & V4L2_SEL_FLAG_GE) &&
-	    !v4l2_rect_enclosed(&sel->r, &rect))
+	    !enclosed_rectangle(&sel->r, &rect))
 		return -ERANGE;
 
 	sel->r = rect;

@@ -109,7 +109,6 @@ struct meson_dev {
 struct meson_cipher_req_ctx {
 	u32 op_dir;
 	int flow;
-	struct skcipher_request fallback_req;	// keep at the end
 };
 
 /*
@@ -127,7 +126,7 @@ struct meson_cipher_tfm_ctx {
 	u32 keylen;
 	u32 keymode;
 	struct meson_dev *mc;
-	struct crypto_skcipher *fallback_tfm;
+	struct crypto_sync_skcipher *fallback_tfm;
 };
 
 /*

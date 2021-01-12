@@ -32,7 +32,6 @@ struct host1x_subdev {
 /**
  * host1x_subdev_add() - add a new subdevice with an associated device node
  * @device: host1x device to add the subdevice to
- * @driver: host1x driver containing the subdevices
  * @np: device node
  */
 static int host1x_subdev_add(struct host1x_device *device,
@@ -687,16 +686,7 @@ EXPORT_SYMBOL(host1x_driver_register_full);
  */
 void host1x_driver_unregister(struct host1x_driver *driver)
 {
-	struct host1x *host1x;
-
 	driver_unregister(&driver->driver);
-
-	mutex_lock(&devices_lock);
-
-	list_for_each_entry(host1x, &devices, list)
-		host1x_detach_driver(host1x, driver);
-
-	mutex_unlock(&devices_lock);
 
 	mutex_lock(&drivers_lock);
 	list_del_init(&driver->list);

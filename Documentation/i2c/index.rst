@@ -47,7 +47,6 @@ Slave I2C
 
    slave-interface
    slave-eeprom-backend
-   slave-testunit-backend
 
 Advanced topics
 ===============
@@ -63,6 +62,7 @@ Legacy documentation
 .. toctree::
    :maxdepth: 1
 
+   upgrading-clients
    old-module-parameters
 
 .. only::  subproject and html

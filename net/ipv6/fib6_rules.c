@@ -13,7 +13,6 @@
 #include <linux/netdevice.h>
 #include <linux/notifier.h>
 #include <linux/export.h>
-#include <linux/indirect_call_wrapper.h>
 
 #include <net/fib_rules.h>
 #include <net/ipv6.h>
@@ -112,13 +111,11 @@ struct dst_entry *fib6_rule_lookup(struct net *net, struct flowi6 *fl6,
 	} else {
 		struct rt6_info *rt;
 
-		rt = pol_lookup_func(lookup,
-			     net, net->ipv6.fib6_local_tbl, fl6, skb, flags);
+		rt = lookup(net, net->ipv6.fib6_local_tbl, fl6, skb, flags);
 		if (rt != net->ipv6.ip6_null_entry && rt->dst.error != -EAGAIN)
 			return &rt->dst;
 		ip6_rt_put_flags(rt, flags);
-		rt = pol_lookup_func(lookup,
-			     net, net->ipv6.fib6_main_tbl, fl6, skb, flags);
+		rt = lookup(net, net->ipv6.fib6_main_tbl, fl6, skb, flags);
 		if (rt->dst.error != -EAGAIN)
 			return &rt->dst;
 		ip6_rt_put_flags(rt, flags);
@@ -229,8 +226,7 @@ static int __fib6_rule_action(struct fib_rule *rule, struct flowi *flp,
 		goto out;
 	}
 
-	rt = pol_lookup_func(lookup,
-			     net, table, flp6, arg->lookup_data, flags);
+	rt = lookup(net, table, flp6, arg->lookup_data, flags);
 	if (rt != net->ipv6.ip6_null_entry) {
 		err = fib6_rule_saddr(net, rule, flags, flp6,
 				      ip6_dst_idev(&rt->dst)->dev);
@@ -256,9 +252,8 @@ out:
 	return err;
 }
 
-INDIRECT_CALLABLE_SCOPE int fib6_rule_action(struct fib_rule *rule,
-					     struct flowi *flp, int flags,
-					     struct fib_lookup_arg *arg)
+static int fib6_rule_action(struct fib_rule *rule, struct flowi *flp,
+			    int flags, struct fib_lookup_arg *arg)
 {
 	if (arg->lookup_ptr == fib6_table_lookup)
 		return fib6_rule_action_alt(rule, flp, flags, arg);
@@ -266,8 +261,7 @@ INDIRECT_CALLABLE_SCOPE int fib6_rule_action(struct fib_rule *rule,
 	return __fib6_rule_action(rule, flp, flags, arg);
 }
 
-INDIRECT_CALLABLE_SCOPE bool fib6_rule_suppress(struct fib_rule *rule,
-						struct fib_lookup_arg *arg)
+static bool fib6_rule_suppress(struct fib_rule *rule, struct fib_lookup_arg *arg)
 {
 	struct fib6_result *res = arg->result;
 	struct rt6_info *rt = res->rt6;
@@ -299,8 +293,7 @@ suppress_route:
 	return true;
 }
 
-INDIRECT_CALLABLE_SCOPE int fib6_rule_match(struct fib_rule *rule,
-					    struct flowi *fl, int flags)
+static int fib6_rule_match(struct fib_rule *rule, struct flowi *fl, int flags)
 {
 	struct fib6_rule *r = (struct fib6_rule *) rule;
 	struct flowi6 *fl6 = &fl->u.ip6;

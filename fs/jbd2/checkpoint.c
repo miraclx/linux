@@ -106,8 +106,6 @@ static int __try_to_free_cp_buf(struct journal_head *jh)
  * for a checkpoint to free up some space in the log.
  */
 void __jbd2_log_wait_for_space(journal_t *journal)
-__acquires(&journal->j_state_lock)
-__releases(&journal->j_state_lock)
 {
 	int nblocks, space_left;
 	/* assert_spin_locked(&journal->j_state_lock); */
@@ -416,7 +414,7 @@ int jbd2_cleanup_journal_tail(journal_t *journal)
 	 * jbd2_cleanup_journal_tail() doesn't get called all that often.
 	 */
 	if (journal->j_flags & JBD2_BARRIER)
-		blkdev_issue_flush(journal->j_fs_dev, GFP_NOFS);
+		blkdev_issue_flush(journal->j_fs_dev, GFP_NOFS, NULL);
 
 	return __jbd2_update_log_tail(journal, first_tid, blocknr);
 }

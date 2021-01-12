@@ -114,4 +114,5 @@ enum rt_rf_type_def {
 
 u32 rtw_ch2freq(u32 ch);
 
+
 #endif /* _RTL8711_RF_H_ */

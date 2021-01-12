@@ -232,8 +232,6 @@ static void frontbuffer_release(struct kref *ref)
 	RCU_INIT_POINTER(obj->frontbuffer, NULL);
 	spin_unlock(&to_i915(obj->base.dev)->fb_tracking.lock);
 
-	i915_active_fini(&front->write);
-
 	i915_gem_object_put(obj);
 	kfree_rcu(front, rcu);
 }
@@ -304,14 +302,12 @@ void intel_frontbuffer_track(struct intel_frontbuffer *old,
 		     BITS_PER_TYPE(atomic_t));
 
 	if (old) {
-		drm_WARN_ON(old->obj->base.dev,
-			    !(atomic_read(&old->bits) & frontbuffer_bits));
+		WARN_ON(!(atomic_read(&old->bits) & frontbuffer_bits));
 		atomic_andnot(frontbuffer_bits, &old->bits);
 	}
 
 	if (new) {
-		drm_WARN_ON(new->obj->base.dev,
-			    atomic_read(&new->bits) & frontbuffer_bits);
+		WARN_ON(atomic_read(&new->bits) & frontbuffer_bits);
 		atomic_or(frontbuffer_bits, &new->bits);
 	}
 }

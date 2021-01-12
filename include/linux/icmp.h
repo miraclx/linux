@@ -15,7 +15,6 @@
 
 #include <linux/skbuff.h>
 #include <uapi/linux/icmp.h>
-#include <uapi/linux/errqueue.h>
 
 static inline struct icmphdr *icmp_hdr(const struct sk_buff *skb)
 {
@@ -35,9 +34,5 @@ static inline bool icmp_is_err(int type)
 
 	return false;
 }
-
-void ip_icmp_error_rfc4884(const struct sk_buff *skb,
-			   struct sock_ee_data_rfc4884 *out,
-			   int thlen, int off);
 
 #endif	/* _LINUX_ICMP_H */

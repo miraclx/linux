@@ -127,7 +127,8 @@ struct ndis_801_11_ai_resfi {
 	u16 AssociationId;
 };
 
-typedef struct _NDIS_802_11_ASSOCIATION_INFORMATION {
+typedef struct _NDIS_802_11_ASSOCIATION_INFORMATION
+{
 	u32                   Length;
 	u16                  AvailableRequestFixedIEs;
 	struct ndis_802_11_ai_reqfi    RequestFixedIEs;
@@ -145,7 +146,8 @@ enum NDIS_802_11_RELOAD_DEFAULTS {
 
 
 /*  Key mapping keys require a BSSID */
-typedef struct _NDIS_802_11_KEY {
+typedef struct _NDIS_802_11_KEY
+{
 	u32           Length;             /*  Length of this structure */
 	u32           KeyIndex;
 	u32           KeyLength;          /*  length of key in bytes */
@@ -154,7 +156,8 @@ typedef struct _NDIS_802_11_KEY {
 	u8           KeyMaterial[32];     /*  variable length depending on above field */
 } NDIS_802_11_KEY, *PNDIS_802_11_KEY;
 
-typedef struct _NDIS_802_11_REMOVE_KEY {
+typedef struct _NDIS_802_11_REMOVE_KEY
+{
 	u32                   Length;        /*  Length of this structure */
 	u32                   KeyIndex;
 	NDIS_802_11_MAC_ADDRESS BSSID;

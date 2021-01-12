@@ -8,7 +8,7 @@ target architecture, specifically, is the 32-bit OpenRISC 1000 family (or1k).
 For information about OpenRISC processors and ongoing development:
 
 	=======		=============================
-	website		https://openrisc.io
+	website		http://openrisc.io
 	email		openrisc@lists.librecores.org
 	=======		=============================
 

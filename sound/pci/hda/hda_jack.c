@@ -275,23 +275,6 @@ int snd_hda_jack_detect_state_mst(struct hda_codec *codec,
 }
 EXPORT_SYMBOL_GPL(snd_hda_jack_detect_state_mst);
 
-static struct hda_jack_callback *
-find_callback_from_list(struct hda_jack_tbl *jack,
-			hda_jack_callback_fn func)
-{
-	struct hda_jack_callback *cb;
-
-	if (!func)
-		return NULL;
-
-	for (cb = jack->callback; cb; cb = cb->next) {
-		if (cb->func == func)
-			return cb;
-	}
-
-	return NULL;
-}
-
 /**
  * snd_hda_jack_detect_enable_mst - enable the jack-detection
  * @codec: the HDA codec
@@ -314,10 +297,7 @@ snd_hda_jack_detect_enable_callback_mst(struct hda_codec *codec, hda_nid_t nid,
 	jack = snd_hda_jack_tbl_new(codec, nid, dev_id);
 	if (!jack)
 		return ERR_PTR(-ENOMEM);
-
-	callback = find_callback_from_list(jack, func);
-
-	if (func && !callback) {
+	if (func) {
 		callback = kzalloc(sizeof(*callback), GFP_KERNEL);
 		if (!callback)
 			return ERR_PTR(-ENOMEM);

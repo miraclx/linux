@@ -132,15 +132,76 @@ module_param(log_stats, int, 0644);
 
 #define BLKBACK_INVALID_HANDLE (~0)
 
+/* Number of free pages to remove on each call to gnttab_free_pages */
+#define NUM_BATCH_FREE_PAGES 10
+
 static inline bool persistent_gnt_timeout(struct persistent_gnt *persistent_gnt)
 {
 	return pgrant_timeout && (jiffies - persistent_gnt->last_used >=
 			HZ * pgrant_timeout);
 }
 
+static inline int get_free_page(struct xen_blkif_ring *ring, struct page **page)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&ring->free_pages_lock, flags);
+	if (list_empty(&ring->free_pages)) {
+		BUG_ON(ring->free_pages_num != 0);
+		spin_unlock_irqrestore(&ring->free_pages_lock, flags);
+		return gnttab_alloc_pages(1, page);
+	}
+	BUG_ON(ring->free_pages_num == 0);
+	page[0] = list_first_entry(&ring->free_pages, struct page, lru);
+	list_del(&page[0]->lru);
+	ring->free_pages_num--;
+	spin_unlock_irqrestore(&ring->free_pages_lock, flags);
+
+	return 0;
+}
+
+static inline void put_free_pages(struct xen_blkif_ring *ring, struct page **page,
+                                  int num)
+{
+	unsigned long flags;
+	int i;
+
+	spin_lock_irqsave(&ring->free_pages_lock, flags);
+	for (i = 0; i < num; i++)
+		list_add(&page[i]->lru, &ring->free_pages);
+	ring->free_pages_num += num;
+	spin_unlock_irqrestore(&ring->free_pages_lock, flags);
+}
+
+static inline void shrink_free_pagepool(struct xen_blkif_ring *ring, int num)
+{
+	/* Remove requested pages in batches of NUM_BATCH_FREE_PAGES */
+	struct page *page[NUM_BATCH_FREE_PAGES];
+	unsigned int num_pages = 0;
+	unsigned long flags;
+
+	spin_lock_irqsave(&ring->free_pages_lock, flags);
+	while (ring->free_pages_num > num) {
+		BUG_ON(list_empty(&ring->free_pages));
+		page[num_pages] = list_first_entry(&ring->free_pages,
+		                                   struct page, lru);
+		list_del(&page[num_pages]->lru);
+		ring->free_pages_num--;
+		if (++num_pages == NUM_BATCH_FREE_PAGES) {
+			spin_unlock_irqrestore(&ring->free_pages_lock, flags);
+			gnttab_free_pages(num_pages, page);
+			spin_lock_irqsave(&ring->free_pages_lock, flags);
+			num_pages = 0;
+		}
+	}
+	spin_unlock_irqrestore(&ring->free_pages_lock, flags);
+	if (num_pages != 0)
+		gnttab_free_pages(num_pages, page);
+}
+
 #define vaddr(page) ((unsigned long)pfn_to_kaddr(page_to_pfn(page)))
 
-static int do_block_io_op(struct xen_blkif_ring *ring, unsigned int *eoi_flags);
+static int do_block_io_op(struct xen_blkif_ring *ring);
 static int dispatch_rw_block_io(struct xen_blkif_ring *ring,
 				struct blkif_request *req,
 				struct pending_req *pending_req);
@@ -270,8 +331,7 @@ static void free_persistent_gnts(struct xen_blkif_ring *ring, struct rb_root *ro
 			unmap_data.count = segs_to_unmap;
 			BUG_ON(gnttab_unmap_refs_sync(&unmap_data));
 
-			gnttab_page_cache_put(&ring->free_pages, pages,
-					      segs_to_unmap);
+			put_free_pages(ring, pages, segs_to_unmap);
 			segs_to_unmap = 0;
 		}
 
@@ -311,8 +371,7 @@ void xen_blkbk_unmap_purged_grants(struct work_struct *work)
 		if (++segs_to_unmap == BLKIF_MAX_SEGMENTS_PER_REQUEST) {
 			unmap_data.count = segs_to_unmap;
 			BUG_ON(gnttab_unmap_refs_sync(&unmap_data));
-			gnttab_page_cache_put(&ring->free_pages, pages,
-					      segs_to_unmap);
+			put_free_pages(ring, pages, segs_to_unmap);
 			segs_to_unmap = 0;
 		}
 		kfree(persistent_gnt);
@@ -320,7 +379,7 @@ void xen_blkbk_unmap_purged_grants(struct work_struct *work)
 	if (segs_to_unmap > 0) {
 		unmap_data.count = segs_to_unmap;
 		BUG_ON(gnttab_unmap_refs_sync(&unmap_data));
-		gnttab_page_cache_put(&ring->free_pages, pages, segs_to_unmap);
+		put_free_pages(ring, pages, segs_to_unmap);
 	}
 }
 
@@ -553,8 +612,6 @@ int xen_blkif_schedule(void *arg)
 	struct xen_vbd *vbd = &blkif->vbd;
 	unsigned long timeout;
 	int ret;
-	bool do_eoi;
-	unsigned int eoi_flags = XEN_EOI_FLAG_SPURIOUS;
 
 	set_freezable();
 	while (!kthread_should_stop()) {
@@ -579,22 +636,15 @@ int xen_blkif_schedule(void *arg)
 		if (timeout == 0)
 			goto purge_gnt_list;
 
-		do_eoi = ring->waiting_reqs;
-
 		ring->waiting_reqs = 0;
 		smp_mb(); /* clear flag *before* checking for work */
 
-		ret = do_block_io_op(ring, &eoi_flags);
+		ret = do_block_io_op(ring);
 		if (ret > 0)
 			ring->waiting_reqs = 1;
 		if (ret == -EACCES)
 			wait_event_interruptible(ring->shutdown_wq,
 						 kthread_should_stop());
-
-		if (do_eoi && !ring->waiting_reqs) {
-			xen_irq_lateeoi(ring->irq, eoi_flags);
-			eoi_flags |= XEN_EOI_FLAG_SPURIOUS;
-		}
 
 purge_gnt_list:
 		if (blkif->vbd.feature_gnt_persistent &&
@@ -605,10 +655,9 @@ purge_gnt_list:
 
 		/* Shrink the free pages pool if it is too large. */
 		if (time_before(jiffies, blkif->buffer_squeeze_end))
-			gnttab_page_cache_shrink(&ring->free_pages, 0);
+			shrink_free_pagepool(ring, 0);
 		else
-			gnttab_page_cache_shrink(&ring->free_pages,
-						 max_buffer_pages);
+			shrink_free_pagepool(ring, max_buffer_pages);
 
 		if (log_stats && time_after(jiffies, ring->st_print))
 			print_stats(ring);
@@ -639,7 +688,7 @@ void xen_blkbk_free_caches(struct xen_blkif_ring *ring)
 	ring->persistent_gnt_c = 0;
 
 	/* Since we are shutting down remove all pages from the buffer */
-	gnttab_page_cache_shrink(&ring->free_pages, 0 /* All */);
+	shrink_free_pagepool(ring, 0 /* All */);
 }
 
 static unsigned int xen_blkbk_unmap_prepare(
@@ -678,7 +727,7 @@ static void xen_blkbk_unmap_and_respond_callback(int result, struct gntab_unmap_
 	   but is this the best way to deal with this? */
 	BUG_ON(result);
 
-	gnttab_page_cache_put(&ring->free_pages, data->pages, data->count);
+	put_free_pages(ring, data->pages, data->count);
 	make_response(ring, pending_req->id,
 		      pending_req->operation, pending_req->status);
 	free_req(ring, pending_req);
@@ -745,8 +794,7 @@ static void xen_blkbk_unmap(struct xen_blkif_ring *ring,
 		if (invcount) {
 			ret = gnttab_unmap_refs(unmap, NULL, unmap_pages, invcount);
 			BUG_ON(ret);
-			gnttab_page_cache_put(&ring->free_pages, unmap_pages,
-					      invcount);
+			put_free_pages(ring, unmap_pages, invcount);
 		}
 		pages += batch;
 		num -= batch;
@@ -793,8 +841,7 @@ again:
 			pages[i]->page = persistent_gnt->page;
 			pages[i]->persistent_gnt = persistent_gnt;
 		} else {
-			if (gnttab_page_cache_get(&ring->free_pages,
-						  &pages[i]->page))
+			if (get_free_page(ring, &pages[i]->page))
 				goto out_of_memory;
 			addr = vaddr(pages[i]->page);
 			pages_to_gnt[segs_to_map] = pages[i]->page;
@@ -827,8 +874,7 @@ again:
 			BUG_ON(new_map_idx >= segs_to_map);
 			if (unlikely(map[new_map_idx].status != 0)) {
 				pr_debug("invalid buffer -- could not remap it\n");
-				gnttab_page_cache_put(&ring->free_pages,
-						      &pages[seg_idx]->page, 1);
+				put_free_pages(ring, &pages[seg_idx]->page, 1);
 				pages[seg_idx]->handle = BLKBACK_INVALID_HANDLE;
 				ret |= 1;
 				goto next;
@@ -889,7 +935,7 @@ next:
 
 out_of_memory:
 	pr_alert("%s: out of memory\n", __func__);
-	gnttab_page_cache_put(&ring->free_pages, pages_to_gnt, segs_to_map);
+	put_free_pages(ring, pages_to_gnt, segs_to_map);
 	for (i = last_map; i < num; i++)
 		pages[i]->handle = BLKBACK_INVALID_HANDLE;
 	return -ENOMEM;
@@ -1075,7 +1121,7 @@ static void end_block_io_op(struct bio *bio)
  * and transmute  it to the block API to hand it over to the proper block disk.
  */
 static int
-__do_block_io_op(struct xen_blkif_ring *ring, unsigned int *eoi_flags)
+__do_block_io_op(struct xen_blkif_ring *ring)
 {
 	union blkif_back_rings *blk_rings = &ring->blk_rings;
 	struct blkif_request req;
@@ -1097,9 +1143,6 @@ __do_block_io_op(struct xen_blkif_ring *ring, unsigned int *eoi_flags)
 
 		if (RING_REQUEST_CONS_OVERFLOW(&blk_rings->common, rc))
 			break;
-
-		/* We've seen a request, so clear spurious eoi flag. */
-		*eoi_flags &= ~XEN_EOI_FLAG_SPURIOUS;
 
 		if (kthread_should_stop()) {
 			more_to_do = 1;
@@ -1159,13 +1202,13 @@ done:
 }
 
 static int
-do_block_io_op(struct xen_blkif_ring *ring, unsigned int *eoi_flags)
+do_block_io_op(struct xen_blkif_ring *ring)
 {
 	union blkif_back_rings *blk_rings = &ring->blk_rings;
 	int more_to_do;
 
 	do {
-		more_to_do = __do_block_io_op(ring, eoi_flags);
+		more_to_do = __do_block_io_op(ring);
 		if (more_to_do)
 			break;
 
@@ -1217,7 +1260,7 @@ static int dispatch_rw_block_io(struct xen_blkif_ring *ring,
 		break;
 	case BLKIF_OP_WRITE_BARRIER:
 		drain = true;
-		fallthrough;
+		/* fall through */
 	case BLKIF_OP_FLUSH_DISKCACHE:
 		ring->st_f_req++;
 		operation = REQ_OP_WRITE;

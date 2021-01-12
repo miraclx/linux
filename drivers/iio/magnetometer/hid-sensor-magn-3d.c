@@ -14,6 +14,8 @@
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
 #include <linux/iio/buffer.h>
+#include <linux/iio/trigger_consumer.h>
+#include <linux/iio/triggered_buffer.h>
 #include "../common/hid-sensors/hid-sensor-trigger.h"
 
 enum magn_3d_channel {
@@ -512,17 +514,23 @@ static int hid_magn_3d_probe(struct platform_device *pdev)
 
 	indio_dev->channels = channels;
 	indio_dev->num_channels = chan_count;
+	indio_dev->dev.parent = &pdev->dev;
 	indio_dev->info = &magn_3d_info;
 	indio_dev->name = name;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 
+	ret = iio_triggered_buffer_setup(indio_dev, &iio_pollfunc_store_time,
+		NULL, NULL);
+	if (ret) {
+		dev_err(&pdev->dev, "failed to initialize trigger buffer\n");
+		return ret;
+	}
 	atomic_set(&magn_state->magn_flux_attributes.data_ready, 0);
-
 	ret = hid_sensor_setup_trigger(indio_dev, name,
 					&magn_state->magn_flux_attributes);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "trigger setup failed\n");
-		return ret;
+		goto error_unreg_buffer_funcs;
 	}
 
 	ret = iio_device_register(indio_dev);
@@ -546,7 +554,9 @@ static int hid_magn_3d_probe(struct platform_device *pdev)
 error_iio_unreg:
 	iio_device_unregister(indio_dev);
 error_remove_trigger:
-	hid_sensor_remove_trigger(indio_dev, &magn_state->magn_flux_attributes);
+	hid_sensor_remove_trigger(&magn_state->magn_flux_attributes);
+error_unreg_buffer_funcs:
+	iio_triggered_buffer_cleanup(indio_dev);
 	return ret;
 }
 
@@ -559,7 +569,8 @@ static int hid_magn_3d_remove(struct platform_device *pdev)
 
 	sensor_hub_remove_callback(hsdev, HID_USAGE_SENSOR_COMPASS_3D);
 	iio_device_unregister(indio_dev);
-	hid_sensor_remove_trigger(indio_dev, &magn_state->magn_flux_attributes);
+	hid_sensor_remove_trigger(&magn_state->magn_flux_attributes);
+	iio_triggered_buffer_cleanup(indio_dev);
 
 	return 0;
 }

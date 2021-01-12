@@ -4,6 +4,7 @@
 #include <linux/module.h>
 #include <linux/mlx5/driver.h>
 #include <linux/mlx5/port.h>
+#include <linux/mlx5/cmd.h>
 #include "mlx5_core.h"
 #include "lib/port_tun.h"
 
@@ -144,11 +145,11 @@ static int mlx5_set_entropy(struct mlx5_tun_entropy *tun_entropy,
 int mlx5_tun_entropy_refcount_inc(struct mlx5_tun_entropy *tun_entropy,
 				  int reformat_type)
 {
+	/* the default is error for unknown (non VXLAN/GRE tunnel types) */
 	int err = -EOPNOTSUPP;
 
 	mutex_lock(&tun_entropy->lock);
-	if ((reformat_type == MLX5_REFORMAT_TYPE_L2_TO_VXLAN ||
-	     reformat_type == MLX5_REFORMAT_TYPE_L2_TO_L3_TUNNEL) &&
+	if (reformat_type == MLX5_REFORMAT_TYPE_L2_TO_VXLAN &&
 	    tun_entropy->enabled) {
 		/* in case entropy calculation is enabled for all tunneling
 		 * types, it is ok for VXLAN, so approve.

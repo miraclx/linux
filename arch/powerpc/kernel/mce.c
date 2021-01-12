@@ -16,7 +16,6 @@
 #include <linux/export.h>
 #include <linux/irq_work.h>
 #include <linux/extable.h>
-#include <linux/ftrace.h>
 
 #include <asm/machdep.h>
 #include <asm/mce.h>
@@ -48,20 +47,6 @@ static struct irq_work mce_ue_event_irq_work = {
 };
 
 DECLARE_WORK(mce_ue_event_work, machine_process_ue_event);
-
-static BLOCKING_NOTIFIER_HEAD(mce_notifier_list);
-
-int mce_register_notifier(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_register(&mce_notifier_list, nb);
-}
-EXPORT_SYMBOL_GPL(mce_register_notifier);
-
-int mce_unregister_notifier(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_unregister(&mce_notifier_list, nb);
-}
-EXPORT_SYMBOL_GPL(mce_unregister_notifier);
 
 static void mce_set_error_info(struct machine_check_event *mce,
 			       struct mce_error_info *mce_err)
@@ -292,7 +277,6 @@ static void machine_process_ue_event(struct work_struct *work)
 	while (__this_cpu_read(mce_ue_count) > 0) {
 		index = __this_cpu_read(mce_ue_count) - 1;
 		evt = this_cpu_ptr(&mce_ue_event_queue[index]);
-		blocking_notifier_call_chain(&mce_notifier_list, 0, evt);
 #ifdef CONFIG_MEMORY_FAILURE
 		/*
 		 * This should probably queued elsewhere, but
@@ -385,7 +369,6 @@ void machine_check_print_event_info(struct machine_check_event *evt,
 	static const char *mc_user_types[] = {
 		"Indeterminate",
 		"tlbie(l) invalid",
-		"scv invalid",
 	};
 	static const char *mc_ra_types[] = {
 		"Indeterminate",
@@ -555,7 +538,7 @@ void machine_check_print_event_info(struct machine_check_event *evt,
 	}
 
 	printk("%sMCE: CPU%d: machine check (%s) %s %s %s %s[%s]\n",
-		level, evt->cpu, sevstr, in_guest ? "Guest" : "",
+		level, evt->cpu, sevstr, in_guest ? "Guest" : "Host",
 		err_type, subtype, dar_str,
 		evt->disposition == MCE_DISPOSITION_RECOVERED ?
 		"Recovered" : "Not recovered");
@@ -577,7 +560,7 @@ void machine_check_print_event_info(struct machine_check_event *evt,
 
 #ifdef CONFIG_PPC_BOOK3S_64
 	/* Display faulty slb contents for SLB errors. */
-	if (evt->error_type == MCE_ERROR_TYPE_SLB && !in_guest)
+	if (evt->error_type == MCE_ERROR_TYPE_SLB)
 		slb_dump_contents(local_paca->mce_faulty_slbs);
 #endif
 }
@@ -588,15 +571,9 @@ EXPORT_SYMBOL_GPL(machine_check_print_event_info);
  *
  * regs->nip and regs->msr contains srr0 and ssr1.
  */
-long notrace machine_check_early(struct pt_regs *regs)
+long machine_check_early(struct pt_regs *regs)
 {
 	long handled = 0;
-	u8 ftrace_enabled = this_cpu_get_ftrace_enabled();
-
-	this_cpu_set_ftrace_enabled(0);
-	/* Do not use nmi_enter/exit for pseries hpte guest */
-	if (radix_enabled() || !firmware_has_feature(FW_FEATURE_LPAR))
-		nmi_enter();
 
 	hv_nmi_check_nonrecoverable(regs);
 
@@ -605,12 +582,6 @@ long notrace machine_check_early(struct pt_regs *regs)
 	 */
 	if (ppc_md.machine_check_early)
 		handled = ppc_md.machine_check_early(regs);
-
-	if (radix_enabled() || !firmware_has_feature(FW_FEATURE_LPAR))
-		nmi_exit();
-
-	this_cpu_set_ftrace_enabled(ftrace_enabled);
-
 	return handled;
 }
 
@@ -726,7 +697,7 @@ long hmi_exception_realmode(struct pt_regs *regs)
 {	
 	int ret;
 
-	local_paca->hmi_irqs++;
+	__this_cpu_inc(irq_stat.hmi_exceptions);
 
 	ret = hmi_handle_debugtrig(regs);
 	if (ret >= 0)

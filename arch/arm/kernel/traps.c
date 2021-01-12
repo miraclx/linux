@@ -62,24 +62,21 @@ __setup("user_debug=", user_debug_setup);
 
 static void dump_mem(const char *, const char *, unsigned long, unsigned long);
 
-void dump_backtrace_entry(unsigned long where, unsigned long from,
-			  unsigned long frame, const char *loglvl)
+void dump_backtrace_entry(unsigned long where, unsigned long from, unsigned long frame)
 {
 	unsigned long end = frame + 4 + sizeof(struct pt_regs);
 
 #ifdef CONFIG_KALLSYMS
-	printk("%s[<%08lx>] (%ps) from [<%08lx>] (%pS)\n",
-		loglvl, where, (void *)where, from, (void *)from);
+	printk("[<%08lx>] (%ps) from [<%08lx>] (%pS)\n", where, (void *)where, from, (void *)from);
 #else
-	printk("%sFunction entered at [<%08lx>] from [<%08lx>]\n",
-		loglvl, where, from);
+	printk("Function entered at [<%08lx>] from [<%08lx>]\n", where, from);
 #endif
 
 	if (in_entry_text(from) && end <= ALIGN(frame, THREAD_SIZE))
-		dump_mem(loglvl, "Exception stack", frame + 4, end);
+		dump_mem("", "Exception stack", frame + 4, end);
 }
 
-void dump_backtrace_stm(u32 *stack, u32 instruction, const char *loglvl)
+void dump_backtrace_stm(u32 *stack, u32 instruction)
 {
 	char str[80], *p;
 	unsigned int x;
@@ -91,12 +88,12 @@ void dump_backtrace_stm(u32 *stack, u32 instruction, const char *loglvl)
 			if (++x == 6) {
 				x = 0;
 				p = str;
-				printk("%s%s\n", loglvl, str);
+				printk("%s\n", str);
 			}
 		}
 	}
 	if (p != str)
-		printk("%s%s\n", loglvl, str);
+		printk("%s\n", str);
 }
 
 #ifndef CONFIG_ARM_UNWIND
@@ -204,19 +201,17 @@ static void dump_instr(const char *lvl, struct pt_regs *regs)
 }
 
 #ifdef CONFIG_ARM_UNWIND
-static inline void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk,
-				  const char *loglvl)
+static inline void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 {
-	unwind_backtrace(regs, tsk, loglvl);
+	unwind_backtrace(regs, tsk);
 }
 #else
-static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk,
-			   const char *loglvl)
+static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 {
 	unsigned int fp, mode;
 	int ok = 1;
 
-	printk("%sBacktrace: ", loglvl);
+	printk("Backtrace: ");
 
 	if (!tsk)
 		tsk = current;
@@ -243,13 +238,13 @@ static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk,
 	pr_cont("\n");
 
 	if (ok)
-		c_backtrace(fp, mode, loglvl);
+		c_backtrace(fp, mode);
 }
 #endif
 
-void show_stack(struct task_struct *tsk, unsigned long *sp, const char *loglvl)
+void show_stack(struct task_struct *tsk, unsigned long *sp)
 {
-	dump_backtrace(NULL, tsk, loglvl);
+	dump_backtrace(NULL, tsk);
 	barrier();
 }
 
@@ -293,7 +288,7 @@ static int __die(const char *str, int err, struct pt_regs *regs)
 	if (!user_mode(regs) || in_interrupt()) {
 		dump_mem(KERN_EMERG, "Stack: ", regs->ARM_sp,
 			 THREAD_SIZE + (unsigned long)task_stack_page(tsk));
-		dump_backtrace(regs, tsk, KERN_EMERG);
+		dump_backtrace(regs, tsk);
 		dump_instr(KERN_EMERG, regs);
 	}
 
@@ -396,7 +391,7 @@ int is_valid_bugaddr(unsigned long pc)
 	u32 insn = __opcode_to_mem_arm(BUG_INSTR_VALUE);
 #endif
 
-	if (get_kernel_nofault(bkpt, (void *)pc))
+	if (probe_kernel_address((unsigned *)pc, bkpt))
 		return 0;
 
 	return bkpt == insn;
@@ -571,7 +566,7 @@ __do_cache_op(unsigned long start, unsigned long end)
 		if (fatal_signal_pending(current))
 			return 0;
 
-		ret = flush_icache_user_range(start, start + chunk);
+		ret = flush_cache_user_range(start, start + chunk);
 		if (ret)
 			return ret;
 
@@ -668,10 +663,10 @@ asmlinkage int arm_syscall(int no, struct pt_regs *regs)
 	if (user_debug & UDBG_SYSCALL) {
 		pr_err("[%d] %s: arm syscall %d\n",
 		       task_pid_nr(current), current->comm, no);
-		dump_instr(KERN_ERR, regs);
+		dump_instr("", regs);
 		if (user_mode(regs)) {
 			__show_regs(regs);
-			c_backtrace(frame_pointer(regs), processor_mode(regs), KERN_ERR);
+			c_backtrace(frame_pointer(regs), processor_mode(regs));
 		}
 	}
 #endif

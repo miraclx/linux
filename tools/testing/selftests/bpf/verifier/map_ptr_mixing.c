@@ -56,7 +56,7 @@
 	.fixup_map_in_map = { 16 },
 	.fixup_map_array_48b = { 13 },
 	.result = REJECT,
-	.errstr = "only read from bpf_array is supported",
+	.errstr = "R0 invalid mem access 'map_ptr'",
 },
 {
 	"cond: two branches returning different map pointers for lookup (tail, tail)",

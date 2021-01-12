@@ -46,7 +46,6 @@
 #include <keys/user-type.h>
 #include <keys/request_key_auth-type.h>
 #include <linux/module.h>
-#include <linux/user_namespace.h>
 
 #include "internal.h"
 #include "netns.h"
@@ -70,13 +69,13 @@ struct idmap {
 	struct rpc_pipe		*idmap_pipe;
 	struct idmap_legacy_upcalldata *idmap_upcall_data;
 	struct mutex		idmap_mutex;
-	struct user_namespace	*user_ns;
+	const struct cred	*cred;
 };
 
 static struct user_namespace *idmap_userns(const struct idmap *idmap)
 {
-	if (idmap && idmap->user_ns)
-		return idmap->user_ns;
+	if (idmap && idmap->cred)
+		return idmap->cred->user_ns;
 	return &init_user_ns;
 }
 
@@ -287,7 +286,7 @@ static struct key *nfs_idmap_request_key(const char *name, size_t namelen,
 	if (ret < 0)
 		return ERR_PTR(ret);
 
-	if (!idmap->user_ns || idmap->user_ns == &init_user_ns)
+	if (!idmap->cred || idmap->cred->user_ns == &init_user_ns)
 		rkey = request_key(&key_type_id_resolver, desc, "");
 	if (IS_ERR(rkey)) {
 		mutex_lock(&idmap->idmap_mutex);
@@ -463,7 +462,7 @@ nfs_idmap_new(struct nfs_client *clp)
 		return -ENOMEM;
 
 	mutex_init(&idmap->idmap_mutex);
-	idmap->user_ns = get_user_ns(clp->cl_rpcclient->cl_cred->user_ns);
+	idmap->cred = get_cred(clp->cl_rpcclient->cl_cred);
 
 	rpc_init_pipe_dir_object(&idmap->idmap_pdo,
 			&nfs_idmap_pipe_dir_object_ops,
@@ -487,7 +486,7 @@ nfs_idmap_new(struct nfs_client *clp)
 err_destroy_pipe:
 	rpc_destroy_pipe_data(idmap->idmap_pipe);
 err:
-	get_user_ns(idmap->user_ns);
+	put_cred(idmap->cred);
 	kfree(idmap);
 	return error;
 }
@@ -504,7 +503,7 @@ nfs_idmap_delete(struct nfs_client *clp)
 			&clp->cl_rpcclient->cl_pipedir_objects,
 			&idmap->idmap_pdo);
 	rpc_destroy_pipe_data(idmap->idmap_pipe);
-	put_user_ns(idmap->user_ns);
+	put_cred(idmap->cred);
 	kfree(idmap);
 }
 
@@ -521,7 +520,7 @@ static int nfs_idmap_prepare_message(char *desc, struct idmap *idmap,
 	switch (token) {
 	case Opt_find_uid:
 		im->im_type = IDMAP_TYPE_USER;
-		fallthrough;
+		/* Fall through */
 	case Opt_find_gid:
 		im->im_conv = IDMAP_CONV_NAMETOID;
 		ret = match_strlcpy(im->im_name, &substr, IDMAP_NAMESZ);
@@ -529,7 +528,7 @@ static int nfs_idmap_prepare_message(char *desc, struct idmap *idmap,
 
 	case Opt_find_user:
 		im->im_type = IDMAP_TYPE_USER;
-		fallthrough;
+		/* Fall through */
 	case Opt_find_group:
 		im->im_conv = IDMAP_CONV_IDTONAME;
 		ret = match_int(&substr, &im->im_id);

@@ -10,12 +10,12 @@
 #include <fcntl.h>
 #include <link.h>
 #include <sched.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <sys/sysinfo.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
 #include <unistd.h>
@@ -88,40 +88,28 @@ void *get_auxv_entry(int type)
 
 int pick_online_cpu(void)
 {
-	int ncpus, cpu = -1;
-	cpu_set_t *mask;
-	size_t size;
+	cpu_set_t mask;
+	int cpu;
 
-	ncpus = get_nprocs_conf();
-	size = CPU_ALLOC_SIZE(ncpus);
-	mask = CPU_ALLOC(ncpus);
-	if (!mask) {
-		perror("malloc");
+	CPU_ZERO(&mask);
+
+	if (sched_getaffinity(0, sizeof(mask), &mask)) {
+		perror("sched_getaffinity");
 		return -1;
 	}
 
-	CPU_ZERO_S(size, mask);
-
-	if (sched_getaffinity(0, size, mask)) {
-		perror("sched_getaffinity");
-		goto done;
-	}
-
 	/* We prefer a primary thread, but skip 0 */
-	for (cpu = 8; cpu < ncpus; cpu += 8)
-		if (CPU_ISSET_S(cpu, size, mask))
-			goto done;
+	for (cpu = 8; cpu < CPU_SETSIZE; cpu += 8)
+		if (CPU_ISSET(cpu, &mask))
+			return cpu;
 
 	/* Search for anything, but in reverse */
-	for (cpu = ncpus - 1; cpu >= 0; cpu--)
-		if (CPU_ISSET_S(cpu, size, mask))
-			goto done;
+	for (cpu = CPU_SETSIZE - 1; cpu >= 0; cpu--)
+		if (CPU_ISSET(cpu, &mask))
+			return cpu;
 
 	printf("No cpus in affinity mask?!\n");
-
-done:
-	CPU_FREE(mask);
-	return cpu;
+	return -1;
 }
 
 bool is_ppc64le(void)
@@ -272,32 +260,36 @@ int perf_event_reset(int fd)
 	return 0;
 }
 
-int using_hash_mmu(bool *using_hash)
+static void sigill_handler(int signr, siginfo_t *info, void *unused)
 {
-	char line[128];
-	FILE *f;
-	int rc;
+	static int warned = 0;
+	ucontext_t *ctx = (ucontext_t *)unused;
+	unsigned long *pc = &UCONTEXT_NIA(ctx);
 
-	f = fopen("/proc/cpuinfo", "r");
-	FAIL_IF(!f);
+	/* mtspr 3,RS to check for move to DSCR below */
+	if ((*((unsigned int *)*pc) & 0xfc1fffff) == 0x7c0303a6) {
+		if (!warned++)
+			printf("WARNING: Skipping over dscr setup. Consider running 'ppc64_cpu --dscr=1' manually.\n");
+		*pc += 4;
+	} else {
+		printf("SIGILL at %p\n", pc);
+		abort();
+	}
+}
 
-	rc = 0;
-	while (fgets(line, sizeof(line), f) != NULL) {
-		if (!strcmp(line, "MMU		: Hash\n") ||
-		    !strcmp(line, "platform	: Cell\n") ||
-		    !strcmp(line, "platform	: PowerMac\n")) {
-			*using_hash = true;
-			goto out;
-		}
+void set_dscr(unsigned long val)
+{
+	static int init = 0;
+	struct sigaction sa;
 
-		if (strcmp(line, "MMU		: Radix\n") == 0) {
-			*using_hash = false;
-			goto out;
-		}
+	if (!init) {
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_sigaction = sigill_handler;
+		sa.sa_flags = SA_SIGINFO;
+		if (sigaction(SIGILL, &sa, NULL))
+			perror("sigill_handler");
+		init = 1;
 	}
 
-	rc = -1;
-out:
-	fclose(f);
-	return rc;
+	asm volatile("mtspr %1,%0" : : "r" (val), "i" (SPRN_DSCR));
 }

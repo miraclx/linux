@@ -51,6 +51,7 @@
 #include <asm/reg.h>
 #include <asm/sections.h>
 #include <asm/prom.h>
+#include <asm/pgtable.h>
 #include <asm/io.h>
 #include <asm/pci-bridge.h>
 #include <asm/ohare.h>
@@ -284,7 +285,7 @@ static void __init pmac_setup_arch(void)
 				/* 604, G3, G4 etc. */
 				loops_per_jiffy = *fp / HZ;
 			else
-				/* 603, etc. */
+				/* 601, 603, etc. */
 				loops_per_jiffy = *fp / (2 * HZ);
 			of_node_put(cpu);
 			break;

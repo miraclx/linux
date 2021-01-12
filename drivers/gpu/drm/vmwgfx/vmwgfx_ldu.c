@@ -81,7 +81,7 @@ static int vmw_ldu_commit_list(struct vmw_private *dev_priv)
 	struct vmw_legacy_display_unit *entry;
 	struct drm_framebuffer *fb = NULL;
 	struct drm_crtc *crtc = NULL;
-	int i;
+	int i = 0;
 
 	/* If there is no display topology the host just assumes
 	 * that the guest will set the same layout as the host.
@@ -92,11 +92,12 @@ static int vmw_ldu_commit_list(struct vmw_private *dev_priv)
 			crtc = &entry->base.crtc;
 			w = max(w, crtc->x + crtc->mode.hdisplay);
 			h = max(h, crtc->y + crtc->mode.vdisplay);
+			i++;
 		}
 
 		if (crtc == NULL)
 			return 0;
-		fb = crtc->primary->state->fb;
+		fb = entry->base.crtc.primary->state->fb;
 
 		return vmw_kms_write_svga(dev_priv, w, h, fb->pitches[0],
 					  fb->format->cpp[0] * 8,
@@ -214,7 +215,7 @@ static void vmw_ldu_crtc_mode_set_nofb(struct drm_crtc *crtc)
  * CRTC, it makes more sense to do those at plane update time.
  */
 static void vmw_ldu_crtc_atomic_enable(struct drm_crtc *crtc,
-				       struct drm_atomic_state *state)
+				       struct drm_crtc_state *old_state)
 {
 }
 
@@ -224,7 +225,7 @@ static void vmw_ldu_crtc_atomic_enable(struct drm_crtc *crtc,
  * @crtc: CRTC to be turned off
  */
 static void vmw_ldu_crtc_atomic_disable(struct drm_crtc *crtc,
-					struct drm_atomic_state *state)
+					struct drm_crtc_state *old_state)
 {
 }
 
@@ -387,6 +388,8 @@ static int vmw_ldu_init(struct vmw_private *dev_priv, unsigned unit)
 	ldu->base.is_implicit = true;
 
 	/* Initialize primary plane */
+	vmw_du_plane_reset(primary);
+
 	ret = drm_universal_plane_init(dev, &ldu->base.primary,
 				       0, &vmw_ldu_plane_funcs,
 				       vmw_primary_plane_formats,
@@ -400,6 +403,8 @@ static int vmw_ldu_init(struct vmw_private *dev_priv, unsigned unit)
 	drm_plane_helper_add(primary, &vmw_ldu_primary_plane_helper_funcs);
 
 	/* Initialize cursor plane */
+	vmw_du_plane_reset(cursor);
+
 	ret = drm_universal_plane_init(dev, &ldu->base.cursor,
 			0, &vmw_ldu_cursor_funcs,
 			vmw_cursor_plane_formats,
@@ -413,6 +418,7 @@ static int vmw_ldu_init(struct vmw_private *dev_priv, unsigned unit)
 
 	drm_plane_helper_add(cursor, &vmw_ldu_cursor_plane_helper_funcs);
 
+	vmw_du_connector_reset(connector);
 	ret = drm_connector_init(dev, connector, &vmw_legacy_connector_funcs,
 				 DRM_MODE_CONNECTOR_VIRTUAL);
 	if (ret) {
@@ -440,6 +446,7 @@ static int vmw_ldu_init(struct vmw_private *dev_priv, unsigned unit)
 		goto err_free_encoder;
 	}
 
+	vmw_du_crtc_reset(crtc);
 	ret = drm_crtc_init_with_planes(dev, crtc, &ldu->base.primary,
 					&ldu->base.cursor,
 					&vmw_legacy_crtc_funcs, NULL);
@@ -513,8 +520,6 @@ int vmw_kms_ldu_init_display(struct vmw_private *dev_priv)
 		vmw_ldu_init(dev_priv, 0);
 
 	dev_priv->active_display_unit = vmw_du_legacy;
-
-	drm_mode_config_reset(dev);
 
 	DRM_INFO("Legacy Display Unit initialized\n");
 

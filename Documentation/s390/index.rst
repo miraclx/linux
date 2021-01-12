@@ -15,11 +15,8 @@ s390 Architecture
     vfio-ccw
     zfcpdump
     common_io
-    pci
 
     text_files
-
-    features
 
 .. only::  subproject and html
 

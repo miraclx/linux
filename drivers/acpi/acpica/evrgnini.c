@@ -38,7 +38,6 @@ acpi_ev_system_memory_region_setup(acpi_handle handle,
 	union acpi_operand_object *region_desc =
 	    (union acpi_operand_object *)handle;
 	struct acpi_mem_space_context *local_region_context;
-	struct acpi_mem_mapping *mm;
 
 	ACPI_FUNCTION_TRACE(ev_system_memory_region_setup);
 
@@ -47,14 +46,13 @@ acpi_ev_system_memory_region_setup(acpi_handle handle,
 			local_region_context =
 			    (struct acpi_mem_space_context *)*region_context;
 
-			/* Delete memory mappings if present */
+			/* Delete a cached mapping if present */
 
-			while (local_region_context->first_mm) {
-				mm = local_region_context->first_mm;
-				local_region_context->first_mm = mm->next_mm;
-				acpi_os_unmap_memory(mm->logical_address,
-						     mm->length);
-				ACPI_FREE(mm);
+			if (local_region_context->mapped_length) {
+				acpi_os_unmap_memory(local_region_context->
+						     mapped_logical_address,
+						     local_region_context->
+						     mapped_length);
 			}
 			ACPI_FREE(local_region_context);
 			*region_context = NULL;

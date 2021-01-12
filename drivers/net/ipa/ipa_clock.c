@@ -4,7 +4,7 @@
  * Copyright (C) 2018-2020 Linaro Ltd.
  */
 
-#include <linux/refcount.h>
+#include <linux/atomic.h>
 #include <linux/mutex.h>
 #include <linux/clk.h>
 #include <linux/device.h>
@@ -13,7 +13,6 @@
 #include "ipa.h"
 #include "ipa_clock.h"
 #include "ipa_modem.h"
-#include "ipa_data.h"
 
 /**
  * DOC: IPA Clocking
@@ -30,24 +29,34 @@
  * An IPA clock reference must be held for any access to IPA hardware.
  */
 
+#define	IPA_CORE_CLOCK_RATE		(75UL * 1000 * 1000)	/* Hz */
+
+/* Interconnect path bandwidths (each times 1000 bytes per second) */
+#define IPA_MEMORY_AVG			(80 * 1000)	/* 80 MBps */
+#define IPA_MEMORY_PEAK			(600 * 1000)
+
+#define IPA_IMEM_AVG			(80 * 1000)
+#define IPA_IMEM_PEAK			(350 * 1000)
+
+#define IPA_CONFIG_AVG			(40 * 1000)
+#define IPA_CONFIG_PEAK			(40 * 1000)
+
 /**
  * struct ipa_clock - IPA clocking information
  * @count:		Clocking reference count
- * @mutex:		Protects clock enable/disable
+ * @mutex;		Protects clock enable/disable
  * @core:		IPA core clock
  * @memory_path:	Memory interconnect
  * @imem_path:		Internal memory interconnect
  * @config_path:	Configuration space interconnect
- * @interconnect_data:	Interconnect configuration data
  */
 struct ipa_clock {
-	refcount_t count;
+	atomic_t count;
 	struct mutex mutex; /* protects clock enable/disable */
 	struct clk *core;
 	struct icc_path *memory_path;
 	struct icc_path *imem_path;
 	struct icc_path *config_path;
-	const struct ipa_interconnect_data *interconnect_data;
 };
 
 static struct icc_path *
@@ -57,8 +66,8 @@ ipa_interconnect_init_one(struct device *dev, const char *name)
 
 	path = of_icc_get(dev, name);
 	if (IS_ERR(path))
-		dev_err(dev, "error %ld getting %s interconnect\n",
-			PTR_ERR(path), name);
+		dev_err(dev, "error %ld getting memory interconnect\n",
+			PTR_ERR(path));
 
 	return path;
 }
@@ -104,25 +113,18 @@ static void ipa_interconnect_exit(struct ipa_clock *clock)
 /* Currently we only use one bandwidth level, so just "enable" interconnects */
 static int ipa_interconnect_enable(struct ipa *ipa)
 {
-	const struct ipa_interconnect_data *data;
 	struct ipa_clock *clock = ipa->clock;
 	int ret;
 
-	data = &clock->interconnect_data[IPA_INTERCONNECT_MEMORY];
-	ret = icc_set_bw(clock->memory_path, data->average_rate,
-			 data->peak_rate);
+	ret = icc_set_bw(clock->memory_path, IPA_MEMORY_AVG, IPA_MEMORY_PEAK);
 	if (ret)
 		return ret;
 
-	data = &clock->interconnect_data[IPA_INTERCONNECT_IMEM];
-	ret = icc_set_bw(clock->memory_path, data->average_rate,
-			 data->peak_rate);
+	ret = icc_set_bw(clock->imem_path, IPA_IMEM_AVG, IPA_IMEM_PEAK);
 	if (ret)
 		goto err_memory_path_disable;
 
-	data = &clock->interconnect_data[IPA_INTERCONNECT_CONFIG];
-	ret = icc_set_bw(clock->memory_path, data->average_rate,
-			 data->peak_rate);
+	ret = icc_set_bw(clock->config_path, IPA_CONFIG_AVG, IPA_CONFIG_PEAK);
 	if (ret)
 		goto err_imem_path_disable;
 
@@ -139,7 +141,6 @@ err_memory_path_disable:
 /* To disable an interconnect, we just its bandwidth to 0 */
 static int ipa_interconnect_disable(struct ipa *ipa)
 {
-	const struct ipa_interconnect_data *data;
 	struct ipa_clock *clock = ipa->clock;
 	int ret;
 
@@ -158,13 +159,9 @@ static int ipa_interconnect_disable(struct ipa *ipa)
 	return 0;
 
 err_imem_path_reenable:
-	data = &clock->interconnect_data[IPA_INTERCONNECT_IMEM];
-	(void)icc_set_bw(clock->imem_path, data->average_rate,
-			 data->peak_rate);
+	(void)icc_set_bw(clock->imem_path, IPA_IMEM_AVG, IPA_IMEM_PEAK);
 err_memory_path_reenable:
-	data = &clock->interconnect_data[IPA_INTERCONNECT_MEMORY];
-	(void)icc_set_bw(clock->memory_path, data->average_rate,
-			 data->peak_rate);
+	(void)icc_set_bw(clock->memory_path, IPA_MEMORY_AVG, IPA_MEMORY_PEAK);
 
 	return ret;
 }
@@ -198,13 +195,14 @@ static void ipa_clock_disable(struct ipa *ipa)
  */
 bool ipa_clock_get_additional(struct ipa *ipa)
 {
-	return refcount_inc_not_zero(&ipa->clock->count);
+	return !!atomic_inc_not_zero(&ipa->clock->count);
 }
 
 /* Get an IPA clock reference.  If the reference count is non-zero, it is
  * incremented and return is immediate.  Otherwise it is checked again
- * under protection of the mutex, and if appropriate the IPA clock
- * is enabled.
+ * under protection of the mutex, and if appropriate the clock (and
+ * interconnects) are enabled suspended endpoints (if any) are resumed
+ * before returning.
  *
  * Incrementing the reference count is intentionally deferred until
  * after the clock is running and endpoints are resumed.
@@ -231,37 +229,35 @@ void ipa_clock_get(struct ipa *ipa)
 		goto out_mutex_unlock;
 	}
 
-	refcount_set(&clock->count, 1);
+	ipa_endpoint_resume(ipa);
+
+	atomic_inc(&clock->count);
 
 out_mutex_unlock:
 	mutex_unlock(&clock->mutex);
 }
 
-/* Attempt to remove an IPA clock reference.  If this represents the
- * last reference, disable the IPA clock under protection of the mutex.
+/* Attempt to remove an IPA clock reference.  If this represents the last
+ * reference, suspend endpoints and disable the clock (and interconnects)
+ * under protection of a mutex.
  */
 void ipa_clock_put(struct ipa *ipa)
 {
 	struct ipa_clock *clock = ipa->clock;
 
 	/* If this is not the last reference there's nothing more to do */
-	if (!refcount_dec_and_mutex_lock(&clock->count, &clock->mutex))
+	if (!atomic_dec_and_mutex_lock(&clock->count, &clock->mutex))
 		return;
+
+	ipa_endpoint_suspend(ipa);
 
 	ipa_clock_disable(ipa);
 
 	mutex_unlock(&clock->mutex);
 }
 
-/* Return the current IPA core clock rate */
-u32 ipa_clock_rate(struct ipa *ipa)
-{
-	return ipa->clock ? (u32)clk_get_rate(ipa->clock->core) : 0;
-}
-
 /* Initialize IPA clocking */
-struct ipa_clock *
-ipa_clock_init(struct device *dev, const struct ipa_clock_data *data)
+struct ipa_clock *ipa_clock_init(struct device *dev)
 {
 	struct ipa_clock *clock;
 	struct clk *clk;
@@ -273,10 +269,10 @@ ipa_clock_init(struct device *dev, const struct ipa_clock_data *data)
 		return ERR_CAST(clk);
 	}
 
-	ret = clk_set_rate(clk, data->core_clock_rate);
+	ret = clk_set_rate(clk, IPA_CORE_CLOCK_RATE);
 	if (ret) {
-		dev_err(dev, "error %d setting core clock rate to %u\n",
-			ret, data->core_clock_rate);
+		dev_err(dev, "error %d setting core clock rate to %lu\n",
+			ret, IPA_CORE_CLOCK_RATE);
 		goto err_clk_put;
 	}
 
@@ -286,14 +282,13 @@ ipa_clock_init(struct device *dev, const struct ipa_clock_data *data)
 		goto err_clk_put;
 	}
 	clock->core = clk;
-	clock->interconnect_data = data->interconnect;
 
 	ret = ipa_interconnect_init(clock, dev);
 	if (ret)
 		goto err_kfree;
 
 	mutex_init(&clock->mutex);
-	refcount_set(&clock->count, 0);
+	atomic_set(&clock->count, 0);
 
 	return clock;
 
@@ -310,7 +305,7 @@ void ipa_clock_exit(struct ipa_clock *clock)
 {
 	struct clk *clk = clock->core;
 
-	WARN_ON(refcount_read(&clock->count) != 0);
+	WARN_ON(atomic_read(&clock->count) != 0);
 	mutex_destroy(&clock->mutex);
 	ipa_interconnect_exit(clock);
 	kfree(clock);

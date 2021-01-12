@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2017-2018 HUAWEI, Inc.
- *             https://www.huawei.com/
+ *             http://www.huawei.com/
  * Created by Gao Xiang <gaoxiang25@huawei.com>
  */
 #ifndef __EROFS_XATTR_H
@@ -76,8 +76,11 @@ static inline int erofs_getxattr(struct inode *inode, int index,
 	return -EOPNOTSUPP;
 }
 
-#define erofs_listxattr (NULL)
-#define erofs_xattr_handlers (NULL)
+static inline ssize_t erofs_listxattr(struct dentry *dentry,
+				      char *buffer, size_t buffer_size)
+{
+	return -EOPNOTSUPP;
+}
 #endif	/* !CONFIG_EROFS_FS_XATTR */
 
 #ifdef CONFIG_EROFS_FS_POSIX_ACL

@@ -234,11 +234,6 @@ static void octeon_mgmt_rx_fill_ring(struct net_device *netdev)
 
 		/* Put it in the ring.  */
 		p->rx_ring[p->rx_next_fill] = re.d64;
-		/* Make sure there is no reorder of filling the ring and ringing
-		 * the bell
-		 */
-		wmb();
-
 		dma_sync_single_for_device(p->dev, p->rx_ring_handle,
 					   ring_size_to_bytes(OCTEON_MGMT_RX_RING_SIZE),
 					   DMA_BIDIRECTIONAL);
@@ -315,9 +310,9 @@ static void octeon_mgmt_clean_tx_buffers(struct octeon_mgmt *p)
 		netif_wake_queue(p->netdev);
 }
 
-static void octeon_mgmt_clean_tx_tasklet(struct tasklet_struct *t)
+static void octeon_mgmt_clean_tx_tasklet(unsigned long arg)
 {
-	struct octeon_mgmt *p = from_tasklet(p, t, tx_clean_tasklet);
+	struct octeon_mgmt *p = (struct octeon_mgmt *)arg;
 	octeon_mgmt_clean_tx_buffers(p);
 	octeon_mgmt_enable_tx_irq(p);
 }
@@ -961,7 +956,7 @@ static int octeon_mgmt_init_phy(struct net_device *netdev)
 				PHY_INTERFACE_MODE_MII);
 
 	if (!phydev)
-		return -EPROBE_DEFER;
+		return -ENODEV;
 
 	return 0;
 }
@@ -1219,7 +1214,7 @@ static int octeon_mgmt_open(struct net_device *netdev)
 	 */
 	if (netdev->phydev) {
 		netif_carrier_off(netdev);
-		phy_start(netdev->phydev);
+		phy_start_aneg(netdev->phydev);
 	}
 
 	netif_wake_queue(netdev);
@@ -1247,10 +1242,8 @@ static int octeon_mgmt_stop(struct net_device *netdev)
 	napi_disable(&p->napi);
 	netif_stop_queue(netdev);
 
-	if (netdev->phydev) {
-		phy_stop(netdev->phydev);
+	if (netdev->phydev)
 		phy_disconnect(netdev->phydev);
-	}
 
 	netif_carrier_off(netdev);
 
@@ -1491,8 +1484,8 @@ static int octeon_mgmt_probe(struct platform_device *pdev)
 
 	skb_queue_head_init(&p->tx_list);
 	skb_queue_head_init(&p->rx_list);
-	tasklet_setup(&p->tx_clean_tasklet,
-		      octeon_mgmt_clean_tx_tasklet);
+	tasklet_init(&p->tx_clean_tasklet,
+		     octeon_mgmt_clean_tx_tasklet, (unsigned long)p);
 
 	netdev->priv_flags |= IFF_UNICAST_FLT;
 
@@ -1556,8 +1549,12 @@ static struct platform_driver octeon_mgmt_driver = {
 	.remove		= octeon_mgmt_remove,
 };
 
+extern void octeon_mdiobus_force_mod_depencency(void);
+
 static int __init octeon_mgmt_mod_init(void)
 {
+	/* Force our mdiobus driver module to be loaded first. */
+	octeon_mdiobus_force_mod_depencency();
 	return platform_driver_register(&octeon_mgmt_driver);
 }
 
@@ -1569,7 +1566,6 @@ static void __exit octeon_mgmt_mod_exit(void)
 module_init(octeon_mgmt_mod_init);
 module_exit(octeon_mgmt_mod_exit);
 
-MODULE_SOFTDEP("pre: mdio-cavium");
 MODULE_DESCRIPTION(DRV_DESCRIPTION);
 MODULE_AUTHOR("David Daney");
 MODULE_LICENSE("GPL");

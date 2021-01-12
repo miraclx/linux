@@ -33,6 +33,7 @@
 
 #include <drm/drm_modes.h>
 #include <drm/drm_panel.h>
+#include <drm/drm_print.h>
 
 #define ILI9322_CHIP_ID			0x00
 #define ILI9322_CHIP_ID_MAGIC		0x96
@@ -152,7 +153,7 @@
 #define ILI9322_GAMMA_7			0x16
 #define ILI9322_GAMMA_8			0x17
 
-/*
+/**
  * enum ili9322_input - the format of the incoming signal to the panel
  *
  * The panel can be connected to various input streams and four of them can
@@ -378,7 +379,7 @@ static int ili9322_init(struct drm_panel *panel, struct ili9322 *ili)
 				"can't set up VCOM amplitude (%d)\n", ret);
 			return ret;
 		}
-	}
+	};
 
 	if (ili->vcom_high != U8_MAX) {
 		ret = regmap_write(ili->regmap, ILI9322_VCOM_HIGH,
@@ -387,7 +388,7 @@ static int ili9322_init(struct drm_panel *panel, struct ili9322 *ili)
 			dev_err(ili->dev, "can't set up VCOM high (%d)\n", ret);
 			return ret;
 		}
-	}
+	};
 
 	/* Set up gamma correction */
 	for (i = 0; i < ARRAY_SIZE(ili->gamma); i++) {
@@ -548,6 +549,7 @@ static const struct drm_display_mode srgb_320x240_mode = {
 	.vsync_start = 240 + 4,
 	.vsync_end = 240 + 4 + 1,
 	.vtotal = 262,
+	.vrefresh = 60,
 	.flags = 0,
 };
 
@@ -561,6 +563,7 @@ static const struct drm_display_mode srgb_360x240_mode = {
 	.vsync_start = 240 + 21,
 	.vsync_end = 240 + 21 + 1,
 	.vtotal = 262,
+	.vrefresh = 60,
 	.flags = 0,
 };
 
@@ -575,6 +578,7 @@ static const struct drm_display_mode prgb_320x240_mode = {
 	.vsync_start = 240 + 4,
 	.vsync_end = 240 + 4 + 1,
 	.vtotal = 262,
+	.vrefresh = 60,
 	.flags = 0,
 };
 
@@ -589,6 +593,7 @@ static const struct drm_display_mode yuv_640x320_mode = {
 	.vsync_start = 320 + 4,
 	.vsync_end = 320 + 4 + 1,
 	.vtotal = 320 + 4 + 1 + 18,
+	.vrefresh = 60,
 	.flags = 0,
 };
 
@@ -602,6 +607,7 @@ static const struct drm_display_mode yuv_720x360_mode = {
 	.vsync_start = 360 + 4,
 	.vsync_end = 360 + 4 + 1,
 	.vtotal = 360 + 4 + 1 + 18,
+	.vrefresh = 60,
 	.flags = 0,
 };
 
@@ -616,6 +622,7 @@ static const struct drm_display_mode itu_r_bt_656_640_mode = {
 	.vsync_start = 480 + 4,
 	.vsync_end = 480 + 4 + 1,
 	.vtotal = 500,
+	.vrefresh = 60,
 	.flags = 0,
 };
 
@@ -630,6 +637,7 @@ static const struct drm_display_mode itu_r_bt_656_720_mode = {
 	.vsync_start = 480 + 4,
 	.vsync_end = 480 + 4 + 1,
 	.vtotal = 500,
+	.vrefresh = 60,
 	.flags = 0,
 };
 
@@ -682,7 +690,7 @@ static int ili9322_get_modes(struct drm_panel *panel,
 		break;
 	}
 	if (!mode) {
-		dev_err(panel->dev, "bad mode or failed to add mode\n");
+		DRM_ERROR("bad mode or failed to add mode\n");
 		return -EINVAL;
 	}
 	drm_mode_set_name(mode);
@@ -891,9 +899,7 @@ static int ili9322_probe(struct spi_device *spi)
 	drm_panel_init(&ili->panel, dev, &ili9322_drm_funcs,
 		       DRM_MODE_CONNECTOR_DPI);
 
-	drm_panel_add(&ili->panel);
-
-	return 0;
+	return drm_panel_add(&ili->panel);
 }
 
 static int ili9322_remove(struct spi_device *spi)

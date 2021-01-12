@@ -9,13 +9,13 @@ Supported chips:
 
     Prefix: 'tmp512'
 
-    Datasheet: https://www.ti.com/lit/ds/symlink/tmp512.pdf
+    Datasheet: http://www.ti.com/lit/ds/symlink/tmp512.pdf
 
   * Texas Instruments TMP513
 
     Prefix: 'tmp513'
 
-    Datasheet: https://www.ti.com/lit/ds/symlink/tmp513.pdf
+    Datasheet: http://www.ti.com/lit/ds/symlink/tmp513.pdf
 
 Authors:
 

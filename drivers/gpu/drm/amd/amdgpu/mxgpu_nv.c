@@ -30,6 +30,7 @@
 #include "navi10_ih.h"
 #include "soc15_common.h"
 #include "mxgpu_nv.h"
+#include "mxgpu_ai.h"
 
 static void xgpu_nv_mailbox_send_ack(struct amdgpu_device *adev)
 {
@@ -52,7 +53,8 @@ static void xgpu_nv_mailbox_set_valid(struct amdgpu_device *adev, bool val)
  */
 static enum idh_event xgpu_nv_mailbox_peek_msg(struct amdgpu_device *adev)
 {
-	return RREG32_NO_KIQ(mmMAILBOX_MSGBUF_RCV_DW0);
+	return RREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0,
+				mmBIF_BX_PF_MAILBOX_MSGBUF_RCV_DW0));
 }
 
 
@@ -61,7 +63,8 @@ static int xgpu_nv_mailbox_rcv_msg(struct amdgpu_device *adev,
 {
 	u32 reg;
 
-	reg = RREG32_NO_KIQ(mmMAILBOX_MSGBUF_RCV_DW0);
+	reg = RREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0,
+					     mmBIF_BX_PF_MAILBOX_MSGBUF_RCV_DW0));
 	if (reg != event)
 		return -ENOENT;
 
@@ -107,6 +110,7 @@ static int xgpu_nv_poll_msg(struct amdgpu_device *adev, enum idh_event event)
 		timeout -= 10;
 	} while (timeout > 1);
 
+	pr_err("Doesn't get msg:%d from pf, error=%d\n", event, r);
 
 	return -ETIME;
 }
@@ -114,6 +118,7 @@ static int xgpu_nv_poll_msg(struct amdgpu_device *adev, enum idh_event event)
 static void xgpu_nv_mailbox_trans_msg (struct amdgpu_device *adev,
 	      enum idh_request req, u32 data1, u32 data2, u32 data3)
 {
+	u32 reg;
 	int r;
 	uint8_t trn;
 
@@ -132,10 +137,19 @@ static void xgpu_nv_mailbox_trans_msg (struct amdgpu_device *adev,
 		}
 	} while (trn);
 
-	WREG32_NO_KIQ(mmMAILBOX_MSGBUF_TRN_DW0, req);
-	WREG32_NO_KIQ(mmMAILBOX_MSGBUF_TRN_DW1, data1);
-	WREG32_NO_KIQ(mmMAILBOX_MSGBUF_TRN_DW2, data2);
-	WREG32_NO_KIQ(mmMAILBOX_MSGBUF_TRN_DW3, data3);
+	reg = RREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0,
+					     mmBIF_BX_PF_MAILBOX_MSGBUF_TRN_DW0));
+	reg = REG_SET_FIELD(reg, BIF_BX_PF_MAILBOX_MSGBUF_TRN_DW0,
+			    MSGBUF_DATA, req);
+	WREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF_MAILBOX_MSGBUF_TRN_DW0),
+		      reg);
+	WREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF_MAILBOX_MSGBUF_TRN_DW1),
+				data1);
+	WREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF_MAILBOX_MSGBUF_TRN_DW2),
+				data2);
+	WREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF_MAILBOX_MSGBUF_TRN_DW3),
+				data3);
+
 	xgpu_nv_mailbox_set_valid(adev, true);
 
 	/* start to poll ack */
@@ -150,48 +164,23 @@ static int xgpu_nv_send_access_requests(struct amdgpu_device *adev,
 					enum idh_request req)
 {
 	int r;
-	enum idh_event event = -1;
 
 	xgpu_nv_mailbox_trans_msg(adev, req, 0, 0, 0);
 
-	switch (req) {
-	case IDH_REQ_GPU_INIT_ACCESS:
-	case IDH_REQ_GPU_FINI_ACCESS:
-	case IDH_REQ_GPU_RESET_ACCESS:
-		event = IDH_READY_TO_ACCESS_GPU;
-		break;
-	case IDH_REQ_GPU_INIT_DATA:
-		event = IDH_REQ_GPU_INIT_DATA_READY;
-		break;
-	default:
-		break;
-	}
-
-	if (event != -1) {
-		r = xgpu_nv_poll_msg(adev, event);
+	/* start to check msg if request is idh_req_gpu_init_access */
+	if (req == IDH_REQ_GPU_INIT_ACCESS ||
+		req == IDH_REQ_GPU_FINI_ACCESS ||
+		req == IDH_REQ_GPU_RESET_ACCESS) {
+		r = xgpu_nv_poll_msg(adev, IDH_READY_TO_ACCESS_GPU);
 		if (r) {
-			if (req != IDH_REQ_GPU_INIT_DATA) {
-				pr_err("Doesn't get msg:%d from pf, error=%d\n", event, r);
-				return r;
-			}
-			else /* host doesn't support REQ_GPU_INIT_DATA handshake */
-				adev->virt.req_init_data_ver = 0;
-		} else {
-			if (req == IDH_REQ_GPU_INIT_DATA)
-			{
-				adev->virt.req_init_data_ver =
-					RREG32_NO_KIQ(mmMAILBOX_MSGBUF_RCV_DW1);
-
-				/* assume V1 in case host doesn't set version number */
-				if (adev->virt.req_init_data_ver < 1)
-					adev->virt.req_init_data_ver = 1;
-			}
+			pr_err("Doesn't get READY_TO_ACCESS_GPU from pf, give up\n");
+			return r;
 		}
-
 		/* Retrieve checksum from mailbox2 */
 		if (req == IDH_REQ_GPU_INIT_ACCESS || req == IDH_REQ_GPU_RESET_ACCESS) {
 			adev->virt.fw_reserve.checksum_key =
-				RREG32_NO_KIQ(mmMAILBOX_MSGBUF_RCV_DW2);
+				RREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0,
+					mmBIF_BX_PF_MAILBOX_MSGBUF_RCV_DW2));
 		}
 	}
 
@@ -200,16 +189,7 @@ static int xgpu_nv_send_access_requests(struct amdgpu_device *adev,
 
 static int xgpu_nv_request_reset(struct amdgpu_device *adev)
 {
-	int ret, i = 0;
-
-	while (i < NV_MAILBOX_POLL_MSG_REP_MAX) {
-		ret = xgpu_nv_send_access_requests(adev, IDH_REQ_GPU_RESET_ACCESS);
-		if (!ret)
-			break;
-		i++;
-	}
-
-	return ret;
+	return xgpu_nv_send_access_requests(adev, IDH_REQ_GPU_RESET_ACCESS);
 }
 
 static int xgpu_nv_request_full_gpu_access(struct amdgpu_device *adev,
@@ -233,11 +213,6 @@ static int xgpu_nv_release_full_gpu_access(struct amdgpu_device *adev,
 	return r;
 }
 
-static int xgpu_nv_request_init_data(struct amdgpu_device *adev)
-{
-	return xgpu_nv_send_access_requests(adev, IDH_REQ_GPU_INIT_DATA);
-}
-
 static int xgpu_nv_mailbox_ack_irq(struct amdgpu_device *adev,
 					struct amdgpu_irq_src *source,
 					struct amdgpu_iv_entry *entry)
@@ -251,14 +226,11 @@ static int xgpu_nv_set_mailbox_ack_irq(struct amdgpu_device *adev,
 					unsigned type,
 					enum amdgpu_interrupt_state state)
 {
-	u32 tmp = RREG32_NO_KIQ(mmMAILBOX_INT_CNTL);
+	u32 tmp = RREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF_MAILBOX_INT_CNTL));
 
-	if (state == AMDGPU_IRQ_STATE_ENABLE)
-		tmp |= 2;
-	else
-		tmp &= ~2;
-
-	WREG32_NO_KIQ(mmMAILBOX_INT_CNTL, tmp);
+	tmp = REG_SET_FIELD(tmp, BIF_BX_PF_MAILBOX_INT_CNTL, ACK_INT_EN,
+				(state == AMDGPU_IRQ_STATE_ENABLE) ? 1 : 0);
+	WREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF_MAILBOX_INT_CNTL), tmp);
 
 	return 0;
 }
@@ -268,15 +240,19 @@ static void xgpu_nv_mailbox_flr_work(struct work_struct *work)
 	struct amdgpu_virt *virt = container_of(work, struct amdgpu_virt, flr_work);
 	struct amdgpu_device *adev = container_of(virt, struct amdgpu_device, virt);
 	int timeout = NV_MAILBOX_POLL_FLR_TIMEDOUT;
+	int locked;
 
 	/* block amdgpu_gpu_recover till msg FLR COMPLETE received,
 	 * otherwise the mailbox msg will be ruined/reseted by
 	 * the VF FLR.
+	 *
+	 * we can unlock the lock_reset to allow "amdgpu_job_timedout"
+	 * to run gpu_recover() after FLR_NOTIFICATION_CMPL received
+	 * which means host side had finished this VF's FLR.
 	 */
-	if (!down_read_trylock(&adev->reset_sem))
-		return;
-
-	atomic_set(&adev->in_gpu_reset, 1);
+	locked = mutex_trylock(&adev->lock_reset);
+	if (locked)
+		adev->in_gpu_reset = true;
 
 	do {
 		if (xgpu_nv_mailbox_peek_msg(adev) == IDH_FLR_NOTIFICATION_CMPL)
@@ -287,13 +263,14 @@ static void xgpu_nv_mailbox_flr_work(struct work_struct *work)
 	} while (timeout > 1);
 
 flr_done:
-	atomic_set(&adev->in_gpu_reset, 0);
-	up_read(&adev->reset_sem);
+	if (locked) {
+		adev->in_gpu_reset = false;
+		mutex_unlock(&adev->lock_reset);
+	}
 
 	/* Trigger recovery for world switch failure if no TDR */
 	if (amdgpu_device_should_recover_gpu(adev)
-		&& (!amdgpu_device_has_job_running(adev) ||
-		adev->sdma_timeout == MAX_SCHEDULE_TIMEOUT ||
+		&& (adev->sdma_timeout == MAX_SCHEDULE_TIMEOUT ||
 		adev->gfx_timeout == MAX_SCHEDULE_TIMEOUT ||
 		adev->compute_timeout == MAX_SCHEDULE_TIMEOUT ||
 		adev->video_timeout == MAX_SCHEDULE_TIMEOUT))
@@ -305,14 +282,11 @@ static int xgpu_nv_set_mailbox_rcv_irq(struct amdgpu_device *adev,
 				       unsigned type,
 				       enum amdgpu_interrupt_state state)
 {
-	u32 tmp = RREG32_NO_KIQ(mmMAILBOX_INT_CNTL);
+	u32 tmp = RREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF_MAILBOX_INT_CNTL));
 
-	if (state == AMDGPU_IRQ_STATE_ENABLE)
-		tmp |= 1;
-	else
-		tmp &= ~1;
-
-	WREG32_NO_KIQ(mmMAILBOX_INT_CNTL, tmp);
+	tmp = REG_SET_FIELD(tmp, BIF_BX_PF_MAILBOX_INT_CNTL, VALID_INT_EN,
+			    (state == AMDGPU_IRQ_STATE_ENABLE) ? 1 : 0);
+	WREG32_NO_KIQ(SOC15_REG_OFFSET(NBIO, 0, mmBIF_BX_PF_MAILBOX_INT_CNTL), tmp);
 
 	return 0;
 }
@@ -404,7 +378,6 @@ void xgpu_nv_mailbox_put_irq(struct amdgpu_device *adev)
 const struct amdgpu_virt_ops xgpu_nv_virt_ops = {
 	.req_full_gpu	= xgpu_nv_request_full_gpu_access,
 	.rel_full_gpu	= xgpu_nv_release_full_gpu_access,
-	.req_init_data  = xgpu_nv_request_init_data,
 	.reset_gpu = xgpu_nv_request_reset,
 	.wait_reset = NULL,
 	.trans_msg = xgpu_nv_mailbox_trans_msg,

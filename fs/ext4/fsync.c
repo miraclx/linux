@@ -44,28 +44,30 @@
  */
 static int ext4_sync_parent(struct inode *inode)
 {
-	struct dentry *dentry, *next;
+	struct dentry *dentry = NULL;
+	struct inode *next;
 	int ret = 0;
 
 	if (!ext4_test_inode_state(inode, EXT4_STATE_NEWENTRY))
 		return 0;
-	dentry = d_find_any_alias(inode);
-	if (!dentry)
-		return 0;
+	inode = igrab(inode);
 	while (ext4_test_inode_state(inode, EXT4_STATE_NEWENTRY)) {
 		ext4_clear_inode_state(inode, EXT4_STATE_NEWENTRY);
-
-		next = dget_parent(dentry);
+		dentry = d_find_any_alias(inode);
+		if (!dentry)
+			break;
+		next = igrab(d_inode(dentry->d_parent));
 		dput(dentry);
-		dentry = next;
-		inode = dentry->d_inode;
-
+		if (!next)
+			break;
+		iput(inode);
+		inode = next;
 		/*
 		 * The directory inode may have gone through rmdir by now. But
 		 * the inode itself and its blocks are still allocated (we hold
-		 * a reference to the inode via its dentry), so it didn't go
-		 * through ext4_evict_inode()) and so we are safe to flush
-		 * metadata blocks and the inode.
+		 * a reference to the inode so it didn't go through
+		 * ext4_evict_inode()) and so we are safe to flush metadata
+		 * blocks and the inode.
 		 */
 		ret = sync_mapping_buffers(inode->i_mapping);
 		if (ret)
@@ -74,7 +76,7 @@ static int ext4_sync_parent(struct inode *inode)
 		if (ret)
 			break;
 	}
-	dput(dentry);
+	iput(inode);
 	return ret;
 }
 
@@ -112,7 +114,7 @@ static int ext4_fsync_journal(struct inode *inode, bool datasync,
 	    !jbd2_trans_will_send_data_barrier(journal, commit_tid))
 		*needs_barrier = true;
 
-	return ext4_fc_commit(journal, commit_tid);
+	return jbd2_complete_transaction(journal, commit_tid);
 }
 
 /*
@@ -136,21 +138,21 @@ int ext4_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 	if (unlikely(ext4_forced_shutdown(sbi)))
 		return -EIO;
 
-	ASSERT(ext4_journal_current_handle() == NULL);
+	J_ASSERT(ext4_journal_current_handle() == NULL);
 
 	trace_ext4_sync_file_enter(file, datasync);
 
 	if (sb_rdonly(inode->i_sb)) {
 		/* Make sure that we read updated s_mount_flags value */
 		smp_rmb();
-		if (ext4_test_mount_flag(inode->i_sb, EXT4_MF_FS_ABORTED))
+		if (sbi->s_mount_flags & EXT4_MF_FS_ABORTED)
 			ret = -EROFS;
 		goto out;
 	}
 
 	ret = file_write_and_wait_range(file, start, end);
 	if (ret)
-		goto out;
+		return ret;
 
 	/*
 	 * data=writeback,ordered:
@@ -174,7 +176,7 @@ int ext4_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 		ret = ext4_fsync_journal(inode, datasync, &needs_barrier);
 
 	if (needs_barrier) {
-		err = blkdev_issue_flush(inode->i_sb->s_bdev, GFP_KERNEL);
+		err = blkdev_issue_flush(inode->i_sb->s_bdev, GFP_KERNEL, NULL);
 		if (!ret)
 			ret = err;
 	}

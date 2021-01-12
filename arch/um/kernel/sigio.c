@@ -25,7 +25,7 @@ int write_sigio_irq(int fd)
 
 	err = um_request_irq(SIGIO_WRITE_IRQ, fd, IRQ_READ, sigio_interrupt,
 			     0, "write sigio", NULL);
-	if (err < 0) {
+	if (err) {
 		printk(KERN_ERR "write_sigio_irq : um_request_irq failed, "
 		       "err = %d\n", err);
 		return -1;
@@ -35,14 +35,14 @@ int write_sigio_irq(int fd)
 }
 
 /* These are called from os-Linux/sigio.c to protect its pollfds arrays. */
-static DEFINE_MUTEX(sigio_mutex);
+static DEFINE_SPINLOCK(sigio_spinlock);
 
 void sigio_lock(void)
 {
-	mutex_lock(&sigio_mutex);
+	spin_lock(&sigio_spinlock);
 }
 
 void sigio_unlock(void)
 {
-	mutex_unlock(&sigio_mutex);
+	spin_unlock(&sigio_spinlock);
 }

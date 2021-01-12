@@ -21,16 +21,14 @@ static inline void trace_ ## name(proto) {}
 #define TRACE_SYSTEM ath11k
 
 TRACE_EVENT(ath11k_htt_pktlog,
-	    TP_PROTO(struct ath11k *ar, const void *buf, u16 buf_len,
-		     u32 pktlog_checksum),
+	    TP_PROTO(struct ath11k *ar, const void *buf, u16 buf_len),
 
-	TP_ARGS(ar, buf, buf_len, pktlog_checksum),
+	TP_ARGS(ar, buf, buf_len),
 
 	TP_STRUCT__entry(
 		__string(device, dev_name(ar->ab->dev))
 		__string(driver, dev_driver_string(ar->ab->dev))
 		__field(u16, buf_len)
-		__field(u32, pktlog_checksum)
 		__dynamic_array(u8, pktlog, buf_len)
 	),
 
@@ -38,16 +36,14 @@ TRACE_EVENT(ath11k_htt_pktlog,
 		__assign_str(device, dev_name(ar->ab->dev));
 		__assign_str(driver, dev_driver_string(ar->ab->dev));
 		__entry->buf_len = buf_len;
-		__entry->pktlog_checksum = pktlog_checksum;
 		memcpy(__get_dynamic_array(pktlog), buf, buf_len);
 	),
 
 	TP_printk(
-		"%s %s size %hu pktlog_checksum %d",
+		"%s %s size %hu",
 		__get_str(driver),
 		__get_str(device),
-		__entry->buf_len,
-		__entry->pktlog_checksum
+		__entry->buf_len
 	 )
 );
 

@@ -409,9 +409,8 @@ static void uniphier_sd_clk_disable(struct tmio_mmc_host *host)
 	clk_disable_unprepare(priv->clk);
 }
 
-static void uniphier_sd_hw_reset(struct mmc_host *mmc)
+static void uniphier_sd_hw_reset(struct tmio_mmc_host *host)
 {
-	struct tmio_mmc_host *host = mmc_priv(mmc);
 	struct uniphier_sd_priv *priv = uniphier_sd_priv(host);
 
 	reset_control_assert(priv->rst_hw);
@@ -586,7 +585,6 @@ static int uniphier_sd_probe(struct platform_device *pdev)
 
 	tmio_data = &priv->tmio_data;
 	tmio_data->flags |= TMIO_MMC_32BIT_DATA_PORT;
-	tmio_data->flags |= TMIO_MMC_USE_BUSY_TIMEOUT;
 
 	host = tmio_mmc_host_alloc(pdev, tmio_data);
 	if (IS_ERR(host))
@@ -599,7 +597,7 @@ static int uniphier_sd_probe(struct platform_device *pdev)
 			ret = PTR_ERR(priv->rst_hw);
 			goto free_host;
 		}
-		host->ops.hw_reset = uniphier_sd_hw_reset;
+		host->hw_reset = uniphier_sd_hw_reset;
 	}
 
 	if (host->mmc->caps & MMC_CAP_UHS) {
@@ -611,6 +609,11 @@ static int uniphier_sd_probe(struct platform_device *pdev)
 			host->mmc->caps &= ~MMC_CAP_UHS;
 		}
 	}
+
+	ret = devm_request_irq(dev, irq, tmio_mmc_irq, IRQF_SHARED,
+			       dev_name(dev), host);
+	if (ret)
+		goto free_host;
 
 	if (priv->caps & UNIPHIER_SD_CAP_EXTENDED_IP)
 		host->dma_ops = &uniphier_sd_internal_dma_ops;
@@ -639,15 +642,8 @@ static int uniphier_sd_probe(struct platform_device *pdev)
 	if (ret)
 		goto free_host;
 
-	ret = devm_request_irq(dev, irq, tmio_mmc_irq, IRQF_SHARED,
-			       dev_name(dev), host);
-	if (ret)
-		goto remove_host;
-
 	return 0;
 
-remove_host:
-	tmio_mmc_host_remove(host);
 free_host:
 	tmio_mmc_host_free(host);
 
@@ -686,7 +682,6 @@ static struct platform_driver uniphier_sd_driver = {
 	.remove = uniphier_sd_remove,
 	.driver = {
 		.name = "uniphier-sd",
-		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.of_match_table = uniphier_sd_match,
 	},
 };

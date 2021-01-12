@@ -15,7 +15,7 @@
 # include <linux/spinlock_types_up.h>
 #endif
 
-#include <linux/lockdep_types.h>
+#include <linux/lockdep.h>
 
 typedef struct raw_spinlock {
 	arch_spinlock_t raw_lock;

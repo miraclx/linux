@@ -35,31 +35,27 @@ static struct snapshot_data {
 	bool ready;
 	bool platform_support;
 	bool free_bitmaps;
-	dev_t dev;
 } snapshot_state;
 
-int is_hibernate_resume_dev(dev_t dev)
-{
-	return hibernation_available() && snapshot_state.dev == dev;
-}
+atomic_t snapshot_device_available = ATOMIC_INIT(1);
 
 static int snapshot_open(struct inode *inode, struct file *filp)
 {
 	struct snapshot_data *data;
-	int error;
+	int error, nr_calls = 0;
 
 	if (!hibernation_available())
 		return -EPERM;
 
 	lock_system_sleep();
 
-	if (!hibernate_acquire()) {
+	if (!atomic_add_unless(&snapshot_device_available, -1, 0)) {
 		error = -EBUSY;
 		goto Unlock;
 	}
 
 	if ((filp->f_flags & O_ACCMODE) == O_RDWR) {
-		hibernate_release();
+		atomic_inc(&snapshot_device_available);
 		error = -ENOSYS;
 		goto Unlock;
 	}
@@ -69,10 +65,13 @@ static int snapshot_open(struct inode *inode, struct file *filp)
 	memset(&data->handle, 0, sizeof(struct snapshot_handle));
 	if ((filp->f_flags & O_ACCMODE) == O_RDONLY) {
 		/* Hibernating.  The image device should be accessible. */
-		data->swap = swap_type_of(swsusp_resume_device, 0);
+		data->swap = swsusp_resume_device ?
+			swap_type_of(swsusp_resume_device, 0, NULL) : -1;
 		data->mode = O_RDONLY;
 		data->free_bitmaps = false;
-		error = pm_notifier_call_chain_robust(PM_HIBERNATION_PREPARE, PM_POST_HIBERNATION);
+		error = __pm_notifier_call_chain(PM_HIBERNATION_PREPARE, -1, &nr_calls);
+		if (error)
+			__pm_notifier_call_chain(PM_POST_HIBERNATION, --nr_calls, NULL);
 	} else {
 		/*
 		 * Resuming.  We may need to wait for the image device to
@@ -82,19 +81,22 @@ static int snapshot_open(struct inode *inode, struct file *filp)
 
 		data->swap = -1;
 		data->mode = O_WRONLY;
-		error = pm_notifier_call_chain_robust(PM_RESTORE_PREPARE, PM_POST_RESTORE);
+		error = __pm_notifier_call_chain(PM_RESTORE_PREPARE, -1, &nr_calls);
 		if (!error) {
 			error = create_basic_memory_bitmaps();
 			data->free_bitmaps = !error;
-		}
+		} else
+			nr_calls--;
+
+		if (error)
+			__pm_notifier_call_chain(PM_POST_RESTORE, nr_calls, NULL);
 	}
 	if (error)
-		hibernate_release();
+		atomic_inc(&snapshot_device_available);
 
 	data->frozen = false;
 	data->ready = false;
 	data->platform_support = false;
-	data->dev = 0;
 
  Unlock:
 	unlock_system_sleep();
@@ -110,7 +112,6 @@ static int snapshot_release(struct inode *inode, struct file *filp)
 
 	swsusp_free();
 	data = filp->private_data;
-	data->dev = 0;
 	free_all_swap_pages(data->swap);
 	if (data->frozen) {
 		pm_restore_gfp_mask();
@@ -121,7 +122,7 @@ static int snapshot_release(struct inode *inode, struct file *filp)
 	}
 	pm_notifier_call_chain(data->mode == O_RDONLY ?
 			PM_POST_HIBERNATION : PM_POST_RESTORE);
-	hibernate_release();
+	atomic_inc(&snapshot_device_available);
 
 	unlock_system_sleep();
 
@@ -229,10 +230,13 @@ static int snapshot_set_swap_area(struct snapshot_data *data,
 	 * User space encodes device types as two-byte values,
 	 * so we need to recode them
 	 */
-	data->swap = swap_type_of(swdev, offset);
+	if (!swdev) {
+		data->swap = -1;
+		return -EINVAL;
+	}
+	data->swap = swap_type_of(swdev, offset, NULL);
 	if (data->swap < 0)
-		return swdev ? -ENODEV : -EINVAL;
-	data->dev = swdev;
+		return -ENODEV;
 	return 0;
 }
 

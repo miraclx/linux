@@ -14,19 +14,6 @@ properties:
     const: '/'
   compatible:
     oneOf:
-      - description: S3C2416 based boards
-        items:
-          - enum:
-              - samsung,smdk2416                # Samsung SMDK2416
-          - const: samsung,s3c2416
-
-      - description: S3C6410 based boards
-        items:
-          - enum:
-              - friendlyarm,mini6410            # FriendlyARM Mini6410
-              - samsung,smdk6410                # Samsung SMDK6410
-          - const: samsung,s3c6410
-
       - description: S5PV210 based boards
         items:
           - enum:
@@ -65,7 +52,6 @@ properties:
         items:
           - enum:
               - insignal,origen                 # Insignal Origen
-              - samsung,i9100                   # Samsung Galaxy S2 (GT-I9100)
               - samsung,smdkv310                # Samsung SMDKV310 eval
               - samsung,trats                   # Samsung Tizen Reference
               - samsung,universal_c210          # Samsung C210
@@ -93,14 +79,6 @@ properties:
               - samsung,n710x                   # Samsung GT-N7100/GT-N7105
               - samsung,trats2                  # Samsung Tizen Reference
           - const: samsung,midas
-          - const: samsung,exynos4412
-          - const: samsung,exynos4
-
-      - description: Samsung p4note family boards
-        items:
-          - enum:
-              - samsung,n8010                   # Samsung GT-N8010/GT-N8013
-          - const: samsung,p4note
           - const: samsung,exynos4412
           - const: samsung,exynos4
 
@@ -201,5 +179,3 @@ properties:
 
 required:
   - compatible
-
-additionalProperties: true

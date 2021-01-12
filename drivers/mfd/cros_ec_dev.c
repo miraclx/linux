@@ -24,7 +24,7 @@ static struct class cros_class = {
 };
 
 /**
- * struct cros_feature_to_name - CrOS feature id to name/short description.
+ * cros_feature_to_name - CrOS feature id to name/short description.
  * @id: The feature identifier.
  * @name: Device name associated with the feature id.
  * @desc: Short name that will be displayed.
@@ -36,7 +36,7 @@ struct cros_feature_to_name {
 };
 
 /**
- * struct cros_feature_to_cells - CrOS feature id to mfd cells association.
+ * cros_feature_to_cells - CrOS feature id to mfd cells association.
  * @id: The feature identifier.
  * @mfd_cells: Pointer to the array of mfd cells that needs to be added.
  * @num_cells: Number of mfd cells into the array.

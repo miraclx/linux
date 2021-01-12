@@ -61,6 +61,17 @@ MODULE_FIRMWARE("amdgpu/si58_mc.bin");
 #define MC_SEQ_MISC0__MT__HBM    0x60000000
 #define MC_SEQ_MISC0__MT__DDR3   0xB0000000
 
+
+static const u32 crtc_offsets[6] =
+{
+	SI_CRTC0_REGISTER_OFFSET,
+	SI_CRTC1_REGISTER_OFFSET,
+	SI_CRTC2_REGISTER_OFFSET,
+	SI_CRTC3_REGISTER_OFFSET,
+	SI_CRTC4_REGISTER_OFFSET,
+	SI_CRTC5_REGISTER_OFFSET
+};
+
 static void gmc_v6_0_mc_stop(struct amdgpu_device *adev)
 {
 	u32 blackout;
@@ -530,7 +541,7 @@ static int gmc_v6_0_gart_enable(struct amdgpu_device *adev)
 	 * the VMs are determined by the application and setup and assigned
 	 * on the fly in the vm part of radeon_gart.c
 	 */
-	for (i = 1; i < AMDGPU_NUM_VMID; i++) {
+	for (i = 1; i < 16; i++) {
 		if (i < 8)
 			WREG32(mmVM_CONTEXT0_PAGE_TABLE_BASE_ADDR + i,
 			       table_addr >> 12);
@@ -791,6 +802,8 @@ static int gmc_v6_0_late_init(void *handle)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
 
+	amdgpu_bo_late_init(adev);
+
 	if (amdgpu_vm_fault_stop != AMDGPU_VM_FAULT_STOP_ALWAYS)
 		return amdgpu_irq_get(adev, &adev->gmc.vm_fault, 0);
 	else
@@ -803,13 +816,16 @@ static unsigned gmc_v6_0_get_vbios_fb_size(struct amdgpu_device *adev)
 	unsigned size;
 
 	if (REG_GET_FIELD(d1vga_control, D1VGA_CONTROL, D1VGA_MODE_ENABLE)) {
-		size = AMDGPU_VBIOS_VGA_ALLOCATION;
+		size = 9 * 1024 * 1024; /* reserve 8MB for vga emulator and 1 MB for FB */
 	} else {
 		u32 viewport = RREG32(mmVIEWPORT_SIZE);
 		size = (REG_GET_FIELD(viewport, VIEWPORT_SIZE, VIEWPORT_HEIGHT) *
 			REG_GET_FIELD(viewport, VIEWPORT_SIZE, VIEWPORT_WIDTH) *
 			4);
 	}
+	/* return 0 if the pre-OS buffer uses up most of vram */
+	if ((adev->gmc.real_vram_size - size) < (8 * 1024 * 1024))
+		return 0;
 	return size;
 }
 
@@ -842,7 +858,7 @@ static int gmc_v6_0_sw_init(void *handle)
 
 	r = dma_set_mask_and_coherent(adev->dev, DMA_BIT_MASK(44));
 	if (r) {
-		dev_warn(adev->dev, "No suitable DMA available.\n");
+		dev_warn(adev->dev, "amdgpu: No suitable DMA available.\n");
 		return r;
 	}
 	adev->need_swiotlb = drm_need_swiotlb(44);
@@ -857,7 +873,7 @@ static int gmc_v6_0_sw_init(void *handle)
 	if (r)
 		return r;
 
-	amdgpu_gmc_get_vbios_allocations(adev);
+	adev->gmc.stolen_size = gmc_v6_0_get_vbios_fb_size(adev);
 
 	r = amdgpu_bo_init(adev);
 	if (r)
@@ -873,7 +889,7 @@ static int gmc_v6_0_sw_init(void *handle)
 	 * amdgpu graphics/compute will use VMIDs 1-7
 	 * amdkfd will use VMIDs 8-15
 	 */
-	adev->vm_manager.first_kfd_vmid = 8;
+	adev->vm_manager.id_mgr[0].num_ids = AMDGPU_NUM_OF_VMIDS;
 	amdgpu_vm_manager_init(adev);
 
 	/* base offset of vram pages */
@@ -1131,7 +1147,6 @@ static const struct amdgpu_gmc_funcs gmc_v6_0_gmc_funcs = {
 	.set_prt = gmc_v6_0_set_prt,
 	.get_vm_pde = gmc_v6_0_get_vm_pde,
 	.get_vm_pte = gmc_v6_0_get_vm_pte,
-	.get_vbios_fb_size = gmc_v6_0_get_vbios_fb_size,
 };
 
 static const struct amdgpu_irq_src_funcs gmc_v6_0_irq_funcs = {

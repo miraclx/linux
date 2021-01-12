@@ -7,7 +7,6 @@
 
 #ifndef __ASSEMBLY__
 
-#include <asm/barrier.h>
 #include <asm/errno.h>
 #include <asm/unistd.h>
 #include <asm/vdso/cp15.h>
@@ -113,8 +112,7 @@ static inline bool arm_vdso_hres_capable(void)
 }
 #define __arch_vdso_hres_capable arm_vdso_hres_capable
 
-static __always_inline u64 __arch_get_hw_counter(int clock_mode,
-						 const struct vdso_data *vd)
+static __always_inline u64 __arch_get_hw_counter(int clock_mode)
 {
 #ifdef CONFIG_ARM_ARCH_TIMER
 	u64 cycle_now;

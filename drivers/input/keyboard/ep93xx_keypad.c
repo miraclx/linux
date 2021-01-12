@@ -208,7 +208,7 @@ static int ep93xx_keypad_resume(struct device *dev)
 
 	mutex_lock(&input_dev->mutex);
 
-	if (input_device_enabled(input_dev)) {
+	if (input_dev->users) {
 		if (!keypad->enabled) {
 			ep93xx_keypad_config(keypad);
 			clk_enable(keypad->clk);
@@ -250,8 +250,8 @@ static int ep93xx_keypad_probe(struct platform_device *pdev)
 	}
 
 	keypad->irq = platform_get_irq(pdev, 0);
-	if (keypad->irq < 0) {
-		err = keypad->irq;
+	if (!keypad->irq) {
+		err = -ENXIO;
 		goto failed_free;
 	}
 

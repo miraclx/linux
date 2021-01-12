@@ -24,7 +24,6 @@
 
 /**
  *	aac_nark_ioremap
- *	@dev: device to ioremap
  *	@size: mapping resize request
  *
  */

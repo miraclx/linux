@@ -9,8 +9,6 @@ x86-specific Documentation
    :numbered:
 
    boot
-   booting-dt
-   cpuinfo
    topology
    exception-tables
    kernel-stacks
@@ -27,11 +25,8 @@ x86-specific Documentation
    pti
    mds
    microcode
-   resctrl
+   resctrl_ui
    tsx_async_abort
    usb-legacy-support
    i386/index
    x86_64/index
-   sva
-   sgx
-   features

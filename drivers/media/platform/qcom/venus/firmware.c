@@ -171,14 +171,9 @@ static int venus_shutdown_no_tz(struct venus_core *core)
 
 	iommu = core->fw.iommu_domain;
 
-	if (core->fw.mapped_mem_size && iommu) {
-		unmapped = iommu_unmap(iommu, VENUS_FW_START_ADDR, mapped);
-
-		if (unmapped != mapped)
-			dev_err(dev, "failed to unmap firmware\n");
-		else
-			core->fw.mapped_mem_size = 0;
-	}
+	unmapped = iommu_unmap(iommu, VENUS_FW_START_ADDR, mapped);
+	if (unmapped != mapped)
+		dev_err(dev, "failed to unmap firmware\n");
 
 	return 0;
 }
@@ -186,7 +181,6 @@ static int venus_shutdown_no_tz(struct venus_core *core)
 int venus_boot(struct venus_core *core)
 {
 	struct device *dev = core->dev;
-	const struct venus_resources *res = core->res;
 	phys_addr_t mem_phys;
 	size_t mem_size;
 	int ret;
@@ -206,23 +200,7 @@ int venus_boot(struct venus_core *core)
 	else
 		ret = venus_boot_no_tz(core, mem_phys, mem_size);
 
-	if (ret)
-		return ret;
-
-	if (core->use_tz && res->cp_size) {
-		ret = qcom_scm_mem_protect_video_var(res->cp_start,
-						     res->cp_size,
-						     res->cp_nonpixel_start,
-						     res->cp_nonpixel_size);
-		if (ret) {
-			qcom_scm_pas_shutdown(VENUS_PAS_ID);
-			dev_err(dev, "set virtual address ranges fail (%d)\n",
-				ret);
-			return ret;
-		}
-	}
-
-	return 0;
+	return ret;
 }
 
 int venus_shutdown(struct venus_core *core)
@@ -310,11 +288,7 @@ void venus_firmware_deinit(struct venus_core *core)
 	iommu = core->fw.iommu_domain;
 
 	iommu_detach_device(iommu, core->fw.dev);
-
-	if (core->fw.iommu_domain) {
-		iommu_domain_free(iommu);
-		core->fw.iommu_domain = NULL;
-	}
+	iommu_domain_free(iommu);
 
 	platform_device_unregister(to_platform_device(core->fw.dev));
 }

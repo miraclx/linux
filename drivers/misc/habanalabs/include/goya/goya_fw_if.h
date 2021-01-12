@@ -22,8 +22,7 @@ enum goya_pll_index {
 	MME_PLL,
 	PCI_PLL,
 	EMMC_PLL,
-	TPC_PLL,
-	PLL_MAX
+	TPC_PLL
 };
 
 #define GOYA_PLL_FREQ_LOW		50000000 /* 50 MHz */

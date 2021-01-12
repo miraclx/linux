@@ -6,7 +6,7 @@
 
 /*
  * Algorithm Specification
- *  https://info.isl.ntt.co.jp/crypt/eng/camellia/specifications.html
+ *  http://info.isl.ntt.co.jp/crypt/eng/camellia/specifications.html
  */
 
 /*

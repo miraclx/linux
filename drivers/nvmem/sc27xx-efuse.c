@@ -4,14 +4,12 @@
 #include <linux/hwspinlock.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/nvmem-provider.h>
 
 /* PMIC global registers definition */
 #define SC27XX_MODULE_EN		0xc08
-#define SC2730_MODULE_EN		0x1808
 #define SC27XX_EFUSE_EN			BIT(6)
 
 /* Efuse controller registers definition */
@@ -51,29 +49,12 @@
 #define SC27XX_EFUSE_POLL_TIMEOUT	3000000
 #define SC27XX_EFUSE_POLL_DELAY_US	10000
 
-/*
- * Since different PMICs of SC27xx series can have different
- * address , we should save address in the device data structure.
- */
-struct sc27xx_efuse_variant_data {
-	u32 module_en;
-};
-
 struct sc27xx_efuse {
 	struct device *dev;
 	struct regmap *regmap;
 	struct hwspinlock *hwlock;
 	struct mutex mutex;
 	u32 base;
-	const struct sc27xx_efuse_variant_data *var_data;
-};
-
-static const struct sc27xx_efuse_variant_data sc2731_edata = {
-	.module_en = SC27XX_MODULE_EN,
-};
-
-static const struct sc27xx_efuse_variant_data sc2730_edata = {
-	.module_en = SC2730_MODULE_EN,
 };
 
 /*
@@ -138,7 +119,7 @@ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
 		return ret;
 
 	/* Enable the efuse controller. */
-	ret = regmap_update_bits(efuse->regmap, efuse->var_data->module_en,
+	ret = regmap_update_bits(efuse->regmap, SC27XX_MODULE_EN,
 				 SC27XX_EFUSE_EN, SC27XX_EFUSE_EN);
 	if (ret)
 		goto unlock_efuse;
@@ -188,7 +169,7 @@ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
 
 disable_efuse:
 	/* Disable the efuse controller after reading. */
-	regmap_update_bits(efuse->regmap, efuse->var_data->module_en, SC27XX_EFUSE_EN, 0);
+	regmap_update_bits(efuse->regmap, SC27XX_MODULE_EN, SC27XX_EFUSE_EN, 0);
 unlock_efuse:
 	sc27xx_efuse_unlock(efuse);
 
@@ -238,7 +219,6 @@ static int sc27xx_efuse_probe(struct platform_device *pdev)
 
 	mutex_init(&efuse->mutex);
 	efuse->dev = &pdev->dev;
-	efuse->var_data = of_device_get_match_data(&pdev->dev);
 
 	econfig.stride = 1;
 	econfig.word_size = 1;
@@ -258,8 +238,7 @@ static int sc27xx_efuse_probe(struct platform_device *pdev)
 }
 
 static const struct of_device_id sc27xx_efuse_of_match[] = {
-	{ .compatible = "sprd,sc2731-efuse", .data = &sc2731_edata},
-	{ .compatible = "sprd,sc2730-efuse", .data = &sc2730_edata},
+	{ .compatible = "sprd,sc2731-efuse" },
 	{ }
 };
 

@@ -1,4 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
-userprogs-always-y += hid-example
+# List of programs to build
+hostprogs := hid-example
+always-y := $(hostprogs)
 
-userccflags += -I usr/include
+HOSTCFLAGS_hid-example.o += -I$(objtree)/usr/include
+
+all: hid-example

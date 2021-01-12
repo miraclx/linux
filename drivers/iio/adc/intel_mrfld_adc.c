@@ -75,7 +75,7 @@ static int mrfld_adc_single_conv(struct iio_dev *indio_dev,
 	struct regmap *regmap = adc->regmap;
 	unsigned int req;
 	long timeout;
-	__be16 value;
+	u8 buf[2];
 	int ret;
 
 	reinit_completion(&adc->completion);
@@ -105,11 +105,11 @@ static int mrfld_adc_single_conv(struct iio_dev *indio_dev,
 		goto done;
 	}
 
-	ret = regmap_bulk_read(regmap, chan->address, &value, sizeof(value));
+	ret = regmap_bulk_read(regmap, chan->address, buf, 2);
 	if (ret)
 		goto done;
 
-	*result = be16_to_cpu(value);
+	*result = get_unaligned_be16(buf);
 	ret = IIO_VAL_INT;
 
 done:
@@ -207,6 +207,7 @@ static int mrfld_adc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, indio_dev);
 
+	indio_dev->dev.parent = dev;
 	indio_dev->name = pdev->name;
 
 	indio_dev->channels = mrfld_adc_channels;

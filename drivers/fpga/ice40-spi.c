@@ -46,16 +46,10 @@ static int ice40_fpga_ops_write_init(struct fpga_manager *mgr,
 	struct spi_message message;
 	struct spi_transfer assert_cs_then_reset_delay = {
 		.cs_change   = 1,
-		.delay = {
-			.value = ICE40_SPI_RESET_DELAY,
-			.unit = SPI_DELAY_UNIT_USECS
-		}
+		.delay_usecs = ICE40_SPI_RESET_DELAY
 	};
 	struct spi_transfer housekeeping_delay_then_release_cs = {
-		.delay = {
-			.value = ICE40_SPI_HOUSEKEEPING_DELAY,
-			.unit = SPI_DELAY_UNIT_USECS
-		}
+		.delay_usecs = ICE40_SPI_HOUSEKEEPING_DELAY
 	};
 	int ret;
 
@@ -183,7 +177,18 @@ static int ice40_fpga_probe(struct spi_device *spi)
 	if (!mgr)
 		return -ENOMEM;
 
-	return devm_fpga_mgr_register(dev, mgr);
+	spi_set_drvdata(spi, mgr);
+
+	return fpga_mgr_register(mgr);
+}
+
+static int ice40_fpga_remove(struct spi_device *spi)
+{
+	struct fpga_manager *mgr = spi_get_drvdata(spi);
+
+	fpga_mgr_unregister(mgr);
+
+	return 0;
 }
 
 static const struct of_device_id ice40_fpga_of_match[] = {
@@ -194,6 +199,7 @@ MODULE_DEVICE_TABLE(of, ice40_fpga_of_match);
 
 static struct spi_driver ice40_fpga_driver = {
 	.probe = ice40_fpga_probe,
+	.remove = ice40_fpga_remove,
 	.driver = {
 		.name = "ice40spi",
 		.of_match_table = of_match_ptr(ice40_fpga_of_match),

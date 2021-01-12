@@ -575,8 +575,8 @@ static irqreturn_t saa7164_irq_ts(struct saa7164_port *port)
 
 	/* Find the current write point from the hardware */
 	wp = saa7164_readl(port->bufcounter);
-
-	BUG_ON(wp > (port->hwcfg.buffercount - 1));
+	if (wp > (port->hwcfg.buffercount - 1))
+		BUG();
 
 	/* Find the previous buffer to the current write point */
 	if (wp == 0)
@@ -588,8 +588,8 @@ static irqreturn_t saa7164_irq_ts(struct saa7164_port *port)
 	/* TODO: turn this into a worker thread */
 	list_for_each_safe(c, n, &port->dmaqueue.list) {
 		buf = list_entry(c, struct saa7164_buffer, list);
-		BUG_ON(i > port->hwcfg.buffercount);
-		i++;
+		if (i++ > port->hwcfg.buffercount)
+			BUG();
 
 		if (buf->idx == rp) {
 			/* Found the buffer, deal with it */
@@ -894,7 +894,8 @@ static int saa7164_port_init(struct saa7164_dev *dev, int portnr)
 {
 	struct saa7164_port *port = NULL;
 
-	BUG_ON((portnr < 0) || (portnr >= SAA7164_MAX_PORTS));
+	if ((portnr < 0) || (portnr >= SAA7164_MAX_PORTS))
+		BUG();
 
 	port = &dev->ports[portnr];
 
@@ -1139,21 +1140,32 @@ static int saa7164_seq_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static const struct seq_operations saa7164_sops = {
+static const struct seq_operations saa7164_seq_ops = {
 	.start = saa7164_seq_start,
 	.next = saa7164_seq_next,
 	.stop = saa7164_seq_stop,
 	.show = saa7164_seq_show,
 };
 
-DEFINE_SEQ_ATTRIBUTE(saa7164);
+static int saa7164_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &saa7164_seq_ops);
+}
+
+static const struct file_operations saa7164_operations = {
+	.owner          = THIS_MODULE,
+	.open           = saa7164_open,
+	.read           = seq_read,
+	.llseek         = seq_lseek,
+	.release        = seq_release,
+};
 
 static struct dentry *saa7614_dentry;
 
 static void __init saa7164_debugfs_create(void)
 {
 	saa7614_dentry = debugfs_create_file("saa7164", 0444, NULL, NULL,
-					     &saa7164_fops);
+					     &saa7164_operations);
 }
 
 static void __exit saa7164_debugfs_remove(void)
@@ -1527,6 +1539,9 @@ static struct pci_driver saa7164_pci_driver = {
 	.id_table = saa7164_pci_tbl,
 	.probe    = saa7164_initdev,
 	.remove   = saa7164_finidev,
+	/* TODO */
+	.suspend  = NULL,
+	.resume   = NULL,
 };
 
 static int __init saa7164_init(void)
@@ -1551,3 +1566,4 @@ static void __exit saa7164_fini(void)
 
 module_init(saa7164_init);
 module_exit(saa7164_fini);
+

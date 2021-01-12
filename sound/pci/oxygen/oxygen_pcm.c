@@ -137,7 +137,7 @@ static int oxygen_open(struct snd_pcm_substream *substream,
 					       SNDRV_PCM_RATE_64000);
 			runtime->hw.rate_min = 44100;
 		}
-		fallthrough;
+		/* fall through */
 	case PCM_A:
 	case PCM_B:
 		runtime->hw.fifo_size = 0;

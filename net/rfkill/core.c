@@ -40,7 +40,6 @@ struct rfkill {
 	enum rfkill_type	type;
 
 	unsigned long		state;
-	unsigned long		hard_block_reasons;
 
 	u32			idx;
 
@@ -266,7 +265,6 @@ static void rfkill_fill_event(struct rfkill_event *ev, struct rfkill *rfkill,
 	ev->hard = !!(rfkill->state & RFKILL_BLOCK_HW);
 	ev->soft = !!(rfkill->state & (RFKILL_BLOCK_SW |
 					RFKILL_BLOCK_SW_PREV));
-	ev->hard_block_reasons = rfkill->hard_block_reasons;
 	spin_unlock_irqrestore(&rfkill->lock, flags);
 }
 
@@ -524,29 +522,19 @@ bool rfkill_get_global_sw_state(const enum rfkill_type type)
 }
 #endif
 
-bool rfkill_set_hw_state_reason(struct rfkill *rfkill,
-				bool blocked, unsigned long reason)
+bool rfkill_set_hw_state(struct rfkill *rfkill, bool blocked)
 {
 	unsigned long flags;
 	bool ret, prev;
 
 	BUG_ON(!rfkill);
 
-	if (WARN(reason &
-	    ~(RFKILL_HARD_BLOCK_SIGNAL | RFKILL_HARD_BLOCK_NOT_OWNER),
-	    "hw_state reason not supported: 0x%lx", reason))
-		return blocked;
-
 	spin_lock_irqsave(&rfkill->lock, flags);
-	prev = !!(rfkill->hard_block_reasons & reason);
-	if (blocked) {
+	prev = !!(rfkill->state & RFKILL_BLOCK_HW);
+	if (blocked)
 		rfkill->state |= RFKILL_BLOCK_HW;
-		rfkill->hard_block_reasons |= reason;
-	} else {
-		rfkill->hard_block_reasons &= ~reason;
-		if (!rfkill->hard_block_reasons)
-			rfkill->state &= ~RFKILL_BLOCK_HW;
-	}
+	else
+		rfkill->state &= ~RFKILL_BLOCK_HW;
 	ret = !!(rfkill->state & RFKILL_BLOCK_ANY);
 	spin_unlock_irqrestore(&rfkill->lock, flags);
 
@@ -558,7 +546,7 @@ bool rfkill_set_hw_state_reason(struct rfkill *rfkill,
 
 	return ret;
 }
-EXPORT_SYMBOL(rfkill_set_hw_state_reason);
+EXPORT_SYMBOL(rfkill_set_hw_state);
 
 static void __rfkill_set_sw_state(struct rfkill *rfkill, bool blocked)
 {
@@ -756,16 +744,6 @@ static ssize_t soft_store(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_RW(soft);
 
-static ssize_t hard_block_reasons_show(struct device *dev,
-				       struct device_attribute *attr,
-				       char *buf)
-{
-	struct rfkill *rfkill = to_rfkill(dev);
-
-	return sprintf(buf, "0x%lx\n", rfkill->hard_block_reasons);
-}
-static DEVICE_ATTR_RO(hard_block_reasons);
-
 static u8 user_state_from_blocked(unsigned long state)
 {
 	if (state & RFKILL_BLOCK_HW)
@@ -818,7 +796,6 @@ static struct attribute *rfkill_dev_attrs[] = {
 	&dev_attr_state.attr,
 	&dev_attr_soft.attr,
 	&dev_attr_hard.attr,
-	&dev_attr_hard_block_reasons.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(rfkill_dev);
@@ -834,7 +811,6 @@ static int rfkill_dev_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
 	struct rfkill *rfkill = to_rfkill(dev);
 	unsigned long flags;
-	unsigned long reasons;
 	u32 state;
 	int error;
 
@@ -847,13 +823,10 @@ static int rfkill_dev_uevent(struct device *dev, struct kobj_uevent_env *env)
 		return error;
 	spin_lock_irqsave(&rfkill->lock, flags);
 	state = rfkill->state;
-	reasons = rfkill->hard_block_reasons;
 	spin_unlock_irqrestore(&rfkill->lock, flags);
 	error = add_uevent_var(env, "RFKILL_STATE=%d",
 			       user_state_from_blocked(state));
-	if (error)
-		return error;
-	return add_uevent_var(env, "RFKILL_HW_BLOCK_REASON=0x%lx", reasons);
+	return error;
 }
 
 void rfkill_pause_polling(struct rfkill *rfkill)
@@ -902,9 +875,6 @@ static int rfkill_resume(struct device *dev)
 	bool cur;
 
 	rfkill->suspended = false;
-
-	if (!rfkill->registered)
-		return 0;
 
 	if (!rfkill->persistent) {
 		cur = !!(rfkill->state & RFKILL_BLOCK_SW);

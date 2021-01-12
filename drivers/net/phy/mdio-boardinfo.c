@@ -17,8 +17,7 @@ static DEFINE_MUTEX(mdio_board_lock);
 /**
  * mdiobus_setup_mdiodev_from_board_info - create and setup MDIO devices
  * from pre-collected board specific MDIO information
- * @bus: Bus the board_info belongs to
- * @cb: Callback to create device on bus
+ * @mdiodev: MDIO device pointer
  * Context: can sleep
  */
 void mdiobus_setup_mdiodev_from_board_info(struct mii_bus *bus,

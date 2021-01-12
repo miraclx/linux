@@ -27,7 +27,6 @@
  **************************************************************************/
 
 #include "vmwgfx_drv.h"
-#include <linux/highmem.h>
 
 /*
  * Template that implements find_first_diff() for a generic
@@ -375,12 +374,12 @@ static int vmw_bo_cpu_blit_line(struct vmw_bo_blit_line_data *d,
 		copy_size = min_t(u32, copy_size, PAGE_SIZE - src_page_offset);
 
 		if (unmap_src) {
-			kunmap_atomic(d->src_addr);
+			ttm_kunmap_atomic_prot(d->src_addr, d->src_prot);
 			d->src_addr = NULL;
 		}
 
 		if (unmap_dst) {
-			kunmap_atomic(d->dst_addr);
+			ttm_kunmap_atomic_prot(d->dst_addr, d->dst_prot);
 			d->dst_addr = NULL;
 		}
 
@@ -389,8 +388,8 @@ static int vmw_bo_cpu_blit_line(struct vmw_bo_blit_line_data *d,
 				return -EINVAL;
 
 			d->dst_addr =
-				kmap_atomic_prot(d->dst_pages[dst_page],
-						 d->dst_prot);
+				ttm_kmap_atomic_prot(d->dst_pages[dst_page],
+						     d->dst_prot);
 			if (!d->dst_addr)
 				return -ENOMEM;
 
@@ -402,8 +401,8 @@ static int vmw_bo_cpu_blit_line(struct vmw_bo_blit_line_data *d,
 				return -EINVAL;
 
 			d->src_addr =
-				kmap_atomic_prot(d->src_pages[src_page],
-						 d->src_prot);
+				ttm_kmap_atomic_prot(d->src_pages[src_page],
+						     d->src_prot);
 			if (!d->src_addr)
 				return -ENOMEM;
 
@@ -459,19 +458,19 @@ int vmw_bo_cpu_blit(struct ttm_buffer_object *dst,
 	int ret = 0;
 
 	/* Buffer objects need to be either pinned or reserved: */
-	if (!(dst->pin_count))
+	if (!(dst->mem.placement & TTM_PL_FLAG_NO_EVICT))
 		dma_resv_assert_held(dst->base.resv);
-	if (!(src->pin_count))
+	if (!(src->mem.placement & TTM_PL_FLAG_NO_EVICT))
 		dma_resv_assert_held(src->base.resv);
 
-	if (!ttm_tt_is_populated(dst->ttm)) {
-		ret = dst->bdev->driver->ttm_tt_populate(dst->bdev, dst->ttm, &ctx);
+	if (dst->ttm->state == tt_unpopulated) {
+		ret = dst->ttm->bdev->driver->ttm_tt_populate(dst->ttm, &ctx);
 		if (ret)
 			return ret;
 	}
 
-	if (!ttm_tt_is_populated(src->ttm)) {
-		ret = src->bdev->driver->ttm_tt_populate(src->bdev, src->ttm, &ctx);
+	if (src->ttm->state == tt_unpopulated) {
+		ret = src->ttm->bdev->driver->ttm_tt_populate(src->ttm, &ctx);
 		if (ret)
 			return ret;
 	}
@@ -484,8 +483,8 @@ int vmw_bo_cpu_blit(struct ttm_buffer_object *dst,
 	d.src_pages = src->ttm->pages;
 	d.dst_num_pages = dst->num_pages;
 	d.src_num_pages = src->num_pages;
-	d.dst_prot = ttm_io_prot(dst, &dst->mem, PAGE_KERNEL);
-	d.src_prot = ttm_io_prot(src, &src->mem, PAGE_KERNEL);
+	d.dst_prot = ttm_io_prot(dst->mem.placement, PAGE_KERNEL);
+	d.src_prot = ttm_io_prot(src->mem.placement, PAGE_KERNEL);
 	d.diff = diff;
 
 	for (j = 0; j < h; ++j) {
@@ -500,9 +499,9 @@ int vmw_bo_cpu_blit(struct ttm_buffer_object *dst,
 	}
 out:
 	if (d.src_addr)
-		kunmap_atomic(d.src_addr);
+		ttm_kunmap_atomic_prot(d.src_addr, d.src_prot);
 	if (d.dst_addr)
-		kunmap_atomic(d.dst_addr);
+		ttm_kunmap_atomic_prot(d.dst_addr, d.dst_prot);
 
 	return ret;
 }

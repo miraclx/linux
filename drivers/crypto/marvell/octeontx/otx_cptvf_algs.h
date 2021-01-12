@@ -66,8 +66,7 @@ enum otx_cpt_aes_key_len {
 };
 
 union otx_cpt_encr_ctrl {
-	__be64 flags;
-	u64 cflags;
+	u64 flags;
 	struct {
 #if defined(__BIG_ENDIAN_BITFIELD)
 		u64 enc_cipher:4;
@@ -139,8 +138,7 @@ struct otx_cpt_des3_ctx {
 };
 
 union otx_cpt_offset_ctrl_word {
-	__be64 flags;
-	u64 cflags;
+	u64 flags;
 	struct {
 #if defined(__BIG_ENDIAN_BITFIELD)
 		u64 reserved:32;

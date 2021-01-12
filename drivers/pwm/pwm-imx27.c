@@ -150,12 +150,13 @@ static void pwm_imx27_get_state(struct pwm_chip *chip,
 
 	prescaler = MX3_PWMCR_PRESCALER_GET(val);
 	pwm_clk = clk_get_rate(imx->clk_per);
+	pwm_clk = DIV_ROUND_CLOSEST_ULL(pwm_clk, prescaler);
 	val = readl(imx->mmio_base + MX3_PWMPR);
 	period = val >= MX3_PWMPR_MAX ? MX3_PWMPR_MAX : val;
 
 	/* PWMOUT (Hz) = PWMCLK / (PWMPR + 2) */
-	tmp = NSEC_PER_SEC * (u64)(period + 2) * prescaler;
-	state->period = DIV_ROUND_UP_ULL(tmp, pwm_clk);
+	tmp = NSEC_PER_SEC * (u64)(period + 2);
+	state->period = DIV_ROUND_CLOSEST_ULL(tmp, pwm_clk);
 
 	/*
 	 * PWMSAR can be read only if PWM is enabled. If the PWM is disabled,
@@ -166,8 +167,8 @@ static void pwm_imx27_get_state(struct pwm_chip *chip,
 	else
 		val = imx->duty_cycle;
 
-	tmp = NSEC_PER_SEC * (u64)(val) * prescaler;
-	state->duty_cycle = DIV_ROUND_UP_ULL(tmp, pwm_clk);
+	tmp = NSEC_PER_SEC * (u64)(val);
+	state->duty_cycle = DIV_ROUND_CLOSEST_ULL(tmp, pwm_clk);
 
 	pwm_imx27_clk_disable_unprepare(imx);
 }
@@ -202,7 +203,7 @@ static void pwm_imx27_wait_fifo_slot(struct pwm_chip *chip,
 	sr = readl(imx->mmio_base + MX3_PWMSR);
 	fifoav = FIELD_GET(MX3_PWMSR_FIFOAV, sr);
 	if (fifoav == MX3_PWMSR_FIFOAV_4WORDS) {
-		period_ms = DIV_ROUND_UP_ULL(pwm_get_period(pwm),
+		period_ms = DIV_ROUND_UP(pwm_get_period(pwm),
 					 NSEC_PER_MSEC);
 		msleep(period_ms);
 
@@ -219,25 +220,23 @@ static int pwm_imx27_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 	struct pwm_imx27_chip *imx = to_pwm_imx27_chip(chip);
 	struct pwm_state cstate;
 	unsigned long long c;
-	unsigned long long clkrate;
 	int ret;
 	u32 cr;
 
 	pwm_get_state(pwm, &cstate);
 
-	clkrate = clk_get_rate(imx->clk_per);
-	c = clkrate * state->period;
+	c = clk_get_rate(imx->clk_per);
+	c *= state->period;
 
-	do_div(c, NSEC_PER_SEC);
+	do_div(c, 1000000000);
 	period_cycles = c;
 
 	prescale = period_cycles / 0x10000 + 1;
 
 	period_cycles /= prescale;
-	c = clkrate * state->duty_cycle;
-	do_div(c, NSEC_PER_SEC);
+	c = (unsigned long long)period_cycles * state->duty_cycle;
+	do_div(c, state->period);
 	duty_cycles = c;
-	duty_cycles /= prescale;
 
 	/*
 	 * according to imx pwm RM, the real period value should be PERIOD
@@ -316,14 +315,27 @@ static int pwm_imx27_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, imx);
 
 	imx->clk_ipg = devm_clk_get(&pdev->dev, "ipg");
-	if (IS_ERR(imx->clk_ipg))
-		return dev_err_probe(&pdev->dev, PTR_ERR(imx->clk_ipg),
-				     "getting ipg clock failed\n");
+	if (IS_ERR(imx->clk_ipg)) {
+		int ret = PTR_ERR(imx->clk_ipg);
+
+		if (ret != -EPROBE_DEFER)
+			dev_err(&pdev->dev,
+				"getting ipg clock failed with %d\n",
+				ret);
+		return ret;
+	}
 
 	imx->clk_per = devm_clk_get(&pdev->dev, "per");
-	if (IS_ERR(imx->clk_per))
-		return dev_err_probe(&pdev->dev, PTR_ERR(imx->clk_per),
-				     "failed to get peripheral clock\n");
+	if (IS_ERR(imx->clk_per)) {
+		int ret = PTR_ERR(imx->clk_per);
+
+		if (ret != -EPROBE_DEFER)
+			dev_err(&pdev->dev,
+				"failed to get peripheral clock: %d\n",
+				ret);
+
+		return ret;
+	}
 
 	imx->chip.ops = &pwm_imx27_ops;
 	imx->chip.dev = &pdev->dev;

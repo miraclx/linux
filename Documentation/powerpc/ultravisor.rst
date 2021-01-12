@@ -895,7 +895,6 @@ Return values
     One of the following values:
 
 	* H_SUCCESS	 on success.
-        * H_STATE        if the VM is not in a position to switch to secure.
 
 Description
 ~~~~~~~~~~~
@@ -934,8 +933,6 @@ Return values
 	* H_UNSUPPORTED		if called from the wrong context (e.g.
 				from an SVM or before an H_SVM_INIT_START
 				hypercall).
-	* H_STATE		if the hypervisor could not successfully
-                                transition the VM to Secure VM.
 
 Description
 ~~~~~~~~~~~

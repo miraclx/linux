@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <test_progs.h>
-#include <network_helpers.h>
 #include <net/if.h>
 #include "test_xdp.skel.h"
 #include "test_xdp_bpf2bpf.skel.h"

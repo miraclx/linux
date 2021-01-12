@@ -169,7 +169,7 @@ static bool faulty_make_request(struct mddev *mddev, struct bio *bio)
 	if (bio_data_dir(bio) == WRITE) {
 		/* write request */
 		if (atomic_read(&conf->counters[WriteAll])) {
-			/* special case - don't decrement, don't submit_bio_noacct,
+			/* special case - don't decrement, don't generic_make_request,
 			 * just fail immediately
 			 */
 			bio_io_error(bio);
@@ -214,7 +214,7 @@ static bool faulty_make_request(struct mddev *mddev, struct bio *bio)
 	} else
 		bio_set_dev(bio, conf->rdev->bdev);
 
-	submit_bio_noacct(bio);
+	generic_make_request(bio);
 	return true;
 }
 

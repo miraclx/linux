@@ -26,7 +26,6 @@
 #include <linux/delay.h>
 #include <linux/initrd.h>
 #include <linux/bitops.h>
-#include <linux/pgtable.h>
 #include <asm/prom.h>
 #include <asm/rtas.h>
 #include <asm/page.h>
@@ -35,6 +34,7 @@
 #include <asm/io.h>
 #include <asm/smp.h>
 #include <asm/mmu.h>
+#include <asm/pgtable.h>
 #include <asm/iommu.h>
 #include <asm/btext.h>
 #include <asm/sections.h>
@@ -45,7 +45,7 @@
 #include <linux/linux_logo.h>
 
 /* All of prom_init bss lives here */
-#define __prombss __section(".bss.prominit")
+#define __prombss __section(.bss.prominit)
 
 /*
  * Eventually bump that one up
@@ -169,7 +169,6 @@ static unsigned long __prombss prom_tce_alloc_end;
 
 #ifdef CONFIG_PPC_PSERIES
 static bool __prombss prom_radix_disable;
-static bool __prombss prom_radix_gtse_disable;
 static bool __prombss prom_xive_disable;
 #endif
 
@@ -355,7 +354,6 @@ static int __init prom_strtobool(const char *s, bool *res)
 		default:
 			break;
 		}
-		break;
 	default:
 		break;
 	}
@@ -825,12 +823,6 @@ static void __init early_cmdline_parse(void)
 	if (prom_radix_disable)
 		prom_debug("Radix disabled from cmdline\n");
 
-	opt = prom_strstr(prom_cmd_line, "radix_hcall_invalidate=on");
-	if (opt) {
-		prom_radix_gtse_disable = true;
-		prom_debug("Radix GTSE disabled from cmdline\n");
-	}
-
 	opt = prom_strstr(prom_cmd_line, "xive=off");
 	if (opt) {
 		prom_xive_disable = true;
@@ -928,7 +920,7 @@ struct option_vector6 {
 } __packed;
 
 struct ibm_arch_vec {
-	struct { u32 mask, val; } pvrs[14];
+	struct { u32 mask, val; } pvrs[12];
 
 	u8 num_vectors;
 
@@ -982,14 +974,6 @@ static const struct ibm_arch_vec ibm_architecture_vec_template __initconst = {
 			.val  = cpu_to_be32(0x004e0000),
 		},
 		{
-			.mask = cpu_to_be32(0xffff0000), /* POWER10 */
-			.val  = cpu_to_be32(0x00800000),
-		},
-		{
-			.mask = cpu_to_be32(0xffffffff), /* all 3.1-compliant */
-			.val  = cpu_to_be32(0x0f000006),
-		},
-		{
 			.mask = cpu_to_be32(0xffffffff), /* all 3.00-compliant */
 			.val  = cpu_to_be32(0x0f000005),
 		},
@@ -1018,7 +1002,7 @@ static const struct ibm_arch_vec ibm_architecture_vec_template __initconst = {
 		.byte1 = 0,
 		.arch_versions = OV1_PPC_2_00 | OV1_PPC_2_01 | OV1_PPC_2_02 | OV1_PPC_2_03 |
 				 OV1_PPC_2_04 | OV1_PPC_2_05 | OV1_PPC_2_06 | OV1_PPC_2_07,
-		.arch_versions3 = OV1_PPC_3_00 | OV1_PPC_3_1,
+		.arch_versions3 = OV1_PPC_3_00,
 	},
 
 	.vec2_len = VECTOR_LENGTH(sizeof(struct option_vector2)),
@@ -1293,8 +1277,10 @@ static void __init prom_parse_platform_support(u8 index, u8 val,
 		prom_parse_mmu_model(val & OV5_FEAT(OV5_MMU_SUPPORT), support);
 		break;
 	case OV5_INDX(OV5_RADIX_GTSE): /* Radix Extensions */
-		if (val & OV5_FEAT(OV5_RADIX_GTSE))
-			support->radix_gtse = !prom_radix_gtse_disable;
+		if (val & OV5_FEAT(OV5_RADIX_GTSE)) {
+			prom_debug("Radix - GTSE supported\n");
+			support->radix_gtse = true;
+		}
 		break;
 	case OV5_INDX(OV5_XIVE_SUPPORT): /* Interrupt mode */
 		prom_parse_xive_model(val & OV5_FEAT(OV5_XIVE_SUPPORT),
@@ -1342,15 +1328,12 @@ static void __init prom_check_platform_support(void)
 		}
 	}
 
-	if (supported.radix_mmu && IS_ENABLED(CONFIG_PPC_RADIX_MMU)) {
-		/* Radix preferred - Check if GTSE is also supported */
-		prom_debug("Asking for radix\n");
+	if (supported.radix_mmu && supported.radix_gtse &&
+	    IS_ENABLED(CONFIG_PPC_RADIX_MMU)) {
+		/* Radix preferred - but we require GTSE for now */
+		prom_debug("Asking for radix with GTSE\n");
 		ibm_architecture_vec.vec5.mmu = OV5_FEAT(OV5_MMU_RADIX);
-		if (supported.radix_gtse)
-			ibm_architecture_vec.vec5.radix_ext =
-					OV5_FEAT(OV5_RADIX_GTSE);
-		else
-			prom_debug("Radix GTSE isn't supported\n");
+		ibm_architecture_vec.vec5.radix_ext = OV5_FEAT(OV5_RADIX_GTSE);
 	} else if (supported.hash_mmu) {
 		/* Default to hash mmu (if we can) */
 		prom_debug("Asking for hash\n");
@@ -1466,18 +1449,18 @@ static unsigned long __init alloc_up(unsigned long size, unsigned long align)
 	unsigned long addr = 0;
 
 	if (align)
-		base = ALIGN(base, align);
+		base = _ALIGN_UP(base, align);
 	prom_debug("%s(%lx, %lx)\n", __func__, size, align);
 	if (ram_top == 0)
 		prom_panic("alloc_up() called with mem not initialized\n");
 
 	if (align)
-		base = ALIGN(alloc_bottom, align);
+		base = _ALIGN_UP(alloc_bottom, align);
 	else
 		base = alloc_bottom;
 
 	for(; (base + size) <= alloc_top; 
-	    base = ALIGN(base + 0x100000, align)) {
+	    base = _ALIGN_UP(base + 0x100000, align)) {
 		prom_debug("    trying: 0x%lx\n\r", base);
 		addr = (unsigned long)prom_claim(base, size, 0);
 		if (addr != PROM_ERROR && addr != 0)
@@ -1517,7 +1500,7 @@ static unsigned long __init alloc_down(unsigned long size, unsigned long align,
 
 	if (highmem) {
 		/* Carve out storage for the TCE table. */
-		addr = ALIGN_DOWN(alloc_top_high - size, align);
+		addr = _ALIGN_DOWN(alloc_top_high - size, align);
 		if (addr <= alloc_bottom)
 			return 0;
 		/* Will we bump into the RMO ? If yes, check out that we
@@ -1535,9 +1518,9 @@ static unsigned long __init alloc_down(unsigned long size, unsigned long align,
 		goto bail;
 	}
 
-	base = ALIGN_DOWN(alloc_top - size, align);
+	base = _ALIGN_DOWN(alloc_top - size, align);
 	for (; base > alloc_bottom;
-	     base = ALIGN_DOWN(base - 0x100000, align))  {
+	     base = _ALIGN_DOWN(base - 0x100000, align))  {
 		prom_debug("    trying: 0x%lx\n\r", base);
 		addr = (unsigned long)prom_claim(base, size, 0);
 		if (addr != PROM_ERROR && addr != 0)
@@ -1603,8 +1586,8 @@ static void __init reserve_mem(u64 base, u64 size)
 	 * have our terminator with "size" set to 0 since we are
 	 * dumb and just copy this entire array to the boot params
 	 */
-	base = ALIGN_DOWN(base, PAGE_SIZE);
-	top = ALIGN(top, PAGE_SIZE);
+	base = _ALIGN_DOWN(base, PAGE_SIZE);
+	top = _ALIGN_UP(top, PAGE_SIZE);
 	size = top - base;
 
 	if (cnt >= (MEM_RESERVE_MAP_SIZE - 1))
@@ -2423,19 +2406,10 @@ static void __init prom_check_displays(void)
 			u32 width, height, pitch, addr;
 
 			prom_printf("Setting btext !\n");
-
-			if (prom_getprop(node, "width", &width, 4) == PROM_ERROR)
-				return;
-
-			if (prom_getprop(node, "height", &height, 4) == PROM_ERROR)
-				return;
-
-			if (prom_getprop(node, "linebytes", &pitch, 4) == PROM_ERROR)
-				return;
-
-			if (prom_getprop(node, "address", &addr, 4) == PROM_ERROR)
-				return;
-
+			prom_getprop(node, "width", &width, 4);
+			prom_getprop(node, "height", &height, 4);
+			prom_getprop(node, "linebytes", &pitch, 4);
+			prom_getprop(node, "address", &addr, 4);
 			prom_printf("W=%d H=%d LB=%d addr=0x%x\n",
 				    width, height, pitch, addr);
 			btext_setup_display(width, height, 8, pitch, addr);
@@ -2452,7 +2426,7 @@ static void __init *make_room(unsigned long *mem_start, unsigned long *mem_end,
 {
 	void *ret;
 
-	*mem_start = ALIGN(*mem_start, align);
+	*mem_start = _ALIGN(*mem_start, align);
 	while ((*mem_start + needed) > *mem_end) {
 		unsigned long room, chunk;
 
@@ -2588,7 +2562,7 @@ static void __init scan_dt_build_struct(phandle node, unsigned long *mem_start,
 				*lp++ = *p;
 		}
 		*lp = 0;
-		*mem_start = ALIGN((unsigned long)lp + 1, 4);
+		*mem_start = _ALIGN((unsigned long)lp + 1, 4);
 	}
 
 	/* get it again for debugging */
@@ -2634,7 +2608,7 @@ static void __init scan_dt_build_struct(phandle node, unsigned long *mem_start,
 		/* push property content */
 		valp = make_room(mem_start, mem_end, l, 4);
 		call_prom("getprop", 4, 1, node, pname, valp, l);
-		*mem_start = ALIGN(*mem_start, 4);
+		*mem_start = _ALIGN(*mem_start, 4);
 
 		if (!prom_strcmp(pname, "phandle"))
 			has_phandle = 1;
@@ -2693,7 +2667,7 @@ static void __init flatten_device_tree(void)
 		prom_panic ("couldn't get device tree root\n");
 
 	/* Build header and make room for mem rsv map */ 
-	mem_start = ALIGN(mem_start, 4);
+	mem_start = _ALIGN(mem_start, 4);
 	hdr = make_room(&mem_start, &mem_end,
 			sizeof(struct boot_param_header), 4);
 	dt_header_start = (unsigned long)hdr;
@@ -3280,7 +3254,7 @@ static int enter_secure_mode(unsigned long kbase, unsigned long fdt)
 /*
  * Call the Ultravisor to transfer us to secure memory if we have an ESM blob.
  */
-static void __init setup_secure_guest(unsigned long kbase, unsigned long fdt)
+static void setup_secure_guest(unsigned long kbase, unsigned long fdt)
 {
 	int ret;
 
@@ -3310,7 +3284,7 @@ static void __init setup_secure_guest(unsigned long kbase, unsigned long fdt)
 	}
 }
 #else
-static void __init setup_secure_guest(unsigned long kbase, unsigned long fdt)
+static void setup_secure_guest(unsigned long kbase, unsigned long fdt)
 {
 }
 #endif /* CONFIG_PPC_SVM */

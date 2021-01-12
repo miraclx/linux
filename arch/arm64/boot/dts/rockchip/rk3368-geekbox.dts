@@ -50,13 +50,13 @@
 	leds: gpio-leds {
 		compatible = "gpio-leds";
 
-		blue_led: led-0 {
+		blue {
 			gpios = <&gpio2 RK_PA2 GPIO_ACTIVE_HIGH>;
 			label = "geekbox:blue:led";
 			default-state = "on";
 		};
 
-		red_led: led-1 {
+		red {
 			gpios = <&gpio2 RK_PA3 GPIO_ACTIVE_HIGH>;
 			label = "geekbox:red:led";
 			default-state = "off";

@@ -42,9 +42,6 @@
 #define EHCI_MAX_CLKS 4
 #define hcd_to_ehci_priv(h) ((struct ehci_platform_priv *)hcd_to_ehci(h)->priv)
 
-#define BCM_USB_FIFO_THRESHOLD	0x00800040
-#define bcm_iproc_insnreg01	hostpc[0]
-
 struct ehci_platform_priv {
 	struct clk *clks[EHCI_MAX_CLKS];
 	struct reset_control *rsts;
@@ -78,11 +75,6 @@ static int ehci_platform_reset(struct usb_hcd *hcd)
 
 	if (pdata->no_io_watchdog)
 		ehci->need_io_watchdog = 0;
-
-	if (of_device_is_compatible(pdev->dev.of_node, "brcm,xgs-iproc-ehci"))
-		ehci_writel(ehci, BCM_USB_FIFO_THRESHOLD,
-			    &ehci->regs->bcm_iproc_insnreg01);
-
 	return 0;
 }
 
@@ -418,7 +410,8 @@ static int ehci_platform_remove(struct platform_device *dev)
 	return 0;
 }
 
-static int __maybe_unused ehci_platform_suspend(struct device *dev)
+#ifdef CONFIG_PM_SLEEP
+static int ehci_platform_suspend(struct device *dev)
 {
 	struct usb_hcd *hcd = dev_get_drvdata(dev);
 	struct usb_ehci_pdata *pdata = dev_get_platdata(dev);
@@ -440,7 +433,7 @@ static int __maybe_unused ehci_platform_suspend(struct device *dev)
 	return ret;
 }
 
-static int __maybe_unused ehci_platform_resume(struct device *dev)
+static int ehci_platform_resume(struct device *dev)
 {
 	struct usb_hcd *hcd = dev_get_drvdata(dev);
 	struct usb_ehci_pdata *pdata = dev_get_platdata(dev);
@@ -462,15 +455,12 @@ static int __maybe_unused ehci_platform_resume(struct device *dev)
 
 	ehci_resume(hcd, priv->reset_on_resume);
 
-	pm_runtime_disable(dev);
-	pm_runtime_set_active(dev);
-	pm_runtime_enable(dev);
-
 	if (priv->quirk_poll)
 		quirk_poll_init(priv);
 
 	return 0;
 }
+#endif /* CONFIG_PM_SLEEP */
 
 static const struct of_device_id vt8500_ehci_ids[] = {
 	{ .compatible = "via,vt8500-ehci", },
@@ -481,13 +471,11 @@ static const struct of_device_id vt8500_ehci_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, vt8500_ehci_ids);
 
-#ifdef CONFIG_ACPI
 static const struct acpi_device_id ehci_acpi_match[] = {
 	{ "PNP0D20", 0 }, /* EHCI controller without debug */
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, ehci_acpi_match);
-#endif
 
 static const struct platform_device_id ehci_platform_table[] = {
 	{ "ehci-platform", 0 },
@@ -505,7 +493,7 @@ static struct platform_driver ehci_platform_driver = {
 	.shutdown	= usb_hcd_platform_shutdown,
 	.driver		= {
 		.name	= "ehci-platform",
-		.pm	= pm_ptr(&ehci_platform_pm_ops),
+		.pm	= &ehci_platform_pm_ops,
 		.of_match_table = vt8500_ehci_ids,
 		.acpi_match_table = ACPI_PTR(ehci_acpi_match),
 	}

@@ -57,7 +57,6 @@
 #include <linux/rcupdate.h>
 
 #include <linux/uaccess.h>
-#include <linux/nfs_ssc.h>
 
 #include "nfs4_fs.h"
 #include "callback.h"
@@ -86,10 +85,6 @@ const struct super_operations nfs_sops = {
 };
 EXPORT_SYMBOL_GPL(nfs_sops);
 
-static const struct nfs_ssc_client_ops nfs_ssc_clnt_ops_tbl = {
-	.sco_sb_deactive = nfs_sb_deactive,
-};
-
 #if IS_ENABLED(CONFIG_NFS_V4)
 static int __init register_nfs4_fs(void)
 {
@@ -110,16 +105,6 @@ static void unregister_nfs4_fs(void)
 {
 }
 #endif
-
-static void nfs_ssc_register_ops(void)
-{
-	nfs_ssc_register(&nfs_ssc_clnt_ops_tbl);
-}
-
-static void nfs_ssc_unregister_ops(void)
-{
-	nfs_ssc_unregister(&nfs_ssc_clnt_ops_tbl);
-}
 
 static struct shrinker acl_shrinker = {
 	.count_objects	= nfs_access_cache_count,
@@ -148,7 +133,6 @@ int __init register_nfs_fs(void)
 	ret = register_shrinker(&acl_shrinker);
 	if (ret < 0)
 		goto error_3;
-	nfs_ssc_register_ops();
 	return 0;
 error_3:
 	nfs_unregister_sysctl();
@@ -168,7 +152,6 @@ void __exit unregister_nfs_fs(void)
 	unregister_shrinker(&acl_shrinker);
 	nfs_unregister_sysctl();
 	unregister_nfs4_fs();
-	nfs_ssc_unregister_ops();
 	unregister_filesystem(&nfs_fs_type);
 }
 
@@ -906,7 +889,7 @@ static struct nfs_server *nfs_try_mount_request(struct fs_context *fc)
 		default:
 			if (rpcauth_get_gssinfo(flavor, &info) != 0)
 				continue;
-			break;
+			/* Fallthrough */
 		}
 		dfprintk(MOUNT, "NFS: attempting to use auth flavor %u\n", flavor);
 		ctx->selected_flavor = flavor;
@@ -1217,6 +1200,13 @@ static void nfs_get_cache_cookie(struct super_block *sb,
 }
 #endif
 
+static void nfs_set_readahead(struct backing_dev_info *bdi,
+			      unsigned long iomax_pages)
+{
+	bdi->ra_pages = VM_READAHEAD_PAGES;
+	bdi->io_pages = iomax_pages;
+}
+
 int nfs_get_tree_common(struct fs_context *fc)
 {
 	struct nfs_fs_context *ctx = nfs_fc2context(fc);
@@ -1261,7 +1251,7 @@ int nfs_get_tree_common(struct fs_context *fc)
 					     MINOR(server->s_dev));
 		if (error)
 			goto error_splat_super;
-		s->s_bdi->io_pages = server->rpages;
+		nfs_set_readahead(s->s_bdi, server->rpages);
 		server->super = s;
 	}
 

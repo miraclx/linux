@@ -230,12 +230,12 @@ CXACRU__ATTR_INIT(_name)
 
 static ssize_t cxacru_sysfs_showattr_u32(u32 value, char *buf)
 {
-	return sprintf(buf, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%u\n", value);
 }
 
 static ssize_t cxacru_sysfs_showattr_s8(s8 value, char *buf)
 {
-	return sprintf(buf, "%d\n", value);
+	return snprintf(buf, PAGE_SIZE, "%d\n", value);
 }
 
 static ssize_t cxacru_sysfs_showattr_dB(s16 value, char *buf)
@@ -255,8 +255,8 @@ static ssize_t cxacru_sysfs_showattr_bool(u32 value, char *buf)
 	static char *str[] = { "no", "yes" };
 
 	if (unlikely(value >= ARRAY_SIZE(str)))
-		return sprintf(buf, "%u\n", value);
-	return sprintf(buf, "%s\n", str[value]);
+		return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
 }
 
 static ssize_t cxacru_sysfs_showattr_LINK(u32 value, char *buf)
@@ -264,8 +264,8 @@ static ssize_t cxacru_sysfs_showattr_LINK(u32 value, char *buf)
 	static char *str[] = { NULL, "not connected", "connected", "lost" };
 
 	if (unlikely(value >= ARRAY_SIZE(str) || str[value] == NULL))
-		return sprintf(buf, "%u\n", value);
-	return sprintf(buf, "%s\n", str[value]);
+		return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
 }
 
 static ssize_t cxacru_sysfs_showattr_LINE(u32 value, char *buf)
@@ -275,8 +275,8 @@ static ssize_t cxacru_sysfs_showattr_LINE(u32 value, char *buf)
 		"waiting", "initialising"
 	};
 	if (unlikely(value >= ARRAY_SIZE(str)))
-		return sprintf(buf, "%u\n", value);
-	return sprintf(buf, "%s\n", str[value]);
+		return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
 }
 
 static ssize_t cxacru_sysfs_showattr_MODU(u32 value, char *buf)
@@ -288,8 +288,8 @@ static ssize_t cxacru_sysfs_showattr_MODU(u32 value, char *buf)
 			"ITU-T G.992.2 (G.LITE)"
 	};
 	if (unlikely(value >= ARRAY_SIZE(str)))
-		return sprintf(buf, "%u\n", value);
-	return sprintf(buf, "%s\n", str[value]);
+		return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
 }
 
 /*
@@ -309,7 +309,8 @@ static ssize_t mac_address_show(struct device *dev,
 	if (instance == NULL || instance->usbatm->atm_dev == NULL)
 		return -ENODEV;
 
-	return sprintf(buf, "%pM\n", instance->usbatm->atm_dev->esi);
+	return snprintf(buf, PAGE_SIZE, "%pM\n",
+		instance->usbatm->atm_dev->esi);
 }
 
 static ssize_t adsl_state_show(struct device *dev,
@@ -325,8 +326,8 @@ static ssize_t adsl_state_show(struct device *dev,
 
 	value = instance->card_info[CXINF_LINE_STARTABLE];
 	if (unlikely(value >= ARRAY_SIZE(str)))
-		return sprintf(buf, "%u\n", value);
-	return sprintf(buf, "%s\n", str[value]);
+		return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
 }
 
 static ssize_t adsl_state_store(struct device *dev,
@@ -407,7 +408,7 @@ static ssize_t adsl_state_store(struct device *dev,
 		case CXPOLL_STOPPING:
 			/* abort stop request */
 			instance->poll_state = CXPOLL_POLLING;
-			fallthrough;
+			/* fall through */
 		case CXPOLL_POLLING:
 		case CXPOLL_SHUTDOWN:
 			/* don't start polling */
@@ -801,7 +802,7 @@ static int cxacru_atm_start(struct usbatm_data *usbatm_instance,
 	case CXPOLL_STOPPING:
 		/* abort stop request */
 		instance->poll_state = CXPOLL_POLLING;
-		fallthrough;
+		/* fall through */
 	case CXPOLL_POLLING:
 	case CXPOLL_SHUTDOWN:
 		/* don't start polling */
@@ -809,6 +810,9 @@ static int cxacru_atm_start(struct usbatm_data *usbatm_instance,
 	}
 	mutex_unlock(&instance->poll_state_serialize);
 	mutex_unlock(&instance->adsl_state_serialize);
+
+	printk(KERN_INFO "%s%d: %s %pM\n", atm_dev->type, atm_dev->number,
+			usbatm_instance->description, atm_dev->esi);
 
 	if (start_polling)
 		cxacru_poll_status(&instance->poll_work.work);
@@ -849,15 +853,15 @@ static void cxacru_poll_status(struct work_struct *work)
 
 		switch (instance->adsl_status) {
 		case 0:
-			atm_info(usbatm, "ADSL state: running\n");
+			atm_printk(KERN_INFO, usbatm, "ADSL state: running\n");
 			break;
 
 		case 1:
-			atm_info(usbatm, "ADSL state: stopped\n");
+			atm_printk(KERN_INFO, usbatm, "ADSL state: stopped\n");
 			break;
 
 		default:
-			atm_info(usbatm, "Unknown adsl status %02x\n", instance->adsl_status);
+			atm_printk(KERN_INFO, usbatm, "Unknown adsl status %02x\n", instance->adsl_status);
 			break;
 		}
 	}

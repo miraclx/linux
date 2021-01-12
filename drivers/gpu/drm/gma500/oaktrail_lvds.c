@@ -13,8 +13,6 @@
 
 #include <asm/intel-mid.h>
 
-#include <drm/drm_simple_kms_helper.h>
-
 #include "intel_bios.h"
 #include "power.h"
 #include "psb_drv.h"
@@ -313,7 +311,8 @@ void oaktrail_lvds_init(struct drm_device *dev,
 			   &psb_intel_lvds_connector_funcs,
 			   DRM_MODE_CONNECTOR_LVDS);
 
-	drm_simple_encoder_init(dev, encoder, DRM_MODE_ENCODER_LVDS);
+	drm_encoder_init(dev, encoder, &psb_intel_lvds_enc_funcs,
+			 DRM_MODE_ENCODER_LVDS, NULL);
 
 	gma_connector_attach_encoder(gma_connector, gma_encoder);
 	gma_encoder->type = INTEL_OUTPUT_LVDS;

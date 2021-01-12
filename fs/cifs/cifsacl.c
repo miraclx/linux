@@ -32,7 +32,6 @@
 #include "cifsacl.h"
 #include "cifsproto.h"
 #include "cifs_debug.h"
-#include "fs_context.h"
 
 /* security id for everyone/world system group */
 static const struct cifs_sid sid_everyone = {
@@ -50,7 +49,7 @@ static const struct cifs_sid sid_unix_groups = { 1, 1, {0, 0, 0, 0, 0, 22},
 		{cpu_to_le32(2), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} };
 
 /*
- * See https://technet.microsoft.com/en-us/library/hh509017(v=ws.10).aspx
+ * See http://technet.microsoft.com/en-us/library/hh509017(v=ws.10).aspx
  */
 
 /* S-1-5-88 MS NFS and Apple style UID/GID/mode */
@@ -339,7 +338,7 @@ invalidate_key:
 	goto out_key_put;
 }
 
-int
+static int
 sid_to_id(struct cifs_sb_info *cifs_sb, struct cifs_sid *psid,
 		struct cifs_fattr *fattr, uint sidtype)
 {
@@ -347,8 +346,8 @@ sid_to_id(struct cifs_sb_info *cifs_sb, struct cifs_sid *psid,
 	struct key *sidkey;
 	char *sidstr;
 	const struct cred *saved_cred;
-	kuid_t fuid = cifs_sb->ctx->linux_uid;
-	kgid_t fgid = cifs_sb->ctx->linux_gid;
+	kuid_t fuid = cifs_sb->mnt_uid;
+	kgid_t fgid = cifs_sb->mnt_gid;
 
 	/*
 	 * If we have too many subauthorities, then something is really wrong.
@@ -360,8 +359,7 @@ sid_to_id(struct cifs_sb_info *cifs_sb, struct cifs_sid *psid,
 		return -EIO;
 	}
 
-	if ((cifs_sb->mnt_cifs_flags & CIFS_MOUNT_UID_FROM_ACL) ||
-	    (cifs_sb_master_tcon(cifs_sb)->posix_extensions)) {
+	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_UID_FROM_ACL) {
 		uint32_t unix_id;
 		bool is_group;
 
@@ -449,7 +447,7 @@ out_revert_creds:
 
 	/*
 	 * Note that we return 0 here unconditionally. If the mapping
-	 * fails then we just fall back to using the ctx->linux_uid/linux_gid.
+	 * fails then we just fall back to using the mnt_uid/mnt_gid.
 	 */
 got_valid_id:
 	rc = 0;
@@ -558,37 +556,30 @@ static void copy_sec_desc(const struct cifs_ntsd *pntsd,
    bits to set can be: S_IRWXU, S_IRWXG or S_IRWXO ie 00700 or 00070 or 00007
 */
 static void access_flags_to_mode(__le32 ace_flags, int type, umode_t *pmode,
-				 umode_t *pdenied, umode_t mask)
+				 umode_t *pbits_to_set)
 {
 	__u32 flags = le32_to_cpu(ace_flags);
-	/*
-	 * Do not assume "preferred" or "canonical" order.
-	 * The first DENY or ALLOW ACE which matches perfectly is
-	 * the permission to be used. Once allowed or denied, same
-	 * permission in later ACEs do not matter.
-	 */
+	/* the order of ACEs is important.  The canonical order is to begin with
+	   DENY entries followed by ALLOW, otherwise an allow entry could be
+	   encountered first, making the subsequent deny entry like "dead code"
+	   which would be superflous since Windows stops when a match is made
+	   for the operation you are trying to perform for your user */
 
-	/* If not already allowed, deny these bits */
+	/* For deny ACEs we change the mask so that subsequent allow access
+	   control entries do not turn on the bits we are denying */
 	if (type == ACCESS_DENIED) {
-		if (flags & GENERIC_ALL &&
-				!(*pmode & mask & 0777))
-			*pdenied |= mask & 0777;
+		if (flags & GENERIC_ALL)
+			*pbits_to_set &= ~S_IRWXUGO;
 
-		if (((flags & GENERIC_WRITE) ||
-				((flags & FILE_WRITE_RIGHTS) == FILE_WRITE_RIGHTS)) &&
-				!(*pmode & mask & 0222))
-			*pdenied |= mask & 0222;
-
-		if (((flags & GENERIC_READ) ||
-				((flags & FILE_READ_RIGHTS) == FILE_READ_RIGHTS)) &&
-				!(*pmode & mask & 0444))
-			*pdenied |= mask & 0444;
-
-		if (((flags & GENERIC_EXECUTE) ||
-				((flags & FILE_EXEC_RIGHTS) == FILE_EXEC_RIGHTS)) &&
-				!(*pmode & mask & 0111))
-			*pdenied |= mask & 0111;
-
+		if ((flags & GENERIC_WRITE) ||
+			((flags & FILE_WRITE_RIGHTS) == FILE_WRITE_RIGHTS))
+			*pbits_to_set &= ~S_IWUGO;
+		if ((flags & GENERIC_READ) ||
+			((flags & FILE_READ_RIGHTS) == FILE_READ_RIGHTS))
+			*pbits_to_set &= ~S_IRUGO;
+		if ((flags & GENERIC_EXECUTE) ||
+			((flags & FILE_EXEC_RIGHTS) == FILE_EXEC_RIGHTS))
+			*pbits_to_set &= ~S_IXUGO;
 		return;
 	} else if (type != ACCESS_ALLOWED) {
 		cifs_dbg(VFS, "unknown access control type %d\n", type);
@@ -596,38 +587,20 @@ static void access_flags_to_mode(__le32 ace_flags, int type, umode_t *pmode,
 	}
 	/* else ACCESS_ALLOWED type */
 
-	if ((flags & GENERIC_ALL) &&
-			!(*pdenied & mask & 0777)) {
-		*pmode |= mask & 0777;
+	if (flags & GENERIC_ALL) {
+		*pmode |= (S_IRWXUGO & (*pbits_to_set));
 		cifs_dbg(NOISY, "all perms\n");
 		return;
 	}
-
-	if (((flags & GENERIC_WRITE) ||
-			((flags & FILE_WRITE_RIGHTS) == FILE_WRITE_RIGHTS)) &&
-			!(*pdenied & mask & 0222))
-		*pmode |= mask & 0222;
-
-	if (((flags & GENERIC_READ) ||
-			((flags & FILE_READ_RIGHTS) == FILE_READ_RIGHTS)) &&
-			!(*pdenied & mask & 0444))
-		*pmode |= mask & 0444;
-
-	if (((flags & GENERIC_EXECUTE) ||
-			((flags & FILE_EXEC_RIGHTS) == FILE_EXEC_RIGHTS)) &&
-			!(*pdenied & mask & 0111))
-		*pmode |= mask & 0111;
-
-	/* If DELETE_CHILD is set only on an owner ACE, set sticky bit */
-	if (flags & FILE_DELETE_CHILD) {
-		if (mask == ACL_OWNER_MASK) {
-			if (!(*pdenied & 01000))
-				*pmode |= 01000;
-		} else if (!(*pdenied & 01000)) {
-			*pmode &= ~01000;
-			*pdenied |= 01000;
-		}
-	}
+	if ((flags & GENERIC_WRITE) ||
+			((flags & FILE_WRITE_RIGHTS) == FILE_WRITE_RIGHTS))
+		*pmode |= (S_IWUGO & (*pbits_to_set));
+	if ((flags & GENERIC_READ) ||
+			((flags & FILE_READ_RIGHTS) == FILE_READ_RIGHTS))
+		*pmode |= (S_IRUGO & (*pbits_to_set));
+	if ((flags & GENERIC_EXECUTE) ||
+			((flags & FILE_EXEC_RIGHTS) == FILE_EXEC_RIGHTS))
+		*pmode |= (S_IXUGO & (*pbits_to_set));
 
 	cifs_dbg(NOISY, "access flags 0x%x mode now %04o\n", flags, *pmode);
 	return;
@@ -664,26 +637,17 @@ static void mode_to_access_flags(umode_t mode, umode_t bits_to_use,
 }
 
 static __u16 fill_ace_for_sid(struct cifs_ace *pntace,
-			const struct cifs_sid *psid, __u64 nmode,
-			umode_t bits, __u8 access_type,
-			bool allow_delete_child)
+			const struct cifs_sid *psid, __u64 nmode, umode_t bits)
 {
 	int i;
 	__u16 size = 0;
 	__u32 access_req = 0;
 
-	pntace->type = access_type;
+	pntace->type = ACCESS_ALLOWED;
 	pntace->flags = 0x0;
 	mode_to_access_flags(nmode, bits, &access_req);
-
-	if (access_type == ACCESS_ALLOWED && allow_delete_child)
-		access_req |= FILE_DELETE_CHILD;
-
-	if (access_type == ACCESS_ALLOWED && !access_req)
+	if (!access_req)
 		access_req = SET_MINIMUM_RIGHTS;
-	else if (access_type == ACCESS_DENIED)
-		access_req &= ~SET_MINIMUM_RIGHTS;
-
 	pntace->access_req = cpu_to_le32(access_req);
 
 	pntace->sid.revision = psid->revision;
@@ -751,7 +715,7 @@ static void parse_dacl(struct cifs_acl *pdacl, char *end_of_acl,
 	if (!pdacl) {
 		/* no DACL in the security descriptor, set
 		   all the permissions for user/group/other */
-		fattr->cf_mode |= 0777;
+		fattr->cf_mode |= S_IRWXUGO;
 		return;
 	}
 
@@ -768,14 +732,16 @@ static void parse_dacl(struct cifs_acl *pdacl, char *end_of_acl,
 	/* reset rwx permissions for user/group/other.
 	   Also, if num_aces is 0 i.e. DACL has no ACEs,
 	   user/group/other have no permissions */
-	fattr->cf_mode &= ~(0777);
+	fattr->cf_mode &= ~(S_IRWXUGO);
 
 	acl_base = (char *)pdacl;
 	acl_size = sizeof(struct cifs_acl);
 
 	num_aces = le32_to_cpu(pdacl->num_aces);
 	if (num_aces > 0) {
-		umode_t denied_mode = 0;
+		umode_t user_mask = S_IRWXU;
+		umode_t group_mask = S_IRWXG;
+		umode_t other_mask = S_IRWXU | S_IRWXG | S_IRWXO;
 
 		if (num_aces > ULONG_MAX / sizeof(struct cifs_ace *))
 			return;
@@ -801,28 +767,26 @@ static void parse_dacl(struct cifs_acl *pdacl, char *end_of_acl,
 				fattr->cf_mode |=
 					le32_to_cpu(ppace[i]->sid.sub_auth[2]);
 				break;
-			} else {
-				if (compare_sids(&(ppace[i]->sid), pownersid) == 0) {
-					access_flags_to_mode(ppace[i]->access_req,
-							ppace[i]->type,
-							&fattr->cf_mode,
-							&denied_mode,
-							ACL_OWNER_MASK);
-				} else if (compare_sids(&(ppace[i]->sid), pgrpsid) == 0) {
-					access_flags_to_mode(ppace[i]->access_req,
-							ppace[i]->type,
-							&fattr->cf_mode,
-							&denied_mode,
-							ACL_GROUP_MASK);
-				} else if ((compare_sids(&(ppace[i]->sid), &sid_everyone) == 0) ||
-						(compare_sids(&(ppace[i]->sid), &sid_authusers) == 0)) {
-					access_flags_to_mode(ppace[i]->access_req,
-							ppace[i]->type,
-							&fattr->cf_mode,
-							&denied_mode,
-							ACL_EVERYONE_MASK);
-				}
-			}
+			} else if (compare_sids(&(ppace[i]->sid), pownersid) == 0)
+				access_flags_to_mode(ppace[i]->access_req,
+						     ppace[i]->type,
+						     &fattr->cf_mode,
+						     &user_mask);
+			else if (compare_sids(&(ppace[i]->sid), pgrpsid) == 0)
+				access_flags_to_mode(ppace[i]->access_req,
+						     ppace[i]->type,
+						     &fattr->cf_mode,
+						     &group_mask);
+			else if (compare_sids(&(ppace[i]->sid), &sid_everyone) == 0)
+				access_flags_to_mode(ppace[i]->access_req,
+						     ppace[i]->type,
+						     &fattr->cf_mode,
+						     &other_mask);
+			else if (compare_sids(&(ppace[i]->sid), &sid_authusers) == 0)
+				access_flags_to_mode(ppace[i]->access_req,
+						     ppace[i]->type,
+						     &fattr->cf_mode,
+						     &other_mask);
 
 
 /*			memcpy((void *)(&(cifscred->aces[i])),
@@ -861,7 +825,7 @@ unsigned int setup_authusers_ACE(struct cifs_ace *pntace)
 
 /*
  * Fill in the special SID based on the mode. See
- * https://technet.microsoft.com/en-us/library/hh509017(v=ws.10).aspx
+ * http://technet.microsoft.com/en-us/library/hh509017(v=ws.10).aspx
  */
 unsigned int setup_special_mode_ACE(struct cifs_ace *pntace, __u64 nmode)
 {
@@ -885,45 +849,14 @@ unsigned int setup_special_mode_ACE(struct cifs_ace *pntace, __u64 nmode)
 	return ace_size;
 }
 
-unsigned int setup_special_user_owner_ACE(struct cifs_ace *pntace)
-{
-	int i;
-	unsigned int ace_size = 28;
-
-	pntace->type = ACCESS_ALLOWED_ACE_TYPE;
-	pntace->flags = 0x0;
-	pntace->access_req = cpu_to_le32(GENERIC_ALL);
-	pntace->sid.num_subauth = 3;
-	pntace->sid.revision = 1;
-	for (i = 0; i < NUM_AUTHS; i++)
-		pntace->sid.authority[i] = sid_unix_NFS_users.authority[i];
-
-	pntace->sid.sub_auth[0] = sid_unix_NFS_users.sub_auth[0];
-	pntace->sid.sub_auth[1] = sid_unix_NFS_users.sub_auth[1];
-	pntace->sid.sub_auth[2] = cpu_to_le32(current_fsgid().val);
-
-	/* size = 1 + 1 + 2 + 4 + 1 + 1 + 6 + (psid->num_subauth*4) */
-	pntace->size = cpu_to_le16(ace_size);
-	return ace_size;
-}
-
 static int set_chmod_dacl(struct cifs_acl *pndacl, struct cifs_sid *pownersid,
-			struct cifs_sid *pgrpsid, __u64 *pnmode, bool modefromsid)
+			struct cifs_sid *pgrpsid, __u64 nmode, bool modefromsid)
 {
 	u16 size = 0;
 	u32 num_aces = 0;
 	struct cifs_acl *pnndacl;
-	__u64 nmode;
-	__u64 user_mode;
-	__u64 group_mode;
-	__u64 other_mode;
-	__u64 deny_user_mode = 0;
-	__u64 deny_group_mode = 0;
-	bool sticky_set = false;
 
 	pnndacl = (struct cifs_acl *)((char *)pndacl + sizeof(struct cifs_acl));
-
-	nmode = *pnmode;
 
 	if (modefromsid) {
 		struct cifs_ace *pntace =
@@ -931,68 +864,18 @@ static int set_chmod_dacl(struct cifs_acl *pndacl, struct cifs_sid *pownersid,
 
 		size += setup_special_mode_ACE(pntace, nmode);
 		num_aces++;
-		goto set_size;
 	}
 
-	/*
-	 * We'll try to keep the mode as requested by the user.
-	 * But in cases where we cannot meaningfully convert that
-	 * into ACL, return back the updated mode, so that it is
-	 * updated in the inode.
-	 */
-
-	if (!memcmp(pownersid, pgrpsid, sizeof(struct cifs_sid))) {
-		/*
-		 * Case when owner and group SIDs are the same.
-		 * Set the more restrictive of the two modes.
-		 */
-		user_mode = nmode & (nmode << 3) & 0700;
-		group_mode = nmode & (nmode >> 3) & 0070;
-	} else {
-		user_mode = nmode & 0700;
-		group_mode = nmode & 0070;
-	}
-
-	other_mode = nmode & 0007;
-
-	/* We need DENY ACE when the perm is more restrictive than the next sets. */
-	deny_user_mode = ~(user_mode) & ((group_mode << 3) | (other_mode << 6)) & 0700;
-	deny_group_mode = ~(group_mode) & (other_mode << 3) & 0070;
-
-	*pnmode = user_mode | group_mode | other_mode | (nmode & ~0777);
-
-	/* This tells if we should allow delete child for group and everyone. */
-	if (nmode & 01000)
-		sticky_set = true;
-
-	if (deny_user_mode) {
-		size += fill_ace_for_sid((struct cifs_ace *)((char *)pnndacl + size),
-				pownersid, deny_user_mode, 0700, ACCESS_DENIED, false);
-		num_aces++;
-	}
-	/* Group DENY ACE does not conflict with owner ALLOW ACE. Keep in preferred order*/
-	if (deny_group_mode && !(deny_group_mode & (user_mode >> 3))) {
-		size += fill_ace_for_sid((struct cifs_ace *)((char *)pnndacl + size),
-				pgrpsid, deny_group_mode, 0070, ACCESS_DENIED, false);
-		num_aces++;
-	}
 	size += fill_ace_for_sid((struct cifs_ace *) ((char *)pnndacl + size),
-			pownersid, user_mode, 0700, ACCESS_ALLOWED, true);
-	num_aces++;
-	/* Group DENY ACE conflicts with owner ALLOW ACE. So keep it after. */
-	if (deny_group_mode && (deny_group_mode & (user_mode >> 3))) {
-		size += fill_ace_for_sid((struct cifs_ace *)((char *)pnndacl + size),
-				pgrpsid, deny_group_mode, 0070, ACCESS_DENIED, false);
-		num_aces++;
-	}
-	size += fill_ace_for_sid((struct cifs_ace *)((char *)pnndacl + size),
-			pgrpsid, group_mode, 0070, ACCESS_ALLOWED, !sticky_set);
+					pownersid, nmode, S_IRWXU);
 	num_aces++;
 	size += fill_ace_for_sid((struct cifs_ace *)((char *)pnndacl + size),
-			&sid_everyone, other_mode, 0007, ACCESS_ALLOWED, !sticky_set);
+					pgrpsid, nmode, S_IRWXG);
+	num_aces++;
+	size += fill_ace_for_sid((struct cifs_ace *)((char *)pnndacl + size),
+					 &sid_everyone, nmode, S_IRWXO);
 	num_aces++;
 
-set_size:
 	pndacl->num_aces = cpu_to_le32(num_aces);
 	pndacl->size = cpu_to_le16(size + sizeof(struct cifs_acl));
 
@@ -1094,8 +977,8 @@ static int parse_sec_desc(struct cifs_sb_info *cifs_sb,
 
 /* Convert permission bits from mode to equivalent CIFS ACL */
 static int build_sec_desc(struct cifs_ntsd *pntsd, struct cifs_ntsd *pnntsd,
-	__u32 secdesclen, __u64 *pnmode, kuid_t uid, kgid_t gid,
-	bool mode_from_sid, bool id_from_sid, int *aclflag)
+	__u32 secdesclen, __u64 nmode, kuid_t uid, kgid_t gid,
+	bool mode_from_sid, int *aclflag)
 {
 	int rc = 0;
 	__u32 dacloffset;
@@ -1106,7 +989,7 @@ static int build_sec_desc(struct cifs_ntsd *pntsd, struct cifs_ntsd *pnntsd,
 	struct cifs_acl *dacl_ptr = NULL;  /* no need for SACL ptr */
 	struct cifs_acl *ndacl_ptr = NULL; /* no need for SACL ptr */
 
-	if (pnmode && *pnmode != NO_CHANGE_64) { /* chmod */
+	if (nmode != NO_CHANGE_64) { /* chmod */
 		owner_sid_ptr = (struct cifs_sid *)((char *)pntsd +
 				le32_to_cpu(pntsd->osidoffset));
 		group_sid_ptr = (struct cifs_sid *)((char *)pntsd +
@@ -1120,7 +1003,7 @@ static int build_sec_desc(struct cifs_ntsd *pntsd, struct cifs_ntsd *pnntsd,
 		ndacl_ptr->num_aces = 0;
 
 		rc = set_chmod_dacl(ndacl_ptr, owner_sid_ptr, group_sid_ptr,
-				    pnmode, mode_from_sid);
+				    nmode, mode_from_sid);
 		sidsoffset = ndacloffset + le16_to_cpu(ndacl_ptr->size);
 		/* copy sec desc control portion & owner and group sids */
 		copy_sec_desc(pntsd, pnntsd, sidsoffset);
@@ -1136,23 +1019,12 @@ static int build_sec_desc(struct cifs_ntsd *pntsd, struct cifs_ntsd *pnntsd,
 			if (!nowner_sid_ptr)
 				return -ENOMEM;
 			id = from_kuid(&init_user_ns, uid);
-			if (id_from_sid) {
-				struct owner_sid *osid = (struct owner_sid *)nowner_sid_ptr;
-				/* Populate the user ownership fields S-1-5-88-1 */
-				osid->Revision = 1;
-				osid->NumAuth = 3;
-				osid->Authority[5] = 5;
-				osid->SubAuthorities[0] = cpu_to_le32(88);
-				osid->SubAuthorities[1] = cpu_to_le32(1);
-				osid->SubAuthorities[2] = cpu_to_le32(id);
-			} else { /* lookup sid with upcall */
-				rc = id_to_sid(id, SIDOWNER, nowner_sid_ptr);
-				if (rc) {
-					cifs_dbg(FYI, "%s: Mapping error %d for owner id %d\n",
-						 __func__, rc, id);
-					kfree(nowner_sid_ptr);
-					return rc;
-				}
+			rc = id_to_sid(id, SIDOWNER, nowner_sid_ptr);
+			if (rc) {
+				cifs_dbg(FYI, "%s: Mapping error %d for owner id %d\n",
+					 __func__, rc, id);
+				kfree(nowner_sid_ptr);
+				return rc;
 			}
 			cifs_copy_sid(owner_sid_ptr, nowner_sid_ptr);
 			kfree(nowner_sid_ptr);
@@ -1167,23 +1039,12 @@ static int build_sec_desc(struct cifs_ntsd *pntsd, struct cifs_ntsd *pnntsd,
 			if (!ngroup_sid_ptr)
 				return -ENOMEM;
 			id = from_kgid(&init_user_ns, gid);
-			if (id_from_sid) {
-				struct owner_sid *gsid = (struct owner_sid *)ngroup_sid_ptr;
-				/* Populate the group ownership fields S-1-5-88-2 */
-				gsid->Revision = 1;
-				gsid->NumAuth = 3;
-				gsid->Authority[5] = 5;
-				gsid->SubAuthorities[0] = cpu_to_le32(88);
-				gsid->SubAuthorities[1] = cpu_to_le32(2);
-				gsid->SubAuthorities[2] = cpu_to_le32(id);
-			} else { /* lookup sid with upcall */
-				rc = id_to_sid(id, SIDGROUP, ngroup_sid_ptr);
-				if (rc) {
-					cifs_dbg(FYI, "%s: Mapping error %d for group id %d\n",
-						 __func__, rc, id);
-					kfree(ngroup_sid_ptr);
-					return rc;
-				}
+			rc = id_to_sid(id, SIDGROUP, ngroup_sid_ptr);
+			if (rc) {
+				cifs_dbg(FYI, "%s: Mapping error %d for group id %d\n",
+					 __func__, rc, id);
+				kfree(ngroup_sid_ptr);
+				return rc;
 			}
 			cifs_copy_sid(group_sid_ptr, ngroup_sid_ptr);
 			kfree(ngroup_sid_ptr);
@@ -1195,8 +1056,7 @@ static int build_sec_desc(struct cifs_ntsd *pntsd, struct cifs_ntsd *pnntsd,
 }
 
 struct cifs_ntsd *get_cifs_acl_by_fid(struct cifs_sb_info *cifs_sb,
-				      const struct cifs_fid *cifsfid, u32 *pacllen,
-				      u32 __maybe_unused unused)
+		const struct cifs_fid *cifsfid, u32 *pacllen)
 {
 	struct cifs_ntsd *pntsd = NULL;
 	unsigned int xid;
@@ -1264,7 +1124,7 @@ static struct cifs_ntsd *get_cifs_acl_by_path(struct cifs_sb_info *cifs_sb,
 /* Retrieve an ACL from the server */
 struct cifs_ntsd *get_cifs_acl(struct cifs_sb_info *cifs_sb,
 				      struct inode *inode, const char *path,
-			       u32 *pacllen, u32 info)
+				      u32 *pacllen)
 {
 	struct cifs_ntsd *pntsd = NULL;
 	struct cifsFileInfo *open_file = NULL;
@@ -1274,7 +1134,7 @@ struct cifs_ntsd *get_cifs_acl(struct cifs_sb_info *cifs_sb,
 	if (!open_file)
 		return get_cifs_acl_by_path(cifs_sb, path, pacllen);
 
-	pntsd = get_cifs_acl_by_fid(cifs_sb, &open_file->fid, pacllen, info);
+	pntsd = get_cifs_acl_by_fid(cifs_sb, &open_file->fid, pacllen);
 	cifsFileInfo_put(open_file);
 	return pntsd;
 }
@@ -1339,7 +1199,6 @@ cifs_acl_to_fattr(struct cifs_sb_info *cifs_sb, struct cifs_fattr *fattr,
 	int rc = 0;
 	struct tcon_link *tlink = cifs_sb_tlink(cifs_sb);
 	struct smb_version_operations *ops;
-	const u32 info = 0;
 
 	cifs_dbg(NOISY, "converting ACL to mode for %s\n", path);
 
@@ -1349,9 +1208,9 @@ cifs_acl_to_fattr(struct cifs_sb_info *cifs_sb, struct cifs_fattr *fattr,
 	ops = tlink_tcon(tlink)->ses->server->ops;
 
 	if (pfid && (ops->get_acl_by_fid))
-		pntsd = ops->get_acl_by_fid(cifs_sb, pfid, &acllen, info);
+		pntsd = ops->get_acl_by_fid(cifs_sb, pfid, &acllen);
 	else if (ops->get_acl)
-		pntsd = ops->get_acl(cifs_sb, inode, path, &acllen, info);
+		pntsd = ops->get_acl(cifs_sb, inode, path, &acllen);
 	else {
 		cifs_put_tlink(tlink);
 		return -EOPNOTSUPP;
@@ -1362,7 +1221,6 @@ cifs_acl_to_fattr(struct cifs_sb_info *cifs_sb, struct cifs_fattr *fattr,
 		cifs_dbg(VFS, "%s: error %d getting sec desc\n", __func__, rc);
 	} else if (mode_from_special_sid) {
 		rc = parse_sec_desc(cifs_sb, pntsd, acllen, fattr, true);
-		kfree(pntsd);
 	} else {
 		/* get approximated mode from ACL */
 		rc = parse_sec_desc(cifs_sb, pntsd, acllen, fattr, false);
@@ -1378,7 +1236,7 @@ cifs_acl_to_fattr(struct cifs_sb_info *cifs_sb, struct cifs_fattr *fattr,
 
 /* Convert mode bits to an ACL so we can update the ACL on the server */
 int
-id_mode_to_cifs_acl(struct inode *inode, const char *path, __u64 *pnmode,
+id_mode_to_cifs_acl(struct inode *inode, const char *path, __u64 nmode,
 			kuid_t uid, kgid_t gid)
 {
 	int rc = 0;
@@ -1389,8 +1247,7 @@ id_mode_to_cifs_acl(struct inode *inode, const char *path, __u64 *pnmode,
 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
 	struct tcon_link *tlink = cifs_sb_tlink(cifs_sb);
 	struct smb_version_operations *ops;
-	bool mode_from_sid, id_from_sid;
-	const u32 info = 0;
+	bool mode_from_sid;
 
 	if (IS_ERR(tlink))
 		return PTR_ERR(tlink);
@@ -1406,7 +1263,7 @@ id_mode_to_cifs_acl(struct inode *inode, const char *path, __u64 *pnmode,
 		return -EOPNOTSUPP;
 	}
 
-	pntsd = ops->get_acl(cifs_sb, inode, path, &secdesclen, info);
+	pntsd = ops->get_acl(cifs_sb, inode, path, &secdesclen);
 	if (IS_ERR(pntsd)) {
 		rc = PTR_ERR(pntsd);
 		cifs_dbg(VFS, "%s: error %d getting sec desc\n", __func__, rc);
@@ -1433,13 +1290,8 @@ id_mode_to_cifs_acl(struct inode *inode, const char *path, __u64 *pnmode,
 	else
 		mode_from_sid = false;
 
-	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_UID_FROM_ACL)
-		id_from_sid = true;
-	else
-		id_from_sid = false;
-
-	rc = build_sec_desc(pntsd, pnntsd, secdesclen, pnmode, uid, gid,
-			    mode_from_sid, id_from_sid, &aclflag);
+	rc = build_sec_desc(pntsd, pnntsd, secdesclen, nmode, uid, gid,
+			    mode_from_sid, &aclflag);
 
 	cifs_dbg(NOISY, "build_sec_desc rc: %d\n", rc);
 

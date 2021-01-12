@@ -47,6 +47,9 @@ static const struct snd_pcm_hardware stm32_adfsdm_pcm_hw = {
 		SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_PAUSE,
 	.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S32_LE,
 
+	.rate_min = 8000,
+	.rate_max = 32000,
+
 	.channels_min = 1,
 	.channels_max = 1,
 
@@ -140,9 +143,8 @@ static const struct snd_soc_dai_driver stm32_adfsdm_dai = {
 		    .channels_max = 1,
 		    .formats = SNDRV_PCM_FMTBIT_S16_LE |
 			       SNDRV_PCM_FMTBIT_S32_LE,
-		    .rates = SNDRV_PCM_RATE_CONTINUOUS,
-		    .rate_min = 8000,
-		    .rate_max = 48000,
+		    .rates = (SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |
+			      SNDRV_PCM_RATE_32000),
 		    },
 	.ops = &stm32_adfsdm_dai_ops,
 };
@@ -166,7 +168,7 @@ static void stm32_memcpy_32to16(void *dest, const void *src, size_t n)
 static int stm32_afsdm_pcm_cb(const void *data, size_t size, void *private)
 {
 	struct stm32_adfsdm_priv *priv = private;
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(priv->substream);
+	struct snd_soc_pcm_runtime *rtd = priv->substream->private_data;
 	u8 *pcm_buff = priv->pcm_buff;
 	u8 *src_buff = (u8 *)data;
 	unsigned int old_pos = priv->pos;
@@ -211,7 +213,7 @@ static int stm32_afsdm_pcm_cb(const void *data, size_t size, void *private)
 static int stm32_adfsdm_trigger(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream, int cmd)
 {
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct stm32_adfsdm_priv *priv =
 		snd_soc_dai_get_drvdata(asoc_rtd_to_cpu(rtd, 0));
 
@@ -232,7 +234,7 @@ static int stm32_adfsdm_trigger(struct snd_soc_component *component,
 static int stm32_adfsdm_pcm_open(struct snd_soc_component *component,
 				 struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct stm32_adfsdm_priv *priv = snd_soc_dai_get_drvdata(asoc_rtd_to_cpu(rtd, 0));
 	int ret;
 
@@ -246,7 +248,7 @@ static int stm32_adfsdm_pcm_open(struct snd_soc_component *component,
 static int stm32_adfsdm_pcm_close(struct snd_soc_component *component,
 				  struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct stm32_adfsdm_priv *priv =
 		snd_soc_dai_get_drvdata(asoc_rtd_to_cpu(rtd, 0));
 
@@ -259,7 +261,7 @@ static snd_pcm_uframes_t stm32_adfsdm_pcm_pointer(
 					    struct snd_soc_component *component,
 					    struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct stm32_adfsdm_priv *priv =
 		snd_soc_dai_get_drvdata(asoc_rtd_to_cpu(rtd, 0));
 
@@ -270,7 +272,7 @@ static int stm32_adfsdm_pcm_hw_params(struct snd_soc_component *component,
 				      struct snd_pcm_substream *substream,
 				      struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct stm32_adfsdm_priv *priv =
 		snd_soc_dai_get_drvdata(asoc_rtd_to_cpu(rtd, 0));
 
@@ -290,16 +292,6 @@ static int stm32_adfsdm_pcm_new(struct snd_soc_component *component,
 
 	snd_pcm_set_managed_buffer_all(pcm, SNDRV_DMA_TYPE_DEV,
 				       priv->dev, size, size);
-	return 0;
-}
-
-static int stm32_adfsdm_dummy_cb(const void *data, void *private)
-{
-	/*
-	 * This dummmy callback is requested by iio_channel_get_all_cb() API,
-	 * but the stm32_dfsdm_get_buff_cb() API is used instead, to optimize
-	 * DMA transfers.
-	 */
 	return 0;
 }
 
@@ -345,24 +337,19 @@ static int stm32_adfsdm_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->iio_ch))
 		return PTR_ERR(priv->iio_ch);
 
-	priv->iio_cb = iio_channel_get_all_cb(&pdev->dev, &stm32_adfsdm_dummy_cb, NULL);
+	priv->iio_cb = iio_channel_get_all_cb(&pdev->dev, NULL, NULL);
 	if (IS_ERR(priv->iio_cb))
 		return PTR_ERR(priv->iio_cb);
 
 	component = devm_kzalloc(&pdev->dev, sizeof(*component), GFP_KERNEL);
 	if (!component)
 		return -ENOMEM;
-
-	ret = snd_soc_component_initialize(component,
-					   &stm32_adfsdm_soc_platform,
-					   &pdev->dev);
-	if (ret < 0)
-		return ret;
 #ifdef CONFIG_DEBUG_FS
 	component->debugfs_prefix = "pcm";
 #endif
 
-	ret = snd_soc_add_component(component, NULL, 0);
+	ret = snd_soc_add_component(&pdev->dev, component,
+				    &stm32_adfsdm_soc_platform, NULL, 0);
 	if (ret < 0)
 		dev_err(&pdev->dev, "%s: Failed to register PCM platform\n",
 			__func__);

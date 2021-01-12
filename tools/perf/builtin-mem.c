@@ -7,7 +7,6 @@
 #include "perf.h"
 
 #include <subcmd/parse-options.h>
-#include "util/auxtrace.h"
 #include "util/trace-event.h"
 #include "util/tool.h"
 #include "util/session.h"
@@ -39,16 +38,26 @@ static int parse_record_events(const struct option *opt,
 			       const char *str, int unset __maybe_unused)
 {
 	struct perf_mem *mem = *(struct perf_mem **)opt->value;
+	int j;
 
-	if (!strcmp(str, "list")) {
-		perf_mem_events__list();
-		exit(0);
-	}
-	if (perf_mem_events__parse(str))
+	if (strcmp(str, "list")) {
+		if (!perf_mem_events__parse(str)) {
+			mem->operation = 0;
+			return 0;
+		}
 		exit(-1);
+	}
 
-	mem->operation = 0;
-	return 0;
+	for (j = 0; j < PERF_MEM_EVENTS__MAX; j++) {
+		struct perf_mem_event *e = &perf_mem_events[j];
+
+		fprintf(stderr, "%-13s%-*s%s\n",
+			e->tag,
+			verbose > 0 ? 25 : 0,
+			verbose > 0 ? perf_mem_events__name(j) : "",
+			e->supported ? ": available" : "");
+	}
+	exit(0);
 }
 
 static const char * const __usage[] = {
@@ -65,7 +74,6 @@ static int __cmd_record(int argc, const char **argv, struct perf_mem *mem)
 	const char **rec_argv;
 	int ret;
 	bool all_user = false, all_kernel = false;
-	struct perf_mem_event *e;
 	struct option options[] = {
 	OPT_CALLBACK('e', "event", &mem, "event",
 		     "event selector. use 'perf mem record -e list' to list available events",
@@ -78,11 +86,6 @@ static int __cmd_record(int argc, const char **argv, struct perf_mem *mem)
 	OPT_END()
 	};
 
-	if (perf_mem_events__init()) {
-		pr_err("failed: memory events not supported\n");
-		return -1;
-	}
-
 	argc = parse_options(argc, argv, options, record_mem_usage,
 			     PARSE_OPT_KEEP_UNKNOWN);
 
@@ -93,30 +96,13 @@ static int __cmd_record(int argc, const char **argv, struct perf_mem *mem)
 
 	rec_argv[i++] = "record";
 
-	e = perf_mem_events__ptr(PERF_MEM_EVENTS__LOAD_STORE);
+	if (mem->operation & MEM_OPERATION_LOAD)
+		perf_mem_events[PERF_MEM_EVENTS__LOAD].record = true;
 
-	/*
-	 * The load and store operations are required, use the event
-	 * PERF_MEM_EVENTS__LOAD_STORE if it is supported.
-	 */
-	if (e->tag &&
-	    (mem->operation & MEM_OPERATION_LOAD) &&
-	    (mem->operation & MEM_OPERATION_STORE)) {
-		e->record = true;
-	} else {
-		if (mem->operation & MEM_OPERATION_LOAD) {
-			e = perf_mem_events__ptr(PERF_MEM_EVENTS__LOAD);
-			e->record = true;
-		}
+	if (mem->operation & MEM_OPERATION_STORE)
+		perf_mem_events[PERF_MEM_EVENTS__STORE].record = true;
 
-		if (mem->operation & MEM_OPERATION_STORE) {
-			e = perf_mem_events__ptr(PERF_MEM_EVENTS__STORE);
-			e->record = true;
-		}
-	}
-
-	e = perf_mem_events__ptr(PERF_MEM_EVENTS__LOAD);
-	if (e->record)
+	if (perf_mem_events[PERF_MEM_EVENTS__LOAD].record)
 		rec_argv[i++] = "-W";
 
 	rec_argv[i++] = "-d";
@@ -125,11 +111,10 @@ static int __cmd_record(int argc, const char **argv, struct perf_mem *mem)
 		rec_argv[i++] = "--phys-data";
 
 	for (j = 0; j < PERF_MEM_EVENTS__MAX; j++) {
-		e = perf_mem_events__ptr(j);
-		if (!e->record)
+		if (!perf_mem_events[j].record)
 			continue;
 
-		if (!e->supported) {
+		if (!perf_mem_events[j].supported) {
 			pr_err("failed: event '%s' not supported\n",
 			       perf_mem_events__name(j));
 			free(rec_argv);
@@ -138,7 +123,7 @@ static int __cmd_record(int argc, const char **argv, struct perf_mem *mem)
 
 		rec_argv[i++] = "-e";
 		rec_argv[i++] = perf_mem_events__name(j);
-	}
+	};
 
 	if (all_user)
 		rec_argv[i++] = "--all-user";
@@ -256,12 +241,6 @@ static int process_sample_event(struct perf_tool *tool,
 
 static int report_raw_events(struct perf_mem *mem)
 {
-	struct itrace_synth_opts itrace_synth_opts = {
-		.set = true,
-		.mem = true,	/* Only enable memory event */
-		.default_no_sample = true,
-	};
-
 	struct perf_data data = {
 		.path  = input_name,
 		.mode  = PERF_DATA_MODE_READ,
@@ -273,8 +252,6 @@ static int report_raw_events(struct perf_mem *mem)
 
 	if (IS_ERR(session))
 		return PTR_ERR(session);
-
-	session->itrace_synth_opts = &itrace_synth_opts;
 
 	if (mem->cpu_list) {
 		ret = perf_session__cpu_bitmap(session, mem->cpu_list,
@@ -298,35 +275,11 @@ out_delete:
 	perf_session__delete(session);
 	return ret;
 }
-static char *get_sort_order(struct perf_mem *mem)
-{
-	bool has_extra_options = mem->phys_addr ? true : false;
-	char sort[128];
-
-	/*
-	 * there is no weight (cost) associated with stores, so don't print
-	 * the column
-	 */
-	if (!(mem->operation & MEM_OPERATION_LOAD)) {
-		strcpy(sort, "--sort=mem,sym,dso,symbol_daddr,"
-			     "dso_daddr,tlb,locked");
-	} else if (has_extra_options) {
-		strcpy(sort, "--sort=local_weight,mem,sym,dso,symbol_daddr,"
-			     "dso_daddr,snoop,tlb,locked");
-	} else
-		return NULL;
-
-	if (mem->phys_addr)
-		strcat(sort, ",phys_daddr");
-
-	return strdup(sort);
-}
 
 static int report_events(int argc, const char **argv, struct perf_mem *mem)
 {
 	const char **rep_argv;
 	int ret, i = 0, j, rep_argc;
-	char *new_sort_order;
 
 	if (mem->dump_raw)
 		return report_raw_events(mem);
@@ -340,9 +293,20 @@ static int report_events(int argc, const char **argv, struct perf_mem *mem)
 	rep_argv[i++] = "--mem-mode";
 	rep_argv[i++] = "-n"; /* display number of samples */
 
-	new_sort_order = get_sort_order(mem);
-	if (new_sort_order)
-		rep_argv[i++] = new_sort_order;
+	/*
+	 * there is no weight (cost) associated with stores, so don't print
+	 * the column
+	 */
+	if (!(mem->operation & MEM_OPERATION_LOAD)) {
+		if (mem->phys_addr)
+			rep_argv[i++] = "--sort=mem,sym,dso,symbol_daddr,"
+					"dso_daddr,tlb,locked,phys_daddr";
+		else
+			rep_argv[i++] = "--sort=mem,sym,dso,symbol_daddr,"
+					"dso_daddr,tlb,locked";
+	} else if (mem->phys_addr)
+		rep_argv[i++] = "--sort=local_weight,mem,sym,dso,symbol_daddr,"
+				"dso_daddr,snoop,tlb,locked,phys_daddr";
 
 	for (j = 1; j < argc; j++, i++)
 		rep_argv[i] = argv[j];
@@ -432,12 +396,8 @@ int cmd_mem(int argc, const char **argv)
 			.comm		= perf_event__process_comm,
 			.lost		= perf_event__process_lost,
 			.fork		= perf_event__process_fork,
-			.attr		= perf_event__process_attr,
 			.build_id	= perf_event__process_build_id,
 			.namespaces	= perf_event__process_namespaces,
-			.auxtrace_info  = perf_event__process_auxtrace_info,
-			.auxtrace       = perf_event__process_auxtrace,
-			.auxtrace_error = perf_event__process_auxtrace_error,
 			.ordered_events	= true,
 		},
 		.input_name		 = "perf.data",
@@ -471,6 +431,11 @@ int cmd_mem(int argc, const char **argv)
 		NULL,
 		NULL
 	};
+
+	if (perf_mem_events__init()) {
+		pr_err("failed: memory events not supported\n");
+		return -1;
+	}
 
 	argc = parse_options_subcommand(argc, argv, mem_options, mem_subcommands,
 					mem_usage, PARSE_OPT_KEEP_UNKNOWN);

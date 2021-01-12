@@ -488,7 +488,7 @@ retry:
 		if (dax_is_conflict(entry))
 			goto fallback;
 		if (!xa_is_value(entry)) {
-			xas_set_err(xas, -EIO);
+			xas_set_err(xas, EIO);
 			goto out_unlock;
 		}
 
@@ -559,11 +559,8 @@ fallback:
 }
 
 /**
- * dax_layout_busy_page_range - find first pinned page in @mapping
+ * dax_layout_busy_page - find first pinned page in @mapping
  * @mapping: address space to scan for a page with ref count > 1
- * @start: Starting offset. Page containing 'start' is included.
- * @end: End offset. Page containing 'end' is included. If 'end' is LLONG_MAX,
- *       pages from 'start' till the end of file are included.
  *
  * DAX requires ZONE_DEVICE mapped pages. These pages are never
  * 'onlined' to the page allocator so they are considered idle when
@@ -576,15 +573,12 @@ fallback:
  * to be able to run unmap_mapping_range() and subsequently not race
  * mapping_mapped() becoming true.
  */
-struct page *dax_layout_busy_page_range(struct address_space *mapping,
-					loff_t start, loff_t end)
+struct page *dax_layout_busy_page(struct address_space *mapping)
 {
+	XA_STATE(xas, &mapping->i_pages, 0);
 	void *entry;
 	unsigned int scanned = 0;
 	struct page *page = NULL;
-	pgoff_t start_idx = start >> PAGE_SHIFT;
-	pgoff_t end_idx;
-	XA_STATE(xas, &mapping->i_pages, start_idx);
 
 	/*
 	 * In the 'limited' case get_user_pages() for dax is disabled.
@@ -595,11 +589,6 @@ struct page *dax_layout_busy_page_range(struct address_space *mapping,
 	if (!dax_mapping(mapping) || !mapping_mapped(mapping))
 		return NULL;
 
-	/* If end == LLONG_MAX, all pages from start to till end of file */
-	if (end == LLONG_MAX)
-		end_idx = ULONG_MAX;
-	else
-		end_idx = end >> PAGE_SHIFT;
 	/*
 	 * If we race get_user_pages_fast() here either we'll see the
 	 * elevated page count in the iteration and wait, or
@@ -607,15 +596,15 @@ struct page *dax_layout_busy_page_range(struct address_space *mapping,
 	 * against is no longer mapped in the page tables and bail to the
 	 * get_user_pages() slow path.  The slow path is protected by
 	 * pte_lock() and pmd_lock(). New references are not taken without
-	 * holding those locks, and unmap_mapping_pages() will not zero the
+	 * holding those locks, and unmap_mapping_range() will not zero the
 	 * pte or pmd without holding the respective lock, so we are
 	 * guaranteed to either see new references or prevent new
 	 * references from being established.
 	 */
-	unmap_mapping_pages(mapping, start_idx, end_idx - start_idx + 1, 0);
+	unmap_mapping_range(mapping, 0, 0, 0);
 
 	xas_lock_irq(&xas);
-	xas_for_each(&xas, entry, end_idx) {
+	xas_for_each(&xas, entry, ULONG_MAX) {
 		if (WARN_ON_ONCE(!xa_is_value(entry)))
 			continue;
 		if (unlikely(dax_is_locked(entry)))
@@ -635,12 +624,6 @@ struct page *dax_layout_busy_page_range(struct address_space *mapping,
 	}
 	xas_unlock_irq(&xas);
 	return page;
-}
-EXPORT_SYMBOL_GPL(dax_layout_busy_page_range);
-
-struct page *dax_layout_busy_page(struct address_space *mapping)
-{
-	return dax_layout_busy_page_range(mapping, 0, LLONG_MAX);
 }
 EXPORT_SYMBOL_GPL(dax_layout_busy_page);
 
@@ -697,20 +680,21 @@ int dax_invalidate_mapping_entry_sync(struct address_space *mapping,
 	return __dax_invalidate_entry(mapping, index, false);
 }
 
-static int copy_cow_page_dax(struct block_device *bdev, struct dax_device *dax_dev,
-			     sector_t sector, struct page *to, unsigned long vaddr)
+static int copy_user_dax(struct block_device *bdev, struct dax_device *dax_dev,
+		sector_t sector, size_t size, struct page *to,
+		unsigned long vaddr)
 {
 	void *vto, *kaddr;
 	pgoff_t pgoff;
 	long rc;
 	int id;
 
-	rc = bdev_dax_pgoff(bdev, sector, PAGE_SIZE, &pgoff);
+	rc = bdev_dax_pgoff(bdev, sector, size, &pgoff);
 	if (rc)
 		return rc;
 
 	id = dax_read_lock();
-	rc = dax_direct_access(dax_dev, pgoff, PHYS_PFN(PAGE_SIZE), &kaddr, NULL);
+	rc = dax_direct_access(dax_dev, pgoff, PHYS_PFN(size), &kaddr, NULL);
 	if (rc < 0) {
 		dax_read_unlock(id);
 		return rc;
@@ -810,11 +794,12 @@ static void dax_entry_mkclean(struct address_space *mapping, pgoff_t index,
 		address = pgoff_address(index, vma);
 
 		/*
-		 * Note because we provide range to follow_pte it will call
-		 * mmu_notifier_invalidate_range_start() on our behalf before
-		 * taking any lock.
+		 * Note because we provide range to follow_pte_pmd it will
+		 * call mmu_notifier_invalidate_range_start() on our behalf
+		 * before taking any lock.
 		 */
-		if (follow_pte(vma->vm_mm, address, &range, &ptep, &pmdp, &ptl))
+		if (follow_pte_pmd(vma->vm_mm, address, &range,
+				   &ptep, &pmdp, &ptl))
 			continue;
 
 		/*
@@ -1053,18 +1038,18 @@ static vm_fault_t dax_load_hole(struct xa_state *xas,
 	return ret;
 }
 
-s64 dax_iomap_zero(loff_t pos, u64 length, struct iomap *iomap)
+int dax_iomap_zero(loff_t pos, unsigned offset, unsigned size,
+		   struct iomap *iomap)
 {
 	sector_t sector = iomap_sector(iomap, pos & PAGE_MASK);
 	pgoff_t pgoff;
 	long rc, id;
 	void *kaddr;
 	bool page_aligned = false;
-	unsigned offset = offset_in_page(pos);
-	unsigned size = min_t(u64, PAGE_SIZE - offset, length);
+
 
 	if (IS_ALIGNED(sector << SECTOR_SHIFT, PAGE_SIZE) &&
-	    (size == PAGE_SIZE))
+	    IS_ALIGNED(size, PAGE_SIZE))
 		page_aligned = true;
 
 	rc = bdev_dax_pgoff(iomap->bdev, sector, PAGE_SIZE, &pgoff);
@@ -1074,7 +1059,8 @@ s64 dax_iomap_zero(loff_t pos, u64 length, struct iomap *iomap)
 	id = dax_read_lock();
 
 	if (page_aligned)
-		rc = dax_zero_page_range(iomap->dax_dev, pgoff, 1);
+		rc = dax_zero_page_range(iomap->dax_dev, pgoff,
+					 size >> PAGE_SHIFT);
 	else
 		rc = dax_direct_access(iomap->dax_dev, pgoff, 1, &kaddr, NULL);
 	if (rc < 0) {
@@ -1087,7 +1073,7 @@ s64 dax_iomap_zero(loff_t pos, u64 length, struct iomap *iomap)
 		dax_flush(iomap->dax_dev, kaddr + offset, size);
 	}
 	dax_read_unlock(id);
-	return size;
+	return 0;
 }
 
 static loff_t
@@ -1319,8 +1305,8 @@ static vm_fault_t dax_iomap_pte_fault(struct vm_fault *vmf, pfn_t *pfnp,
 			clear_user_highpage(vmf->cow_page, vaddr);
 			break;
 		case IOMAP_MAPPED:
-			error = copy_cow_page_dax(iomap.bdev, iomap.dax_dev,
-						  sector, vmf->cow_page, vaddr);
+			error = copy_user_dax(iomap.bdev, iomap.dax_dev,
+					sector, PAGE_SIZE, vmf->cow_page, vaddr);
 			break;
 		default:
 			WARN_ON_ONCE(1);
@@ -1382,7 +1368,7 @@ static vm_fault_t dax_iomap_pte_fault(struct vm_fault *vmf, pfn_t *pfnp,
 			ret = dax_load_hole(&xas, mapping, &entry, vmf);
 			goto finish_iomap;
 		}
-		fallthrough;
+		/*FALLTHRU*/
 	default:
 		WARN_ON_ONCE(1);
 		error = -EIO;

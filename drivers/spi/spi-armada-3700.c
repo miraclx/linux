@@ -276,11 +276,11 @@ static int a3700_spi_fifo_flush(struct a3700_spi *a3700_spi)
 	return -ETIMEDOUT;
 }
 
-static void a3700_spi_init(struct a3700_spi *a3700_spi)
+static int a3700_spi_init(struct a3700_spi *a3700_spi)
 {
 	struct spi_master *master = a3700_spi->master;
 	u32 val;
-	int i;
+	int i, ret = 0;
 
 	/* Reset SPI unit */
 	val = spireg_read(a3700_spi, A3700_SPI_IF_CFG_REG);
@@ -311,6 +311,8 @@ static void a3700_spi_init(struct a3700_spi *a3700_spi)
 	/* Mask the interrupts and clear cause bits */
 	spireg_write(a3700_spi, A3700_SPI_INT_MASK_REG, 0);
 	spireg_write(a3700_spi, A3700_SPI_INT_STAT_REG, ~0U);
+
+	return ret;
 }
 
 static irqreturn_t a3700_spi_interrupt(int irq, void *dev_id)
@@ -848,6 +850,7 @@ static int a3700_spi_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, master);
 
 	spi = spi_master_get_devdata(master);
+	memset(spi, 0, sizeof(struct a3700_spi));
 
 	spi->master = master;
 
@@ -883,7 +886,9 @@ static int a3700_spi_probe(struct platform_device *pdev)
 	master->min_speed_hz = DIV_ROUND_UP(clk_get_rate(spi->clk),
 						A3700_SPI_MAX_PRESCALE);
 
-	a3700_spi_init(spi);
+	ret = a3700_spi_init(spi);
+	if (ret)
+		goto error_clk;
 
 	ret = devm_request_irq(dev, spi->irq, a3700_spi_interrupt, 0,
 			       dev_name(dev), master);

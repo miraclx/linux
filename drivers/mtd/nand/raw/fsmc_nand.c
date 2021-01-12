@@ -26,6 +26,7 @@
 #include <linux/types.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/rawnand.h>
+#include <linux/mtd/nand_ecc.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
 #include <linux/mtd/partitions.h>
@@ -326,8 +327,8 @@ static int fsmc_calc_timings(struct fsmc_nand_data *host,
 	return 0;
 }
 
-static int fsmc_setup_interface(struct nand_chip *nand, int csline,
-				const struct nand_interface_config *conf)
+static int fsmc_setup_data_interface(struct nand_chip *nand, int csline,
+				     const struct nand_data_interface *conf)
 {
 	struct fsmc_nand_data *host = nand_to_fsmc(nand);
 	struct fsmc_nand_timings tims;
@@ -607,9 +608,6 @@ static int fsmc_exec_op(struct nand_chip *chip, const struct nand_operation *op,
 	unsigned int op_id;
 	int i;
 
-	if (check_only)
-		return 0;
-
 	pr_debug("Executing operation [%d instructions]:\n", op->ninstrs);
 
 	for (op_id = 0; op_id < op->ninstrs; op_id++) {
@@ -693,7 +691,7 @@ static int fsmc_read_page_hwecc(struct nand_chip *chip, u8 *buf,
 	for (i = 0, s = 0; s < eccsteps; s++, i += eccbytes, p += eccsize) {
 		nand_read_page_op(chip, page, s * eccsize, NULL, 0);
 		chip->ecc.hwctl(chip, NAND_ECC_READ);
-		ret = nand_read_data_op(chip, p, eccsize, false, false);
+		ret = nand_read_data_op(chip, p, eccsize, false);
 		if (ret)
 			return ret;
 
@@ -811,12 +809,11 @@ static int fsmc_bch8_correct_data(struct nand_chip *chip, u8 *dat,
 
 	i = 0;
 	while (num_err--) {
-		err_idx[i] ^= 3;
+		change_bit(0, (unsigned long *)&err_idx[i]);
+		change_bit(1, (unsigned long *)&err_idx[i]);
 
 		if (err_idx[i] < chip->ecc.size * 8) {
-			int err = err_idx[i];
-
-			dat[err >> 3] ^= BIT(err & 7);
+			change_bit(err_idx[i], (unsigned long *)dat);
 			i++;
 		}
 	}
@@ -879,20 +876,6 @@ static int fsmc_nand_attach_chip(struct nand_chip *nand)
 	struct mtd_info *mtd = nand_to_mtd(nand);
 	struct fsmc_nand_data *host = nand_to_fsmc(nand);
 
-	if (nand->ecc.engine_type == NAND_ECC_ENGINE_TYPE_INVALID)
-		nand->ecc.engine_type = NAND_ECC_ENGINE_TYPE_ON_HOST;
-
-	if (!nand->ecc.size)
-		nand->ecc.size = 512;
-
-	if (AMBA_REV_BITS(host->pid) >= 8) {
-		nand->ecc.read_page = fsmc_read_page_hwecc;
-		nand->ecc.calculate = fsmc_read_hwecc_ecc4;
-		nand->ecc.correct = fsmc_bch8_correct_data;
-		nand->ecc.bytes = 13;
-		nand->ecc.strength = 8;
-	}
-
 	if (AMBA_REV_BITS(host->pid) >= 8) {
 		switch (mtd->oobsize) {
 		case 16:
@@ -913,25 +896,24 @@ static int fsmc_nand_attach_chip(struct nand_chip *nand)
 		return 0;
 	}
 
-	switch (nand->ecc.engine_type) {
-	case NAND_ECC_ENGINE_TYPE_ON_HOST:
+	switch (nand->ecc.mode) {
+	case NAND_ECC_HW:
 		dev_info(host->dev, "Using 1-bit HW ECC scheme\n");
 		nand->ecc.calculate = fsmc_read_hwecc_ecc1;
-		nand->ecc.correct = rawnand_sw_hamming_correct;
-		nand->ecc.hwctl = fsmc_enable_hwecc;
+		nand->ecc.correct = nand_correct_data;
 		nand->ecc.bytes = 3;
 		nand->ecc.strength = 1;
 		nand->ecc.options |= NAND_ECC_SOFT_HAMMING_SM_ORDER;
 		break;
 
-	case NAND_ECC_ENGINE_TYPE_SOFT:
-		if (nand->ecc.algo == NAND_ECC_ALGO_BCH) {
+	case NAND_ECC_SOFT:
+		if (nand->ecc.algo == NAND_ECC_BCH) {
 			dev_info(host->dev,
 				 "Using 4-bit SW BCH ECC scheme\n");
 			break;
 		}
 
-	case NAND_ECC_ENGINE_TYPE_ON_DIE:
+	case NAND_ECC_ON_DIE:
 		break;
 
 	default:
@@ -941,9 +923,9 @@ static int fsmc_nand_attach_chip(struct nand_chip *nand)
 
 	/*
 	 * Don't set layout for BCH4 SW ECC. This will be
-	 * generated later during BCH initialization.
+	 * generated later in nand_bch_init() later.
 	 */
-	if (nand->ecc.engine_type == NAND_ECC_ENGINE_TYPE_ON_HOST) {
+	if (nand->ecc.mode == NAND_ECC_HW) {
 		switch (mtd->oobsize) {
 		case 16:
 		case 64:
@@ -965,7 +947,7 @@ static int fsmc_nand_attach_chip(struct nand_chip *nand)
 static const struct nand_controller_ops fsmc_nand_controller_ops = {
 	.attach_chip = fsmc_nand_attach_chip,
 	.exec_op = fsmc_exec_op,
-	.setup_interface = fsmc_setup_interface,
+	.setup_data_interface = fsmc_setup_data_interface,
 };
 
 /**
@@ -1069,6 +1051,13 @@ static int __init fsmc_nand_probe(struct platform_device *pdev)
 
 	mtd->dev.parent = &pdev->dev;
 
+	/*
+	 * Setup default ECC mode. nand_dt_init() called from nand_scan_ident()
+	 * can overwrite this value if the DT provides a different value.
+	 */
+	nand->ecc.mode = NAND_ECC_HW;
+	nand->ecc.hwctl = fsmc_enable_hwecc;
+	nand->ecc.size = 512;
 	nand->badblockbits = 7;
 
 	if (host->mode == USE_DMA_ACCESS) {
@@ -1089,6 +1078,14 @@ static int __init fsmc_nand_probe(struct platform_device *pdev)
 	if (host->dev_timings) {
 		fsmc_nand_setup(host, host->dev_timings);
 		nand->options |= NAND_KEEP_TIMINGS;
+	}
+
+	if (AMBA_REV_BITS(host->pid) >= 8) {
+		nand->ecc.read_page = fsmc_read_page_hwecc;
+		nand->ecc.calculate = fsmc_read_hwecc_ecc4;
+		nand->ecc.correct = fsmc_bch8_correct_data;
+		nand->ecc.bytes = 13;
+		nand->ecc.strength = 8;
 	}
 
 	nand_controller_init(&host->base);
@@ -1135,12 +1132,7 @@ static int fsmc_nand_remove(struct platform_device *pdev)
 	struct fsmc_nand_data *host = platform_get_drvdata(pdev);
 
 	if (host) {
-		struct nand_chip *chip = &host->nand;
-		int ret;
-
-		ret = mtd_device_unregister(nand_to_mtd(chip));
-		WARN_ON(ret);
-		nand_cleanup(chip);
+		nand_release(&host->nand);
 		fsmc_nand_disable(host);
 
 		if (host->mode == USE_DMA_ACCESS) {

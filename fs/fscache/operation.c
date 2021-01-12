@@ -4,7 +4,7 @@
  * Copyright (C) 2008 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
  *
- * See Documentation/filesystems/caching/operations.rst
+ * See Documentation/filesystems/caching/operations.txt
  */
 
 #define FSCACHE_DEBUG_LEVEL OPERATION

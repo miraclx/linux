@@ -27,6 +27,13 @@
 
 static int cdns3_idle_init(struct cdns3 *cdns);
 
+static inline
+struct cdns3_role_driver *cdns3_get_current_role_driver(struct cdns3 *cdns)
+{
+	WARN_ON(!cdns->roles[cdns->role]);
+	return cdns->roles[cdns->role];
+}
+
 static int cdns3_role_start(struct cdns3 *cdns, enum usb_role role)
 {
 	int ret;
@@ -75,6 +82,8 @@ static void cdns3_exit_roles(struct cdns3 *cdns)
 	cdns3_drd_exit(cdns);
 }
 
+static enum usb_role cdsn3_hw_role_state_machine(struct cdns3 *cdns);
+
 /**
  * cdns3_core_init_role - initialize role of operation
  * @cdns: Pointer to cdns3 structure
@@ -86,7 +95,7 @@ static int cdns3_core_init_role(struct cdns3 *cdns)
 	struct device *dev = cdns->dev;
 	enum usb_dr_mode best_dr_mode;
 	enum usb_dr_mode dr_mode;
-	int ret;
+	int ret = 0;
 
 	dr_mode = usb_get_dr_mode(dev);
 	cdns->role = USB_ROLE_NONE;
@@ -177,31 +186,25 @@ static int cdns3_core_init_role(struct cdns3 *cdns)
 		goto err;
 	}
 
-	return 0;
+	return ret;
 err:
 	cdns3_exit_roles(cdns);
 	return ret;
 }
 
 /**
- * cdns3_hw_role_state_machine  - role switch state machine based on hw events.
+ * cdsn3_hw_role_state_machine  - role switch state machine based on hw events.
  * @cdns: Pointer to controller structure.
  *
  * Returns next role to be entered based on hw events.
  */
-static enum usb_role cdns3_hw_role_state_machine(struct cdns3 *cdns)
+static enum usb_role cdsn3_hw_role_state_machine(struct cdns3 *cdns)
 {
-	enum usb_role role = USB_ROLE_NONE;
+	enum usb_role role;
 	int id, vbus;
 
-	if (cdns->dr_mode != USB_DR_MODE_OTG) {
-		if (cdns3_is_host(cdns))
-			role = USB_ROLE_HOST;
-		if (cdns3_is_device(cdns))
-			role = USB_ROLE_DEVICE;
-
-		return role;
-	}
+	if (cdns->dr_mode != USB_DR_MODE_OTG)
+		goto not_otg;
 
 	id = cdns3_get_id(cdns);
 	vbus = cdns3_get_vbus(cdns);
@@ -236,6 +239,14 @@ static enum usb_role cdns3_hw_role_state_machine(struct cdns3 *cdns)
 	}
 
 	dev_dbg(cdns->dev, "role %d -> %d\n", cdns->role, role);
+
+	return role;
+
+not_otg:
+	if (cdns3_is_host(cdns))
+		role = USB_ROLE_HOST;
+	if (cdns3_is_device(cdns))
+		role = USB_ROLE_DEVICE;
 
 	return role;
 }
@@ -273,21 +284,21 @@ static int cdns3_idle_init(struct cdns3 *cdns)
 
 /**
  * cdns3_hw_role_switch - switch roles based on HW state
- * @cdns: controller
+ * @cdns3: controller
  */
 int cdns3_hw_role_switch(struct cdns3 *cdns)
 {
 	enum usb_role real_role, current_role;
 	int ret = 0;
 
-	/* Depends on role switch class */
-	if (cdns->role_sw)
+	/* Do nothing if role based on syfs. */
+	if (cdns->role_override)
 		return 0;
 
 	pm_runtime_get_sync(cdns->dev);
 
 	current_role = cdns->role;
-	real_role = cdns3_hw_role_state_machine(cdns);
+	real_role = cdsn3_hw_role_state_machine(cdns);
 
 	/* Do nothing if nothing changed */
 	if (current_role == real_role)
@@ -315,7 +326,7 @@ exit:
 /**
  * cdsn3_role_get - get current role of controller.
  *
- * @sw: pointer to USB role switch structure
+ * @dev: Pointer to device structure
  *
  * Returns role
  */
@@ -329,8 +340,8 @@ static enum usb_role cdns3_role_get(struct usb_role_switch *sw)
 /**
  * cdns3_role_set - set current role of controller.
  *
- * @sw: pointer to USB role switch structure
- * @role: the previous role
+ * @dev: pointer to device object
+ * @role - the previous role
  * Handles below events:
  * - Role switch for dual-role devices
  * - USB_ROLE_GADGET <--> USB_ROLE_NONE for peripheral-only devices
@@ -342,6 +353,39 @@ static int cdns3_role_set(struct usb_role_switch *sw, enum usb_role role)
 
 	pm_runtime_get_sync(cdns->dev);
 
+	/*
+	 * FIXME: switch role framework should be extended to meet
+	 * requirements. Driver assumes that role can be controlled
+	 * by SW or HW. Temporary workaround is to use USB_ROLE_NONE to
+	 * switch from SW to HW control.
+	 *
+	 * For dr_mode == USB_DR_MODE_OTG:
+	 *	if user sets USB_ROLE_HOST or USB_ROLE_DEVICE then driver
+	 *	sets role_override flag and forces that role.
+	 *	if user sets USB_ROLE_NONE, driver clears role_override and lets
+	 *	HW state machine take over.
+	 *
+	 * For dr_mode != USB_DR_MODE_OTG:
+	 *	Assumptions:
+	 *	1. Restricted user control between NONE and dr_mode.
+	 *	2. Driver doesn't need to rely on role_override flag.
+	 *	3. Driver needs to ensure that HW state machine is never called
+	 *	   if dr_mode != USB_DR_MODE_OTG.
+	 */
+	if (role == USB_ROLE_NONE)
+		cdns->role_override = 0;
+	else
+		cdns->role_override = 1;
+
+	/*
+	 * HW state might have changed so driver need to trigger
+	 * HW state machine if dr_mode == USB_DR_MODE_OTG.
+	 */
+	if (!cdns->role_override && cdns->dr_mode == USB_DR_MODE_OTG) {
+		cdns3_hw_role_switch(cdns);
+		goto pm_put;
+	}
+
 	if (cdns->role == role)
 		goto pm_put;
 
@@ -351,6 +395,7 @@ static int cdns3_role_set(struct usb_role_switch *sw, enum usb_role role)
 		case USB_ROLE_HOST:
 			break;
 		default:
+			ret = -EPERM;
 			goto pm_put;
 		}
 	}
@@ -361,62 +406,21 @@ static int cdns3_role_set(struct usb_role_switch *sw, enum usb_role role)
 		case USB_ROLE_DEVICE:
 			break;
 		default:
+			ret = -EPERM;
 			goto pm_put;
 		}
 	}
 
 	cdns3_role_stop(cdns);
 	ret = cdns3_role_start(cdns, role);
-	if (ret)
+	if (ret) {
 		dev_err(cdns->dev, "set role %d has failed\n", role);
+		ret = -EPERM;
+	}
 
 pm_put:
 	pm_runtime_put_sync(cdns->dev);
 	return ret;
-}
-
-static int set_phy_power_on(struct cdns3 *cdns)
-{
-	int ret;
-
-	ret = phy_power_on(cdns->usb2_phy);
-	if (ret)
-		return ret;
-
-	ret = phy_power_on(cdns->usb3_phy);
-	if (ret)
-		phy_power_off(cdns->usb2_phy);
-
-	return ret;
-}
-
-static void set_phy_power_off(struct cdns3 *cdns)
-{
-	phy_power_off(cdns->usb3_phy);
-	phy_power_off(cdns->usb2_phy);
-}
-
-/**
- * cdns3_wakeup_irq - interrupt handler for wakeup events
- * @irq: irq number for cdns3 core device
- * @data: structure of cdns3
- *
- * Returns IRQ_HANDLED or IRQ_NONE
- */
-static irqreturn_t cdns3_wakeup_irq(int irq, void *data)
-{
-	struct cdns3 *cdns = data;
-
-	if (cdns->in_lpm) {
-		disable_irq_nosync(irq);
-		cdns->wakeup_pending = true;
-		if ((cdns->role == USB_ROLE_HOST) && cdns->host_dev)
-			pm_request_resume(&cdns->host_dev->dev);
-
-		return IRQ_HANDLED;
-	}
-
-	return IRQ_NONE;
 }
 
 /**
@@ -427,6 +431,7 @@ static irqreturn_t cdns3_wakeup_irq(int irq, void *data)
  */
 static int cdns3_probe(struct platform_device *pdev)
 {
+	struct usb_role_switch_desc sw_desc = { };
 	struct device *dev = &pdev->dev;
 	struct resource	*res;
 	struct cdns3 *cdns;
@@ -436,7 +441,7 @@ static int cdns3_probe(struct platform_device *pdev)
 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 	if (ret) {
 		dev_err(dev, "error setting dma mask: %d\n", ret);
-		return ret;
+		return -ENODEV;
 	}
 
 	cdns = devm_kzalloc(dev, sizeof(*cdns), GFP_KERNEL);
@@ -444,7 +449,6 @@ static int cdns3_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	cdns->dev = dev;
-	cdns->pdata = dev_get_platdata(dev);
 
 	platform_set_drvdata(pdev, cdns);
 
@@ -465,17 +469,26 @@ static int cdns3_probe(struct platform_device *pdev)
 	cdns->xhci_res[1] = *res;
 
 	cdns->dev_irq = platform_get_irq_byname(pdev, "peripheral");
-	if (cdns->dev_irq < 0)
+	if (cdns->dev_irq == -EPROBE_DEFER)
 		return cdns->dev_irq;
 
-	regs = devm_platform_ioremap_resource_byname(pdev, "dev");
+	if (cdns->dev_irq < 0)
+		dev_err(dev, "couldn't get peripheral irq\n");
+
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dev");
+	regs = devm_ioremap_resource(dev, res);
 	if (IS_ERR(regs))
 		return PTR_ERR(regs);
 	cdns->dev_regs	= regs;
 
 	cdns->otg_irq = platform_get_irq_byname(pdev, "otg");
-	if (cdns->otg_irq < 0)
+	if (cdns->otg_irq == -EPROBE_DEFER)
 		return cdns->otg_irq;
+
+	if (cdns->otg_irq < 0) {
+		dev_err(dev, "couldn't get otg irq\n");
+		return cdns->otg_irq;
+	}
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "otg");
 	if (!res) {
@@ -483,20 +496,7 @@ static int cdns3_probe(struct platform_device *pdev)
 		return -ENXIO;
 	}
 
-	cdns->phyrst_a_enable = device_property_read_bool(dev, "cdns,phyrst-a-enable");
-
 	cdns->otg_res = *res;
-
-	cdns->wakeup_irq = platform_get_irq_byname_optional(pdev, "wakeup");
-	if (cdns->wakeup_irq == -EPROBE_DEFER)
-		return cdns->wakeup_irq;
-	else if (cdns->wakeup_irq == 0)
-		return -EINVAL;
-
-	if (cdns->wakeup_irq < 0) {
-		dev_dbg(dev, "couldn't get wakeup irq\n");
-		cdns->wakeup_irq = 0x0;
-	}
 
 	mutex_init(&cdns->mutex);
 
@@ -516,53 +516,37 @@ static int cdns3_probe(struct platform_device *pdev)
 	if (ret)
 		goto err1;
 
-	ret = set_phy_power_on(cdns);
+	ret = phy_power_on(cdns->usb2_phy);
 	if (ret)
 		goto err2;
 
-	if (device_property_read_bool(dev, "usb-role-switch")) {
-		struct usb_role_switch_desc sw_desc = { };
+	ret = phy_power_on(cdns->usb3_phy);
+	if (ret)
+		goto err3;
 
-		sw_desc.set = cdns3_role_set;
-		sw_desc.get = cdns3_role_get;
-		sw_desc.allow_userspace_control = true;
-		sw_desc.driver_data = cdns;
-		sw_desc.fwnode = dev->fwnode;
+	sw_desc.set = cdns3_role_set;
+	sw_desc.get = cdns3_role_get;
+	sw_desc.allow_userspace_control = true;
+	sw_desc.driver_data = cdns;
 
-		cdns->role_sw = usb_role_switch_register(dev, &sw_desc);
-		if (IS_ERR(cdns->role_sw)) {
-			ret = PTR_ERR(cdns->role_sw);
-			dev_warn(dev, "Unable to register Role Switch\n");
-			goto err3;
-		}
-	}
-
-	if (cdns->wakeup_irq) {
-		ret = devm_request_irq(cdns->dev, cdns->wakeup_irq,
-						cdns3_wakeup_irq,
-						IRQF_SHARED,
-						dev_name(cdns->dev), cdns);
-
-		if (ret) {
-			dev_err(cdns->dev, "couldn't register wakeup irq handler\n");
-			goto err4;
-		}
+	cdns->role_sw = usb_role_switch_register(dev, &sw_desc);
+	if (IS_ERR(cdns->role_sw)) {
+		ret = PTR_ERR(cdns->role_sw);
+		dev_warn(dev, "Unable to register Role Switch\n");
+		goto err4;
 	}
 
 	ret = cdns3_drd_init(cdns);
 	if (ret)
-		goto err4;
+		goto err5;
 
 	ret = cdns3_core_init_role(cdns);
 	if (ret)
-		goto err4;
+		goto err5;
 
-	spin_lock_init(&cdns->lock);
 	device_set_wakeup_capable(dev, true);
 	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
-	if (!(cdns->pdata && (cdns->pdata->quirks & CDNS3_DEFAULT_PM_RUNTIME_ALLOW)))
-		pm_runtime_forbid(dev);
 
 	/*
 	 * The controller needs less time between bus and controller suspend,
@@ -575,12 +559,14 @@ static int cdns3_probe(struct platform_device *pdev)
 	dev_dbg(dev, "Cadence USB3 core: probe succeed\n");
 
 	return 0;
-err4:
+err5:
 	cdns3_drd_exit(cdns);
-	if (cdns->role_sw)
-		usb_role_switch_unregister(cdns->role_sw);
+	usb_role_switch_unregister(cdns->role_sw);
+err4:
+	phy_power_off(cdns->usb3_phy);
+
 err3:
-	set_phy_power_off(cdns);
+	phy_power_off(cdns->usb2_phy);
 err2:
 	phy_exit(cdns->usb3_phy);
 err1:
@@ -604,89 +590,13 @@ static int cdns3_remove(struct platform_device *pdev)
 	pm_runtime_put_noidle(&pdev->dev);
 	cdns3_exit_roles(cdns);
 	usb_role_switch_unregister(cdns->role_sw);
-	set_phy_power_off(cdns);
+	phy_power_off(cdns->usb2_phy);
+	phy_power_off(cdns->usb3_phy);
 	phy_exit(cdns->usb2_phy);
 	phy_exit(cdns->usb3_phy);
 	return 0;
 }
 
-#ifdef CONFIG_PM
-
-static int cdns3_set_platform_suspend(struct device *dev,
-		bool suspend, bool wakeup)
-{
-	struct cdns3 *cdns = dev_get_drvdata(dev);
-	int ret = 0;
-
-	if (cdns->pdata && cdns->pdata->platform_suspend)
-		ret = cdns->pdata->platform_suspend(dev, suspend, wakeup);
-
-	return ret;
-}
-
-static int cdns3_controller_suspend(struct device *dev, pm_message_t msg)
-{
-	struct cdns3 *cdns = dev_get_drvdata(dev);
-	bool wakeup;
-	unsigned long flags;
-
-	if (cdns->in_lpm)
-		return 0;
-
-	if (PMSG_IS_AUTO(msg))
-		wakeup = true;
-	else
-		wakeup = device_may_wakeup(dev);
-
-	cdns3_set_platform_suspend(cdns->dev, true, wakeup);
-	set_phy_power_off(cdns);
-	spin_lock_irqsave(&cdns->lock, flags);
-	cdns->in_lpm = true;
-	spin_unlock_irqrestore(&cdns->lock, flags);
-	dev_dbg(cdns->dev, "%s ends\n", __func__);
-
-	return 0;
-}
-
-static int cdns3_controller_resume(struct device *dev, pm_message_t msg)
-{
-	struct cdns3 *cdns = dev_get_drvdata(dev);
-	int ret;
-	unsigned long flags;
-
-	if (!cdns->in_lpm)
-		return 0;
-
-	ret = set_phy_power_on(cdns);
-	if (ret)
-		return ret;
-
-	cdns3_set_platform_suspend(cdns->dev, false, false);
-
-	spin_lock_irqsave(&cdns->lock, flags);
-	if (cdns->roles[cdns->role]->resume && !PMSG_IS_AUTO(msg))
-		cdns->roles[cdns->role]->resume(cdns, false);
-
-	cdns->in_lpm = false;
-	spin_unlock_irqrestore(&cdns->lock, flags);
-	if (cdns->wakeup_pending) {
-		cdns->wakeup_pending = false;
-		enable_irq(cdns->wakeup_irq);
-	}
-	dev_dbg(cdns->dev, "%s ends\n", __func__);
-
-	return ret;
-}
-
-static int cdns3_runtime_suspend(struct device *dev)
-{
-	return cdns3_controller_suspend(dev, PMSG_AUTO_SUSPEND);
-}
-
-static int cdns3_runtime_resume(struct device *dev)
-{
-	return cdns3_controller_resume(dev, PMSG_AUTO_RESUME);
-}
 #ifdef CONFIG_PM_SLEEP
 
 static int cdns3_suspend(struct device *dev)
@@ -694,38 +604,45 @@ static int cdns3_suspend(struct device *dev)
 	struct cdns3 *cdns = dev_get_drvdata(dev);
 	unsigned long flags;
 
+	if (cdns->role == USB_ROLE_HOST)
+		return 0;
+
 	if (pm_runtime_status_suspended(dev))
 		pm_runtime_resume(dev);
 
 	if (cdns->roles[cdns->role]->suspend) {
-		spin_lock_irqsave(&cdns->lock, flags);
+		spin_lock_irqsave(&cdns->gadget_dev->lock, flags);
 		cdns->roles[cdns->role]->suspend(cdns, false);
-		spin_unlock_irqrestore(&cdns->lock, flags);
+		spin_unlock_irqrestore(&cdns->gadget_dev->lock, flags);
 	}
 
-	return cdns3_controller_suspend(dev, PMSG_SUSPEND);
+	return 0;
 }
 
 static int cdns3_resume(struct device *dev)
 {
-	int ret;
+	struct cdns3 *cdns = dev_get_drvdata(dev);
+	unsigned long flags;
 
-	ret = cdns3_controller_resume(dev, PMSG_RESUME);
-	if (ret)
-		return ret;
+	if (cdns->role == USB_ROLE_HOST)
+		return 0;
+
+	if (cdns->roles[cdns->role]->resume) {
+		spin_lock_irqsave(&cdns->gadget_dev->lock, flags);
+		cdns->roles[cdns->role]->resume(cdns, false);
+		spin_unlock_irqrestore(&cdns->gadget_dev->lock, flags);
+	}
 
 	pm_runtime_disable(dev);
 	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
 
-	return ret;
+	return 0;
 }
-#endif /* CONFIG_PM_SLEEP */
-#endif /* CONFIG_PM */
+#endif
 
 static const struct dev_pm_ops cdns3_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(cdns3_suspend, cdns3_resume)
-	SET_RUNTIME_PM_OPS(cdns3_runtime_suspend, cdns3_runtime_resume, NULL)
 };
 
 #ifdef CONFIG_OF

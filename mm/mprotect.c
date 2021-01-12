@@ -28,7 +28,7 @@
 #include <linux/ksm.h>
 #include <linux/uaccess.h>
 #include <linux/mm_inline.h>
-#include <linux/pgtable.h>
+#include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
 #include <asm/tlbflush.h>
@@ -49,7 +49,7 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 	bool uffd_wp_resolve = cp_flags & MM_CP_UFFD_WP_RESOLVE;
 
 	/*
-	 * Can be called with only the mmap_lock for reading by
+	 * Can be called with only the mmap_sem for reading by
 	 * prot_numa so we must check the pmd isn't constantly
 	 * changing from under us from pmd_none to pmd_trans_huge
 	 * and/or the other way around.
@@ -59,7 +59,7 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 
 	/*
 	 * The pmd points to a regular pte so the pmd can't change
-	 * from under us even if the mmap_lock is only hold for
+	 * from under us even if the mmap_sem is only hold for
 	 * reading.
 	 */
 	pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
@@ -228,7 +228,7 @@ static inline unsigned long change_pmd_range(struct vm_area_struct *vma,
 		next = pmd_addr_end(addr, end);
 
 		/*
-		 * Automatic NUMA balancing walks the tables with mmap_lock
+		 * Automatic NUMA balancing walks the tables with mmap_sem
 		 * held for read. It's possible a parallel update to occur
 		 * between pmd_trans_huge() and a pmd_none_or_clear_bad()
 		 * check leading to a false positive and clearing.
@@ -477,7 +477,7 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 
 success:
 	/*
-	 * vm_flags and vm_page_prot are protected by the mmap_lock
+	 * vm_flags and vm_page_prot are protected by the mmap_sem
 	 * held in write mode.
 	 */
 	vma->vm_flags = newflags;
@@ -538,7 +538,7 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 
 	reqprot = prot;
 
-	if (mmap_write_lock_killable(current->mm))
+	if (down_write_killable(&current->mm->mmap_sem))
 		return -EINTR;
 
 	/*
@@ -603,12 +603,6 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 			goto out;
 		}
 
-		/* Allow architectures to sanity-check the new flags */
-		if (!arch_validate_flags(newflags)) {
-			error = -EINVAL;
-			goto out;
-		}
-
 		error = security_file_mprotect(vma, reqprot, prot);
 		if (error)
 			goto out;
@@ -616,16 +610,9 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 		tmp = vma->vm_end;
 		if (tmp > end)
 			tmp = end;
-
-		if (vma->vm_ops && vma->vm_ops->mprotect)
-			error = vma->vm_ops->mprotect(vma, nstart, tmp, newflags);
-		if (error)
-			goto out;
-
 		error = mprotect_fixup(vma, &prev, nstart, tmp, newflags);
 		if (error)
 			goto out;
-
 		nstart = tmp;
 
 		if (nstart < prev->vm_end)
@@ -641,7 +628,7 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 		prot = reqprot;
 	}
 out:
-	mmap_write_unlock(current->mm);
+	up_write(&current->mm->mmap_sem);
 	return error;
 }
 
@@ -671,7 +658,7 @@ SYSCALL_DEFINE2(pkey_alloc, unsigned long, flags, unsigned long, init_val)
 	if (init_val & ~PKEY_ACCESS_MASK)
 		return -EINVAL;
 
-	mmap_write_lock(current->mm);
+	down_write(&current->mm->mmap_sem);
 	pkey = mm_pkey_alloc(current->mm);
 
 	ret = -ENOSPC;
@@ -685,7 +672,7 @@ SYSCALL_DEFINE2(pkey_alloc, unsigned long, flags, unsigned long, init_val)
 	}
 	ret = pkey;
 out:
-	mmap_write_unlock(current->mm);
+	up_write(&current->mm->mmap_sem);
 	return ret;
 }
 
@@ -693,9 +680,9 @@ SYSCALL_DEFINE1(pkey_free, int, pkey)
 {
 	int ret;
 
-	mmap_write_lock(current->mm);
+	down_write(&current->mm->mmap_sem);
 	ret = mm_pkey_free(current->mm, pkey);
-	mmap_write_unlock(current->mm);
+	up_write(&current->mm->mmap_sem);
 
 	/*
 	 * We could provie warnings or errors if any VMA still

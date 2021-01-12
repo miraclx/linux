@@ -261,7 +261,8 @@ hfcsusb_ph_info(struct hfcsusb *hw)
 		phi->bch[i].Flags = hw->bch[i].Flags;
 	}
 	_queue_data(&dch->dev.D, MPH_INFORMATION_IND, MISDN_ID_ANY,
-		    struct_size(phi, bch, dch->dev.nrbchan), phi, GFP_ATOMIC);
+		    sizeof(struct ph_info_dch) + dch->dev.nrbchan *
+		    sizeof(struct ph_info_ch), phi, GFP_ATOMIC);
 	kfree(phi);
 }
 
@@ -695,7 +696,7 @@ hfcsusb_setup_bch(struct bchannel *bch, int protocol)
 	switch (protocol) {
 	case (-1):	/* used for init */
 		bch->state = -1;
-		fallthrough;
+		/* fall through */
 	case (ISDN_P_NONE):
 		if (bch->state == ISDN_P_NONE)
 			return 0; /* already in idle state */

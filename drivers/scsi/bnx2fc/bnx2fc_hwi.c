@@ -485,7 +485,7 @@ int bnx2fc_send_session_disable_req(struct fcoe_port *port,
 /**
  * bnx2fc_send_session_destroy_req - initiates FCoE Session destroy
  *
- * @hba:		adapter structure pointer
+ * @port:		port structure pointer
  * @tgt:		bnx2fc_rport structure pointer
  */
 int bnx2fc_send_session_destroy_req(struct bnx2fc_hba *hba,
@@ -635,6 +635,7 @@ static void bnx2fc_process_unsol_compl(struct bnx2fc_rport *tgt, u16 wqe)
 	struct bnx2fc_cmd *io_req = NULL;
 	struct bnx2fc_interface *interface = tgt->port->priv;
 	struct bnx2fc_hba *hba = interface->hba;
+	int task_idx, index;
 	int rc = 0;
 	u64 err_warn_bit_map;
 	u8 err_warn = 0xff;
@@ -700,12 +701,15 @@ static void bnx2fc_process_unsol_compl(struct bnx2fc_rport *tgt, u16 wqe)
 		BNX2FC_TGT_DBG(tgt, "buf_offsets - tx = 0x%x, rx = 0x%x\n",
 			err_entry->data.tx_buf_off, err_entry->data.rx_buf_off);
 
+
 		if (xid > hba->max_xid) {
 			BNX2FC_TGT_DBG(tgt, "xid(0x%x) out of FW range\n",
 				   xid);
 			goto ret_err_rqe;
 		}
 
+		task_idx = xid / BNX2FC_TASKS_PER_PAGE;
+		index = xid % BNX2FC_TASKS_PER_PAGE;
 
 		io_req = (struct bnx2fc_cmd *)hba->cmd_mgr->cmds[xid];
 		if (!io_req)
@@ -770,6 +774,7 @@ static void bnx2fc_process_unsol_compl(struct bnx2fc_rport *tgt, u16 wqe)
 			} else
 				printk(KERN_ERR PFX "SRR in progress\n");
 			goto ret_err_rqe;
+			break;
 		default:
 			break;
 		}
@@ -828,6 +833,8 @@ ret_err_rqe:
 		}
 		BNX2FC_TGT_DBG(tgt, "warn = 0x%x\n", err_warn);
 
+		task_idx = xid / BNX2FC_TASKS_PER_PAGE;
+		index = xid % BNX2FC_TASKS_PER_PAGE;
 		io_req = (struct bnx2fc_cmd *)hba->cmd_mgr->cmds[xid];
 		if (!io_req)
 			goto ret_warn_rqe;
@@ -1001,6 +1008,7 @@ static bool bnx2fc_pending_work(struct bnx2fc_rport *tgt, unsigned int wqe)
 	unsigned char *rq_data = NULL;
 	unsigned char rq_data_buff[BNX2FC_RQ_BUF_SZ];
 	int task_idx, index;
+	unsigned char *dummy;
 	u16 xid;
 	u8 num_rq;
 	int i;
@@ -1030,7 +1038,7 @@ static bool bnx2fc_pending_work(struct bnx2fc_rport *tgt, unsigned int wqe)
 	if (num_rq > 1) {
 		/* We do not need extra sense data */
 		for (i = 1; i < num_rq; i++)
-			bnx2fc_get_next_rqe(tgt, 1);
+			dummy = bnx2fc_get_next_rqe(tgt, 1);
 	}
 
 	if (rq_data)
@@ -1333,8 +1341,8 @@ static void bnx2fc_init_failure(struct bnx2fc_hba *hba, u32 err_code)
 /**
  * bnx2fc_indicae_kcqe - process KCQE
  *
- * @context:	adapter structure pointer
- * @kcq:	kcqe pointer
+ * @hba:	adapter structure pointer
+ * @kcqe:	kcqe pointer
  * @num_cqe:	Number of completion queue elements
  *
  * Generic KCQ event handler
@@ -1403,6 +1411,7 @@ void bnx2fc_indicate_kcqe(void *context, struct kcqe *kcq[],
 			break;
 
 		case FCOE_KCQE_OPCODE_FCOE_ERROR:
+			/* fall thru */
 		default:
 			printk(KERN_ERR PFX "unknown opcode 0x%x\n",
 								kcqe->op_code);
@@ -1501,6 +1510,7 @@ void bnx2fc_init_seq_cleanup_task(struct bnx2fc_cmd *seq_clnp_req,
 	u64 phys_addr = (u64)orig_io_req->bd_tbl->bd_tbl_dma;
 	u32 orig_offset = offset;
 	int bd_count;
+	int orig_task_idx, index;
 	int i;
 
 	memset(task, 0, sizeof(struct fcoe_task_ctx_entry));
@@ -1550,6 +1560,8 @@ void bnx2fc_init_seq_cleanup_task(struct bnx2fc_cmd *seq_clnp_req,
 				offset; /* adjusted offset */
 		task->txwr_only.sgl_ctx.sgl.mul_sgl.cur_sge_idx = i;
 	} else {
+		orig_task_idx = orig_xid / BNX2FC_TASKS_PER_PAGE;
+		index = orig_xid % BNX2FC_TASKS_PER_PAGE;
 
 		/* Multiple SGEs were used for this IO */
 		sgl = &task->rxwr_only.union_ctx.read_info.sgl_ctx.sgl;
@@ -2077,7 +2089,11 @@ static int bnx2fc_allocate_hash_table(struct bnx2fc_hba *hba)
 	pbl = hba->hash_tbl_pbl;
 	i = 0;
 	while (*pbl && *(pbl + 1)) {
+		u32 lo;
+		u32 hi;
+		lo = *pbl;
 		++pbl;
+		hi = *pbl;
 		++pbl;
 		++i;
 	}

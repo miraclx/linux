@@ -49,10 +49,8 @@ int usb_role_switch_set_role(struct usb_role_switch *sw, enum usb_role role)
 	mutex_lock(&sw->lock);
 
 	ret = sw->set(sw, role);
-	if (!ret) {
+	if (!ret)
 		sw->role = role;
-		kobject_uevent(&sw->dev.kobj, KOBJ_CHANGE);
-	}
 
 	mutex_unlock(&sw->lock);
 
@@ -87,15 +85,19 @@ enum usb_role usb_role_switch_get_role(struct usb_role_switch *sw)
 }
 EXPORT_SYMBOL_GPL(usb_role_switch_get_role);
 
-static void *usb_role_switch_match(struct fwnode_handle *fwnode, const char *id,
+static void *usb_role_switch_match(struct device_connection *con, int ep,
 				   void *data)
 {
 	struct device *dev;
 
-	if (id && !fwnode_property_present(fwnode, id))
-		return NULL;
+	if (con->fwnode) {
+		if (con->id && !fwnode_property_present(con->fwnode, con->id))
+			return NULL;
 
-	dev = class_find_device_by_fwnode(role_class, fwnode);
+		dev = class_find_device_by_fwnode(role_class, con->fwnode);
+	} else {
+		dev = class_find_device_by_name(role_class, con->endpoint[ep]);
+	}
 
 	return dev ? to_role_switch(dev) : ERR_PTR(-EPROBE_DEFER);
 }

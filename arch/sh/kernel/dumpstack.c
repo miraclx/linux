@@ -16,38 +16,37 @@
 #include <asm/unwinder.h>
 #include <asm/stacktrace.h>
 
-void dump_mem(const char *str, const char *loglvl, unsigned long bottom,
-	      unsigned long top)
+void dump_mem(const char *str, unsigned long bottom, unsigned long top)
 {
 	unsigned long p;
 	int i;
 
-	printk("%s%s(0x%08lx to 0x%08lx)\n", loglvl, str, bottom, top);
+	printk("%s(0x%08lx to 0x%08lx)\n", str, bottom, top);
 
 	for (p = bottom & ~31; p < top; ) {
-		printk("%s%04lx: ", loglvl,  p & 0xffff);
+		printk("%04lx: ", p & 0xffff);
 
 		for (i = 0; i < 8; i++, p += 4) {
 			unsigned int val;
 
 			if (p < bottom || p >= top)
-				pr_cont("         ");
+				printk("         ");
 			else {
 				if (__get_user(val, (unsigned int __user *)p)) {
-					pr_cont("\n");
+					printk("\n");
 					return;
 				}
-				pr_cont("%08x ", val);
+				printk("%08x ", val);
 			}
 		}
-		pr_cont("\n");
+		printk("\n");
 	}
 }
 
 void printk_address(unsigned long address, int reliable)
 {
-	pr_cont(" [<%px>] %s%pS\n", (void *) address,
-		reliable ? "" : "? ", (void *) address);
+	printk(" [<%p>] %s%pS\n", (void *) address,
+			reliable ? "" : "? ", (void *) address);
 }
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
@@ -107,6 +106,12 @@ stack_reader_dump(struct task_struct *task, struct pt_regs *regs,
 	}
 }
 
+static int print_trace_stack(void *data, char *name)
+{
+	printk("%s <%s> ", (char *)data, name);
+	return 0;
+}
+
 /*
  * Print one address/symbol entries per line.
  */
@@ -117,20 +122,21 @@ static void print_trace_address(void *data, unsigned long addr, int reliable)
 }
 
 static const struct stacktrace_ops print_trace_ops = {
+	.stack = print_trace_stack,
 	.address = print_trace_address,
 };
 
 void show_trace(struct task_struct *tsk, unsigned long *sp,
-		struct pt_regs *regs, const char *loglvl)
+		struct pt_regs *regs)
 {
 	if (regs && user_mode(regs))
 		return;
 
-	printk("%s\nCall trace:\n", loglvl);
+	printk("\nCall trace:\n");
 
-	unwind_stack(tsk, regs, sp, &print_trace_ops, (void *)loglvl);
+	unwind_stack(tsk, regs, sp, &print_trace_ops, "");
 
-	pr_cont("\n");
+	printk("\n");
 
 	if (!tsk)
 		tsk = current;
@@ -138,7 +144,7 @@ void show_trace(struct task_struct *tsk, unsigned long *sp,
 	debug_show_held_locks(tsk);
 }
 
-void show_stack(struct task_struct *tsk, unsigned long *sp, const char *loglvl)
+void show_stack(struct task_struct *tsk, unsigned long *sp)
 {
 	unsigned long stack;
 
@@ -150,7 +156,7 @@ void show_stack(struct task_struct *tsk, unsigned long *sp, const char *loglvl)
 		sp = (unsigned long *)tsk->thread.sp;
 
 	stack = (unsigned long)sp;
-	dump_mem("Stack: ", loglvl, stack, THREAD_SIZE +
+	dump_mem("Stack: ", stack, THREAD_SIZE +
 		 (unsigned long)task_stack_page(tsk));
-	show_trace(tsk, sp, NULL, loglvl);
+	show_trace(tsk, sp, NULL);
 }

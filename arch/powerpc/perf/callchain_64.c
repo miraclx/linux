@@ -11,6 +11,7 @@
 #include <linux/uaccess.h>
 #include <linux/mm.h>
 #include <asm/ptrace.h>
+#include <asm/pgtable.h>
 #include <asm/sigcontext.h>
 #include <asm/ucontext.h>
 #include <asm/vdso.h>
@@ -21,33 +22,59 @@
 /*
  * On 64-bit we don't want to invoke hash_page on user addresses from
  * interrupt context, so if the access faults, we read the page tables
- * to find which page (if any) is mapped and access it directly. Radix
- * has no need for this so it doesn't use read_user_stack_slow.
+ * to find which page (if any) is mapped and access it directly.
  */
-int read_user_stack_slow(const void __user *ptr, void *buf, int nb)
+int read_user_stack_slow(void __user *ptr, void *buf, int nb)
 {
-
+	int ret = -EFAULT;
+	pgd_t *pgdir;
+	pte_t *ptep, pte;
+	unsigned int shift;
 	unsigned long addr = (unsigned long) ptr;
 	unsigned long offset;
-	struct page *page;
+	unsigned long pfn, flags;
 	void *kaddr;
 
-	if (get_user_page_fast_only(addr, FOLL_WRITE, &page)) {
-		kaddr = page_address(page);
+	pgdir = current->mm->pgd;
+	if (!pgdir)
+		return -EFAULT;
 
-		/* align address to page boundary */
-		offset = addr & ~PAGE_MASK;
+	local_irq_save(flags);
+	ptep = find_current_mm_pte(pgdir, addr, NULL, &shift);
+	if (!ptep)
+		goto err_out;
+	if (!shift)
+		shift = PAGE_SHIFT;
 
-		memcpy(buf, kaddr + offset, nb);
-		put_page(page);
-		return 0;
-	}
-	return -EFAULT;
+	/* align address to page boundary */
+	offset = addr & ((1UL << shift) - 1);
+
+	pte = READ_ONCE(*ptep);
+	if (!pte_present(pte) || !pte_user(pte))
+		goto err_out;
+	pfn = pte_pfn(pte);
+	if (!page_is_ram(pfn))
+		goto err_out;
+
+	/* no highmem to worry about here */
+	kaddr = pfn_to_kaddr(pfn);
+	memcpy(buf, kaddr + offset, nb);
+	ret = 0;
+err_out:
+	local_irq_restore(flags);
+	return ret;
 }
 
-static int read_user_stack_64(const unsigned long __user *ptr, unsigned long *ret)
+static int read_user_stack_64(unsigned long __user *ptr, unsigned long *ret)
 {
-	return __read_user_stack(ptr, ret, sizeof(*ret));
+	if ((unsigned long)ptr > TASK_SIZE - sizeof(unsigned long) ||
+	    ((unsigned long)ptr & 7))
+		return -EFAULT;
+
+	if (!probe_user_read(ret, ptr, sizeof(*ret)))
+		return 0;
+
+	return read_user_stack_slow(ptr, ret, 8);
 }
 
 /*
@@ -68,8 +95,8 @@ static int is_sigreturn_64_address(unsigned long nip, unsigned long fp)
 {
 	if (nip == fp + offsetof(struct signal_frame_64, tramp))
 		return 1;
-	if (current->mm->context.vdso &&
-	    nip == VDSO64_SYMBOL(current->mm->context.vdso, sigtramp_rt64))
+	if (vdso64_rt_sigtramp && current->mm->context.vdso_base &&
+	    nip == current->mm->context.vdso_base + vdso64_rt_sigtramp)
 		return 1;
 	return 0;
 }

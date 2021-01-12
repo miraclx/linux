@@ -55,18 +55,31 @@ long arch_ptrace(struct task_struct *child, long request,
 
 		ret = -EIO;
 		/* convert to index and check */
-		index = addr / sizeof(long);
-		if ((addr & (sizeof(long) - 1)) || !child->thread.regs)
+#ifdef CONFIG_PPC32
+		index = addr >> 2;
+		if ((addr & 3) || (index > PT_FPSCR)
+		    || (child->thread.regs == NULL))
+#else
+		index = addr >> 3;
+		if ((addr & 7) || (index > PT_FPSCR))
+#endif
 			break;
 
 		CHECK_FULL_REGS(child->thread.regs);
-		if (index < PT_FPR0)
+		if (index < PT_FPR0) {
 			ret = ptrace_get_reg(child, (int) index, &tmp);
-		else
-			ret = ptrace_get_fpr(child, index, &tmp);
+			if (ret)
+				break;
+		} else {
+			unsigned int fpidx = index - PT_FPR0;
 
-		if (ret)
-			break;
+			flush_fp_to_thread(child);
+			if (fpidx < (PT_FPSCR - PT_FPR0))
+				memcpy(&tmp, &child->thread.TS_FPR(fpidx),
+				       sizeof(long));
+			else
+				tmp = child->thread.fp_state.fpscr;
+		}
 		ret = put_user(tmp, datalp);
 		break;
 	}
@@ -77,15 +90,30 @@ long arch_ptrace(struct task_struct *child, long request,
 
 		ret = -EIO;
 		/* convert to index and check */
-		index = addr / sizeof(long);
-		if ((addr & (sizeof(long) - 1)) || !child->thread.regs)
+#ifdef CONFIG_PPC32
+		index = addr >> 2;
+		if ((addr & 3) || (index > PT_FPSCR)
+		    || (child->thread.regs == NULL))
+#else
+		index = addr >> 3;
+		if ((addr & 7) || (index > PT_FPSCR))
+#endif
 			break;
 
 		CHECK_FULL_REGS(child->thread.regs);
-		if (index < PT_FPR0)
+		if (index < PT_FPR0) {
 			ret = ptrace_put_reg(child, index, data);
-		else
-			ret = ptrace_put_fpr(child, index, data);
+		} else {
+			unsigned int fpidx = index - PT_FPR0;
+
+			flush_fp_to_thread(child);
+			if (fpidx < (PT_FPSCR - PT_FPR0))
+				memcpy(&child->thread.TS_FPR(fpidx), &data,
+				       sizeof(long));
+			else
+				child->thread.fp_state.fpscr = data;
+			ret = 0;
+		}
 		break;
 	}
 

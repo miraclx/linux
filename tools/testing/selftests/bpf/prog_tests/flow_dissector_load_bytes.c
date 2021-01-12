@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <test_progs.h>
-#include <network_helpers.h>
 
 void test_flow_dissector_load_bytes(void)
 {

@@ -512,7 +512,7 @@ int do_unaligned_access(unsigned long addr, struct pt_regs *regs)
 {
 	unsigned long inst;
 	int ret = -EFAULT;
-	mm_segment_t seg;
+	mm_segment_t seg = get_fs();
 
 	inst = get_inst(regs->ipc);
 
@@ -520,12 +520,13 @@ int do_unaligned_access(unsigned long addr, struct pt_regs *regs)
 	      "Faulting addr: 0x%08lx, pc: 0x%08lx [inst: 0x%08lx ]\n", addr,
 	      regs->ipc, inst);
 
-	seg = force_uaccess_begin();
+	set_fs(USER_DS);
+
 	if (inst & NDS32_16BIT_INSTRUCTION)
 		ret = do_16((inst >> 16) & 0xffff, regs);
 	else
 		ret = do_32(inst, regs);
-	force_uaccess_end(seg);
+	set_fs(seg);
 
 	return ret;
 }

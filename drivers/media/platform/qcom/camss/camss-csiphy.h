@@ -66,7 +66,6 @@ struct csiphy_device {
 	u32 irq;
 	char irq_name[30];
 	struct camss_clock *clock;
-	bool *rate_set;
 	int nclocks;
 	u32 timer_clk_rate;
 	struct csiphy_config cfg;

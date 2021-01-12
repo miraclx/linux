@@ -5,7 +5,7 @@
  *
  */
 #include <linux/kernel.h>
-#include <linux/pgtable.h>
+#include <asm/pgtable.h>
 
 #include "ptdump.h"
 

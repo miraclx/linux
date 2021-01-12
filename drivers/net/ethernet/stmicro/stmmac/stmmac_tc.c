@@ -209,11 +209,17 @@ err_unfill:
 static int tc_delete_knode(struct stmmac_priv *priv,
 			   struct tc_cls_u32_offload *cls)
 {
+	int ret;
+
 	/* Set entry and fragments as not used */
 	tc_unfill_entry(priv, cls);
 
-	return stmmac_rxp_config(priv, priv->hw->pcsr, priv->tc_entries,
-				 priv->tc_entries_max);
+	ret = stmmac_rxp_config(priv, priv->hw->pcsr, priv->tc_entries,
+			priv->tc_entries_max);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int tc_setup_cls_u32(struct stmmac_priv *priv,
@@ -222,7 +228,7 @@ static int tc_setup_cls_u32(struct stmmac_priv *priv,
 	switch (cls->command) {
 	case TC_CLSU32_REPLACE_KNODE:
 		tc_unfill_entry(priv, cls);
-		fallthrough;
+		/* Fall through */
 	case TC_CLSU32_NEW_KNODE:
 		return tc_config_knode(priv, cls);
 	case TC_CLSU32_DELETE_KNODE:

@@ -15,7 +15,6 @@
 #include <linux/io.h>
 #include <linux/irqchip/chained_irq.h>
 #include <linux/irqdomain.h>
-#include <linux/module.h>
 #include <linux/of_irq.h>
 #include <linux/platform_device.h>
 
@@ -380,7 +379,6 @@ int mtk_eint_do_suspend(struct mtk_eint *eint)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(mtk_eint_do_suspend);
 
 int mtk_eint_do_resume(struct mtk_eint *eint)
 {
@@ -388,7 +386,6 @@ int mtk_eint_do_resume(struct mtk_eint *eint)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(mtk_eint_do_resume);
 
 int mtk_eint_set_debounce(struct mtk_eint *eint, unsigned long eint_num,
 			  unsigned int debounce)
@@ -443,7 +440,6 @@ int mtk_eint_set_debounce(struct mtk_eint *eint, unsigned long eint_num,
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(mtk_eint_set_debounce);
 
 int mtk_eint_find_irq(struct mtk_eint *eint, unsigned long eint_n)
 {
@@ -455,7 +451,6 @@ int mtk_eint_find_irq(struct mtk_eint *eint, unsigned long eint_n)
 
 	return irq;
 }
-EXPORT_SYMBOL_GPL(mtk_eint_find_irq);
 
 int mtk_eint_do_init(struct mtk_eint *eint)
 {
@@ -500,7 +495,3 @@ int mtk_eint_do_init(struct mtk_eint *eint)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(mtk_eint_do_init);
-
-MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("MediaTek EINT Driver");

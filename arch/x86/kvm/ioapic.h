@@ -3,8 +3,8 @@
 #define __KVM_IO_APIC_H
 
 #include <linux/kvm_host.h>
+
 #include <kvm/iodev.h>
-#include "irq.h"
 
 struct kvm;
 struct kvm_vcpu;
@@ -108,7 +108,11 @@ do {									\
 
 static inline int ioapic_in_kernel(struct kvm *kvm)
 {
-	return irqchip_kernel(kvm);
+	int mode = kvm->arch.irqchip_mode;
+
+	/* Matches smp_wmb() when setting irqchip_mode */
+	smp_rmb();
+	return mode == KVM_IRQCHIP_KERNEL;
 }
 
 void kvm_rtc_eoi_tracking_restore_one(struct kvm_vcpu *vcpu);

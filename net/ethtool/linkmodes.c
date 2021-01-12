@@ -18,9 +18,15 @@ struct linkmodes_reply_data {
 #define LINKMODES_REPDATA(__reply_base) \
 	container_of(__reply_base, struct linkmodes_reply_data, base)
 
-const struct nla_policy ethnl_linkmodes_get_policy[] = {
-	[ETHTOOL_A_LINKMODES_HEADER]		=
-		NLA_POLICY_NESTED(ethnl_header_policy),
+static const struct nla_policy
+linkmodes_get_policy[ETHTOOL_A_LINKMODES_MAX + 1] = {
+	[ETHTOOL_A_LINKMODES_UNSPEC]		= { .type = NLA_REJECT },
+	[ETHTOOL_A_LINKMODES_HEADER]		= { .type = NLA_NESTED },
+	[ETHTOOL_A_LINKMODES_AUTONEG]		= { .type = NLA_REJECT },
+	[ETHTOOL_A_LINKMODES_OURS]		= { .type = NLA_REJECT },
+	[ETHTOOL_A_LINKMODES_PEER]		= { .type = NLA_REJECT },
+	[ETHTOOL_A_LINKMODES_SPEED]		= { .type = NLA_REJECT },
+	[ETHTOOL_A_LINKMODES_DUPLEX]		= { .type = NLA_REJECT },
 };
 
 static int linkmodes_prepare_data(const struct ethnl_req_info *req_base,
@@ -57,7 +63,6 @@ static int linkmodes_reply_size(const struct ethnl_req_info *req_base,
 {
 	const struct linkmodes_reply_data *data = LINKMODES_REPDATA(reply_base);
 	const struct ethtool_link_ksettings *ksettings = &data->ksettings;
-	const struct ethtool_link_settings *lsettings = &ksettings->base;
 	bool compact = req_base->flags & ETHTOOL_FLAG_COMPACT_BITSETS;
 	int len, ret;
 
@@ -80,12 +85,6 @@ static int linkmodes_reply_size(const struct ethnl_req_info *req_base,
 			return ret;
 		len += ret;
 	}
-
-	if (lsettings->master_slave_cfg != MASTER_SLAVE_CFG_UNSUPPORTED)
-		len += nla_total_size(sizeof(u8));
-
-	if (lsettings->master_slave_state != MASTER_SLAVE_STATE_UNSUPPORTED)
-		len += nla_total_size(sizeof(u8));
 
 	return len;
 }
@@ -123,16 +122,6 @@ static int linkmodes_fill_reply(struct sk_buff *skb,
 	    nla_put_u8(skb, ETHTOOL_A_LINKMODES_DUPLEX, lsettings->duplex))
 		return -EMSGSIZE;
 
-	if (lsettings->master_slave_cfg != MASTER_SLAVE_CFG_UNSUPPORTED &&
-	    nla_put_u8(skb, ETHTOOL_A_LINKMODES_MASTER_SLAVE_CFG,
-		       lsettings->master_slave_cfg))
-		return -EMSGSIZE;
-
-	if (lsettings->master_slave_state != MASTER_SLAVE_STATE_UNSUPPORTED &&
-	    nla_put_u8(skb, ETHTOOL_A_LINKMODES_MASTER_SLAVE_STATE,
-		       lsettings->master_slave_state))
-		return -EMSGSIZE;
-
 	return 0;
 }
 
@@ -140,8 +129,10 @@ const struct ethnl_request_ops ethnl_linkmodes_request_ops = {
 	.request_cmd		= ETHTOOL_MSG_LINKMODES_GET,
 	.reply_cmd		= ETHTOOL_MSG_LINKMODES_GET_REPLY,
 	.hdr_attr		= ETHTOOL_A_LINKMODES_HEADER,
+	.max_attr		= ETHTOOL_A_LINKMODES_MAX,
 	.req_info_size		= sizeof(struct linkmodes_req_info),
 	.reply_data_size	= sizeof(struct linkmodes_reply_data),
+	.request_policy		= linkmodes_get_policy,
 
 	.prepare_data		= linkmodes_prepare_data,
 	.reply_size		= linkmodes_reply_size,
@@ -247,33 +238,17 @@ static const struct link_mode_info link_mode_params[] = {
 	__DEFINE_LINK_MODE_PARAMS(400000, DR8, Full),
 	__DEFINE_LINK_MODE_PARAMS(400000, CR8, Full),
 	__DEFINE_SPECIAL_MODE_PARAMS(FEC_LLRS),
-	__DEFINE_LINK_MODE_PARAMS(100000, KR, Full),
-	__DEFINE_LINK_MODE_PARAMS(100000, SR, Full),
-	__DEFINE_LINK_MODE_PARAMS(100000, LR_ER_FR, Full),
-	__DEFINE_LINK_MODE_PARAMS(100000, DR, Full),
-	__DEFINE_LINK_MODE_PARAMS(100000, CR, Full),
-	__DEFINE_LINK_MODE_PARAMS(200000, KR2, Full),
-	__DEFINE_LINK_MODE_PARAMS(200000, SR2, Full),
-	__DEFINE_LINK_MODE_PARAMS(200000, LR2_ER2_FR2, Full),
-	__DEFINE_LINK_MODE_PARAMS(200000, DR2, Full),
-	__DEFINE_LINK_MODE_PARAMS(200000, CR2, Full),
-	__DEFINE_LINK_MODE_PARAMS(400000, KR4, Full),
-	__DEFINE_LINK_MODE_PARAMS(400000, SR4, Full),
-	__DEFINE_LINK_MODE_PARAMS(400000, LR4_ER4_FR4, Full),
-	__DEFINE_LINK_MODE_PARAMS(400000, DR4, Full),
-	__DEFINE_LINK_MODE_PARAMS(400000, CR4, Full),
-	__DEFINE_LINK_MODE_PARAMS(100, FX, Half),
-	__DEFINE_LINK_MODE_PARAMS(100, FX, Full),
 };
 
-const struct nla_policy ethnl_linkmodes_set_policy[] = {
-	[ETHTOOL_A_LINKMODES_HEADER]		=
-		NLA_POLICY_NESTED(ethnl_header_policy),
+static const struct nla_policy
+linkmodes_set_policy[ETHTOOL_A_LINKMODES_MAX + 1] = {
+	[ETHTOOL_A_LINKMODES_UNSPEC]		= { .type = NLA_REJECT },
+	[ETHTOOL_A_LINKMODES_HEADER]		= { .type = NLA_NESTED },
 	[ETHTOOL_A_LINKMODES_AUTONEG]		= { .type = NLA_U8 },
 	[ETHTOOL_A_LINKMODES_OURS]		= { .type = NLA_NESTED },
+	[ETHTOOL_A_LINKMODES_PEER]		= { .type = NLA_REJECT },
 	[ETHTOOL_A_LINKMODES_SPEED]		= { .type = NLA_U32 },
 	[ETHTOOL_A_LINKMODES_DUPLEX]		= { .type = NLA_U8 },
-	[ETHTOOL_A_LINKMODES_MASTER_SLAVE_CFG]	= { .type = NLA_U8 },
 };
 
 /* Set advertised link modes to all supported modes matching requested speed
@@ -312,44 +287,13 @@ static bool ethnl_auto_linkmodes(struct ethtool_link_ksettings *ksettings,
 			     __ETHTOOL_LINK_MODE_MASK_NBITS);
 }
 
-static bool ethnl_validate_master_slave_cfg(u8 cfg)
-{
-	switch (cfg) {
-	case MASTER_SLAVE_CFG_MASTER_PREFERRED:
-	case MASTER_SLAVE_CFG_SLAVE_PREFERRED:
-	case MASTER_SLAVE_CFG_MASTER_FORCE:
-	case MASTER_SLAVE_CFG_SLAVE_FORCE:
-		return true;
-	}
-
-	return false;
-}
-
 static int ethnl_update_linkmodes(struct genl_info *info, struct nlattr **tb,
 				  struct ethtool_link_ksettings *ksettings,
 				  bool *mod)
 {
 	struct ethtool_link_settings *lsettings = &ksettings->base;
 	bool req_speed, req_duplex;
-	const struct nlattr *master_slave_cfg;
 	int ret;
-
-	master_slave_cfg = tb[ETHTOOL_A_LINKMODES_MASTER_SLAVE_CFG];
-	if (master_slave_cfg) {
-		u8 cfg = nla_get_u8(master_slave_cfg);
-
-		if (lsettings->master_slave_cfg == MASTER_SLAVE_CFG_UNSUPPORTED) {
-			NL_SET_ERR_MSG_ATTR(info->extack, master_slave_cfg,
-					    "master/slave configuration not supported by device");
-			return -EOPNOTSUPP;
-		}
-
-		if (!ethnl_validate_master_slave_cfg(cfg)) {
-			NL_SET_ERR_MSG_ATTR(info->extack, master_slave_cfg,
-					    "master/slave value is invalid");
-			return -EOPNOTSUPP;
-		}
-	}
 
 	*mod = false;
 	req_speed = tb[ETHTOOL_A_LINKMODES_SPEED];
@@ -367,7 +311,6 @@ static int ethnl_update_linkmodes(struct genl_info *info, struct nlattr **tb,
 			 mod);
 	ethnl_update_u8(&lsettings->duplex, tb[ETHTOOL_A_LINKMODES_DUPLEX],
 			mod);
-	ethnl_update_u8(&lsettings->master_slave_cfg, master_slave_cfg, mod);
 
 	if (!tb[ETHTOOL_A_LINKMODES_OURS] && lsettings->autoneg &&
 	    (req_speed || req_duplex) &&
@@ -379,13 +322,18 @@ static int ethnl_update_linkmodes(struct genl_info *info, struct nlattr **tb,
 
 int ethnl_set_linkmodes(struct sk_buff *skb, struct genl_info *info)
 {
+	struct nlattr *tb[ETHTOOL_A_LINKMODES_MAX + 1];
 	struct ethtool_link_ksettings ksettings = {};
 	struct ethnl_req_info req_info = {};
-	struct nlattr **tb = info->attrs;
 	struct net_device *dev;
 	bool mod = false;
 	int ret;
 
+	ret = nlmsg_parse(info->nlhdr, GENL_HDRLEN, tb,
+			  ETHTOOL_A_LINKMODES_MAX, linkmodes_set_policy,
+			  info->extack);
+	if (ret < 0)
+		return ret;
 	ret = ethnl_parse_header_dev_get(&req_info,
 					 tb[ETHTOOL_A_LINKMODES_HEADER],
 					 genl_info_net(info), info->extack,
@@ -405,7 +353,8 @@ int ethnl_set_linkmodes(struct sk_buff *skb, struct genl_info *info)
 
 	ret = __ethtool_get_link_ksettings(dev, &ksettings);
 	if (ret < 0) {
-		GENL_SET_ERR_MSG(info, "failed to retrieve link settings");
+		if (info)
+			GENL_SET_ERR_MSG(info, "failed to retrieve link settings");
 		goto out_ops;
 	}
 

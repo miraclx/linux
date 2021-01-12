@@ -153,18 +153,20 @@ int avic_vm_init(struct kvm *kvm)
 		return 0;
 
 	/* Allocating physical APIC ID table (4KB) */
-	p_page = alloc_page(GFP_KERNEL_ACCOUNT | __GFP_ZERO);
+	p_page = alloc_page(GFP_KERNEL_ACCOUNT);
 	if (!p_page)
 		goto free_avic;
 
 	kvm_svm->avic_physical_id_table_page = p_page;
+	clear_page(page_address(p_page));
 
 	/* Allocating logical APIC ID table (4KB) */
-	l_page = alloc_page(GFP_KERNEL_ACCOUNT | __GFP_ZERO);
+	l_page = alloc_page(GFP_KERNEL_ACCOUNT);
 	if (!l_page)
 		goto free_avic;
 
 	kvm_svm->avic_logical_id_table_page = l_page;
+	clear_page(page_address(l_page));
 
 	spin_lock_irqsave(&svm_vm_data_hash_lock, flags);
  again:
@@ -233,8 +235,7 @@ static u64 *avic_get_physical_id_entry(struct kvm_vcpu *vcpu,
  */
 static int avic_update_access_page(struct kvm *kvm, bool activate)
 {
-	void __user *ret;
-	int r = 0;
+	int ret = 0;
 
 	mutex_lock(&kvm->slots_lock);
 	/*
@@ -250,15 +251,13 @@ static int avic_update_access_page(struct kvm *kvm, bool activate)
 				      APIC_ACCESS_PAGE_PRIVATE_MEMSLOT,
 				      APIC_DEFAULT_PHYS_BASE,
 				      activate ? PAGE_SIZE : 0);
-	if (IS_ERR(ret)) {
-		r = PTR_ERR(ret);
+	if (ret)
 		goto out;
-	}
 
 	kvm->arch.apic_access_page_done = activate;
 out:
 	mutex_unlock(&kvm->slots_lock);
-	return r;
+	return ret;
 }
 
 static int avic_init_backing_page(struct kvm_vcpu *vcpu)
@@ -666,7 +665,7 @@ void svm_refresh_apicv_exec_ctrl(struct kvm_vcpu *vcpu)
 	} else {
 		vmcb->control.int_ctl &= ~AVIC_ENABLE_MASK;
 	}
-	vmcb_mark_dirty(vmcb, VMCB_AVIC);
+	mark_dirty(vmcb, VMCB_AVIC);
 
 	svm_set_pi_irte_mode(vcpu, activated);
 }
@@ -869,7 +868,6 @@ int svm_update_pi_irte(struct kvm *kvm, unsigned int host_irq,
 			 * - Tell IOMMU to use legacy mode for this interrupt.
 			 * - Retrieve ga_tag of prior interrupt remapping data.
 			 */
-			pi.prev_ga_tag = 0;
 			pi.is_guest_mode = false;
 			ret = irq_set_vcpu_affinity(host_irq, &pi);
 

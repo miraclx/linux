@@ -393,7 +393,6 @@ static int adc128_init_client(struct adc128_data *data)
 {
 	struct i2c_client *client = data->client;
 	int err;
-	u8 regval = 0x0;
 
 	/*
 	 * Reset chip to defaults.
@@ -404,17 +403,10 @@ static int adc128_init_client(struct adc128_data *data)
 		return err;
 
 	/* Set operation mode, if non-default */
-	if (data->mode != 0)
-		regval |= data->mode << 1;
-
-	/* If external vref is selected, configure the chip to use it */
-	if (data->regulator)
-		regval |= 0x01;
-
-	/* Write advanced configuration register */
-	if (regval != 0x0) {
-		err = i2c_smbus_write_byte_data(client, ADC128_REG_CONFIG_ADV,
-						regval);
+	if (data->mode != 0) {
+		err = i2c_smbus_write_byte_data(client,
+						ADC128_REG_CONFIG_ADV,
+						data->mode << 1);
 		if (err)
 			return err;
 	}
@@ -424,10 +416,19 @@ static int adc128_init_client(struct adc128_data *data)
 	if (err)
 		return err;
 
+	/* If external vref is selected, configure the chip to use it */
+	if (data->regulator) {
+		err = i2c_smbus_write_byte_data(client,
+						ADC128_REG_CONFIG_ADV, 0x01);
+		if (err)
+			return err;
+	}
+
 	return 0;
 }
 
-static int adc128_probe(struct i2c_client *client)
+static int adc128_probe(struct i2c_client *client,
+			const struct i2c_device_id *id)
 {
 	struct device *dev = &client->dev;
 	struct regulator *regulator;
@@ -523,7 +524,7 @@ static struct i2c_driver adc128_driver = {
 		.name	= "adc128d818",
 		.of_match_table = of_match_ptr(adc128_of_match),
 	},
-	.probe_new	= adc128_probe,
+	.probe		= adc128_probe,
 	.remove		= adc128_remove,
 	.id_table	= adc128_id,
 	.detect		= adc128_detect,

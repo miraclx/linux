@@ -25,7 +25,6 @@
 #include <drm/drm_drv.h>
 #include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_fb_helper.h>
-#include <drm/drm_managed.h>
 #include <uapi/drm/v3d_drm.h>
 
 #include "v3d_drv.h"
@@ -37,6 +36,42 @@
 #define DRIVER_MAJOR 1
 #define DRIVER_MINOR 0
 #define DRIVER_PATCHLEVEL 0
+
+#ifdef CONFIG_PM
+static int v3d_runtime_suspend(struct device *dev)
+{
+	struct drm_device *drm = dev_get_drvdata(dev);
+	struct v3d_dev *v3d = to_v3d_dev(drm);
+
+	v3d_irq_disable(v3d);
+
+	clk_disable_unprepare(v3d->clk);
+
+	return 0;
+}
+
+static int v3d_runtime_resume(struct device *dev)
+{
+	struct drm_device *drm = dev_get_drvdata(dev);
+	struct v3d_dev *v3d = to_v3d_dev(drm);
+	int ret;
+
+	ret = clk_prepare_enable(v3d->clk);
+	if (ret != 0)
+		return ret;
+
+	/* XXX: VPM base */
+
+	v3d_mmu_set_page_table(v3d);
+	v3d_irq_enable(v3d);
+
+	return 0;
+}
+#endif
+
+static const struct dev_pm_ops v3d_v3d_pm_ops = {
+	SET_RUNTIME_PM_OPS(v3d_runtime_suspend, v3d_runtime_resume, NULL)
+};
 
 static int v3d_get_param_ioctl(struct drm_device *dev, void *data,
 			       struct drm_file *file_priv)
@@ -69,7 +104,7 @@ static int v3d_get_param_ioctl(struct drm_device *dev, void *data,
 		if (args->value != 0)
 			return -EINVAL;
 
-		ret = pm_runtime_get_sync(v3d->drm.dev);
+		ret = pm_runtime_get_sync(v3d->dev);
 		if (ret < 0)
 			return ret;
 		if (args->param >= DRM_V3D_PARAM_V3D_CORE0_IDENT0 &&
@@ -78,8 +113,8 @@ static int v3d_get_param_ioctl(struct drm_device *dev, void *data,
 		} else {
 			args->value = V3D_READ(offset);
 		}
-		pm_runtime_mark_last_busy(v3d->drm.dev);
-		pm_runtime_put_autosuspend(v3d->drm.dev);
+		pm_runtime_mark_last_busy(v3d->dev);
+		pm_runtime_put_autosuspend(v3d->dev);
 		return 0;
 	}
 
@@ -158,7 +193,7 @@ static const struct drm_ioctl_desc v3d_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(V3D_SUBMIT_CSD, v3d_submit_csd_ioctl, DRM_RENDER_ALLOW | DRM_AUTH),
 };
 
-static const struct drm_driver v3d_drm_driver = {
+static struct drm_driver v3d_drm_driver = {
 	.driver_features = (DRIVER_GEM |
 			    DRIVER_RENDER |
 			    DRIVER_SYNCOBJ),
@@ -199,9 +234,9 @@ static int
 map_regs(struct v3d_dev *v3d, void __iomem **regs, const char *name)
 {
 	struct resource *res =
-		platform_get_resource_byname(v3d_to_pdev(v3d), IORESOURCE_MEM, name);
+		platform_get_resource_byname(v3d->pdev, IORESOURCE_MEM, name);
 
-	*regs = devm_ioremap_resource(v3d->drm.dev, res);
+	*regs = devm_ioremap_resource(v3d->dev, res);
 	return PTR_ERR_OR_ZERO(*regs);
 }
 
@@ -215,21 +250,20 @@ static int v3d_platform_drm_probe(struct platform_device *pdev)
 	u32 ident1;
 
 
-	v3d = devm_drm_dev_alloc(dev, &v3d_drm_driver, struct v3d_dev, drm);
-	if (IS_ERR(v3d))
-		return PTR_ERR(v3d);
-
+	v3d = kzalloc(sizeof(*v3d), GFP_KERNEL);
+	if (!v3d)
+		return -ENOMEM;
+	v3d->dev = dev;
+	v3d->pdev = pdev;
 	drm = &v3d->drm;
-
-	platform_set_drvdata(pdev, drm);
 
 	ret = map_regs(v3d, &v3d->hub_regs, "hub");
 	if (ret)
-		return ret;
+		goto dev_free;
 
 	ret = map_regs(v3d, &v3d->core_regs[0], "core0");
 	if (ret)
-		return ret;
+		goto dev_free;
 
 	mmu_debug = V3D_READ(V3D_MMU_DEBUG_INFO);
 	dev->coherent_dma_mask =
@@ -247,37 +281,45 @@ static int v3d_platform_drm_probe(struct platform_device *pdev)
 		ret = PTR_ERR(v3d->reset);
 
 		if (ret == -EPROBE_DEFER)
-			return ret;
+			goto dev_free;
 
 		v3d->reset = NULL;
 		ret = map_regs(v3d, &v3d->bridge_regs, "bridge");
 		if (ret) {
 			dev_err(dev,
 				"Failed to get reset control or bridge regs\n");
-			return ret;
+			goto dev_free;
 		}
 	}
 
 	if (v3d->ver < 41) {
 		ret = map_regs(v3d, &v3d->gca_regs, "gca");
 		if (ret)
-			return ret;
+			goto dev_free;
 	}
 
 	v3d->mmu_scratch = dma_alloc_wc(dev, 4096, &v3d->mmu_scratch_paddr,
 					GFP_KERNEL | __GFP_NOWARN | __GFP_ZERO);
 	if (!v3d->mmu_scratch) {
 		dev_err(dev, "Failed to allocate MMU scratch page\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto dev_free;
 	}
 
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_set_autosuspend_delay(dev, 50);
 	pm_runtime_enable(dev);
 
-	ret = v3d_gem_init(drm);
+	ret = drm_dev_init(&v3d->drm, &v3d_drm_driver, dev);
 	if (ret)
 		goto dma_free;
+
+	platform_set_drvdata(pdev, drm);
+	drm->dev_private = v3d;
+
+	ret = v3d_gem_init(drm);
+	if (ret)
+		goto dev_destroy;
 
 	ret = v3d_irq_init(v3d);
 	if (ret)
@@ -293,8 +335,12 @@ irq_disable:
 	v3d_irq_disable(v3d);
 gem_destroy:
 	v3d_gem_destroy(drm);
+dev_destroy:
+	drm_dev_put(drm);
 dma_free:
 	dma_free_wc(dev, 4096, v3d->mmu_scratch, v3d->mmu_scratch_paddr);
+dev_free:
+	kfree(v3d);
 	return ret;
 }
 
@@ -307,8 +353,9 @@ static int v3d_platform_drm_remove(struct platform_device *pdev)
 
 	v3d_gem_destroy(drm);
 
-	dma_free_wc(v3d->drm.dev, 4096, v3d->mmu_scratch,
-		    v3d->mmu_scratch_paddr);
+	drm_dev_put(drm);
+
+	dma_free_wc(v3d->dev, 4096, v3d->mmu_scratch, v3d->mmu_scratch_paddr);
 
 	return 0;
 }
@@ -322,7 +369,18 @@ static struct platform_driver v3d_platform_driver = {
 	},
 };
 
-module_platform_driver(v3d_platform_driver);
+static int __init v3d_drm_register(void)
+{
+	return platform_driver_register(&v3d_platform_driver);
+}
+
+static void __exit v3d_drm_unregister(void)
+{
+	platform_driver_unregister(&v3d_platform_driver);
+}
+
+module_init(v3d_drm_register);
+module_exit(v3d_drm_unregister);
 
 MODULE_ALIAS("platform:v3d-drm");
 MODULE_DESCRIPTION("Broadcom V3D DRM Driver");

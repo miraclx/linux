@@ -249,7 +249,7 @@ static void prng_tdes_deinstantiate(void)
 {
 	pr_debug("The prng module stopped "
 		 "after running in triple DES mode\n");
-	kfree_sensitive(prng_data);
+	kzfree(prng_data);
 }
 
 
@@ -442,7 +442,7 @@ outfree:
 static void prng_sha512_deinstantiate(void)
 {
 	pr_debug("The prng module stopped after running in SHA-512 mode\n");
-	kfree_sensitive(prng_data);
+	kzfree(prng_data);
 }
 
 
@@ -674,12 +674,26 @@ static const struct file_operations prng_tdes_fops = {
 	.llseek		= noop_llseek,
 };
 
+static struct miscdevice prng_sha512_dev = {
+	.name	= "prandom",
+	.minor	= MISC_DYNAMIC_MINOR,
+	.mode	= 0644,
+	.fops	= &prng_sha512_fops,
+};
+static struct miscdevice prng_tdes_dev = {
+	.name	= "prandom",
+	.minor	= MISC_DYNAMIC_MINOR,
+	.mode	= 0644,
+	.fops	= &prng_tdes_fops,
+};
+
+
 /* chunksize attribute (ro) */
 static ssize_t prng_chunksize_show(struct device *dev,
 				   struct device_attribute *attr,
 				   char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", prng_chunk_size);
+	return snprintf(buf, PAGE_SIZE, "%u\n", prng_chunk_size);
 }
 static DEVICE_ATTR(chunksize, 0444, prng_chunksize_show, NULL);
 
@@ -698,7 +712,7 @@ static ssize_t prng_counter_show(struct device *dev,
 		counter = prng_data->prngws.byte_counter;
 	mutex_unlock(&prng_data->mutex);
 
-	return scnprintf(buf, PAGE_SIZE, "%llu\n", counter);
+	return snprintf(buf, PAGE_SIZE, "%llu\n", counter);
 }
 static DEVICE_ATTR(byte_counter, 0444, prng_counter_show, NULL);
 
@@ -707,7 +721,7 @@ static ssize_t prng_errorflag_show(struct device *dev,
 				   struct device_attribute *attr,
 				   char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%d\n", prng_errorflag);
+	return snprintf(buf, PAGE_SIZE, "%d\n", prng_errorflag);
 }
 static DEVICE_ATTR(errorflag, 0444, prng_errorflag_show, NULL);
 
@@ -717,9 +731,9 @@ static ssize_t prng_mode_show(struct device *dev,
 			      char *buf)
 {
 	if (prng_mode == PRNG_MODE_TDES)
-		return scnprintf(buf, PAGE_SIZE, "TDES\n");
+		return snprintf(buf, PAGE_SIZE, "TDES\n");
 	else
-		return scnprintf(buf, PAGE_SIZE, "SHA512\n");
+		return snprintf(buf, PAGE_SIZE, "SHA512\n");
 }
 static DEVICE_ATTR(mode, 0444, prng_mode_show, NULL);
 
@@ -742,7 +756,7 @@ static ssize_t prng_reseed_limit_show(struct device *dev,
 				      struct device_attribute *attr,
 				      char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", prng_reseed_limit);
+	return snprintf(buf, PAGE_SIZE, "%u\n", prng_reseed_limit);
 }
 static ssize_t prng_reseed_limit_store(struct device *dev,
 				       struct device_attribute *attr,
@@ -773,7 +787,7 @@ static ssize_t prng_strength_show(struct device *dev,
 				  struct device_attribute *attr,
 				  char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "256\n");
+	return snprintf(buf, PAGE_SIZE, "256\n");
 }
 static DEVICE_ATTR(strength, 0444, prng_strength_show, NULL);
 
@@ -787,30 +801,18 @@ static struct attribute *prng_sha512_dev_attrs[] = {
 	&dev_attr_strength.attr,
 	NULL
 };
-ATTRIBUTE_GROUPS(prng_sha512_dev);
-
 static struct attribute *prng_tdes_dev_attrs[] = {
 	&dev_attr_chunksize.attr,
 	&dev_attr_byte_counter.attr,
 	&dev_attr_mode.attr,
 	NULL
 };
-ATTRIBUTE_GROUPS(prng_tdes_dev);
 
-static struct miscdevice prng_sha512_dev = {
-	.name	= "prandom",
-	.minor	= MISC_DYNAMIC_MINOR,
-	.mode	= 0644,
-	.fops	= &prng_sha512_fops,
-	.groups = prng_sha512_dev_groups,
+static struct attribute_group prng_sha512_dev_attr_group = {
+	.attrs = prng_sha512_dev_attrs
 };
-
-static struct miscdevice prng_tdes_dev = {
-	.name	= "prandom",
-	.minor	= MISC_DYNAMIC_MINOR,
-	.mode	= 0644,
-	.fops	= &prng_tdes_fops,
-	.groups = prng_tdes_dev_groups,
+static struct attribute_group prng_tdes_dev_attr_group = {
+	.attrs = prng_tdes_dev_attrs
 };
 
 
@@ -865,6 +867,13 @@ static int __init prng_init(void)
 			prng_sha512_deinstantiate();
 			goto out;
 		}
+		ret = sysfs_create_group(&prng_sha512_dev.this_device->kobj,
+					 &prng_sha512_dev_attr_group);
+		if (ret) {
+			misc_deregister(&prng_sha512_dev);
+			prng_sha512_deinstantiate();
+			goto out;
+		}
 
 	} else {
 
@@ -889,6 +898,14 @@ static int __init prng_init(void)
 			prng_tdes_deinstantiate();
 			goto out;
 		}
+		ret = sysfs_create_group(&prng_tdes_dev.this_device->kobj,
+					 &prng_tdes_dev_attr_group);
+		if (ret) {
+			misc_deregister(&prng_tdes_dev);
+			prng_tdes_deinstantiate();
+			goto out;
+		}
+
 	}
 
 out:
@@ -899,9 +916,13 @@ out:
 static void __exit prng_exit(void)
 {
 	if (prng_mode == PRNG_MODE_SHA512) {
+		sysfs_remove_group(&prng_sha512_dev.this_device->kobj,
+				   &prng_sha512_dev_attr_group);
 		misc_deregister(&prng_sha512_dev);
 		prng_sha512_deinstantiate();
 	} else {
+		sysfs_remove_group(&prng_tdes_dev.this_device->kobj,
+				   &prng_tdes_dev_attr_group);
 		misc_deregister(&prng_tdes_dev);
 		prng_tdes_deinstantiate();
 	}

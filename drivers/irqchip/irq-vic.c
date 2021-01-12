@@ -27,10 +27,7 @@
 
 #define VIC_IRQ_STATUS			0x00
 #define VIC_FIQ_STATUS			0x04
-#define VIC_RAW_STATUS			0x08
 #define VIC_INT_SELECT			0x0c	/* 1 = FIQ, 0 = IRQ */
-#define VIC_INT_ENABLE			0x10	/* 1 = enable, 0 = disable */
-#define VIC_INT_ENABLE_CLEAR		0x14
 #define VIC_INT_SOFT			0x18
 #define VIC_INT_SOFT_CLEAR		0x1c
 #define VIC_PROTECT			0x20
@@ -431,7 +428,7 @@ static void __init vic_init_st(void __iomem *base, unsigned int irq_start,
 	vic_register(base, 0, irq_start, vic_sources, 0, node);
 }
 
-static void __init __vic_init(void __iomem *base, int parent_irq, int irq_start,
+void __init __vic_init(void __iomem *base, int parent_irq, int irq_start,
 			      u32 vic_sources, u32 resume_sources,
 			      struct device_node *node)
 {
@@ -455,7 +452,7 @@ static void __init __vic_init(void __iomem *base, int parent_irq, int irq_start,
 		return;
 	default:
 		printk(KERN_WARNING "VIC: unknown vendor, continuing anyways\n");
-		fallthrough;
+		/* fall through */
 	case AMBA_VENDOR_ARM:
 		break;
 	}
@@ -483,6 +480,27 @@ void __init vic_init(void __iomem *base, unsigned int irq_start,
 {
 	__vic_init(base, 0, irq_start, vic_sources, resume_sources, NULL);
 }
+
+/**
+ * vic_init_cascaded() - initialise a cascaded vectored interrupt controller
+ * @base: iomem base address
+ * @parent_irq: the parent IRQ we're cascaded off
+ * @vic_sources: bitmask of interrupt sources to allow
+ * @resume_sources: bitmask of interrupt sources to allow for resume
+ *
+ * This returns the base for the new interrupts or negative on error.
+ */
+int __init vic_init_cascaded(void __iomem *base, unsigned int parent_irq,
+			      u32 vic_sources, u32 resume_sources)
+{
+	struct vic_device *v;
+
+	v = &vic_devices[vic_id];
+	__vic_init(base, parent_irq, 0, vic_sources, resume_sources, NULL);
+	/* Return out acquired base */
+	return v->irq;
+}
+EXPORT_SYMBOL_GPL(vic_init_cascaded);
 
 #ifdef CONFIG_OF
 static int __init vic_of_init(struct device_node *node,

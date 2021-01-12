@@ -11,8 +11,8 @@
  *  This code is based on version 2.00 of the UDF specification,
  *  and revision 3 of the ECMA 167 standard [equivalent to ISO 13346].
  *    http://www.osta.org/
- *    https://www.ecma.ch/
- *    https://www.iso.org/
+ *    http://www.ecma.ch/
+ *    http://www.iso.org/
  *
  * COPYRIGHT
  *  This file is distributed under the terms of the GNU General Public
@@ -168,7 +168,7 @@ static void init_once(void *foo)
 {
 	struct udf_inode_info *ei = (struct udf_inode_info *)foo;
 
-	ei->i_data = NULL;
+	ei->i_ext.i_data = NULL;
 	inode_init_once(&ei->vfs_inode);
 }
 
@@ -854,7 +854,7 @@ static int udf_load_pvoldesc(struct super_block *sb, sector_t block)
 	uint8_t *outstr;
 	struct buffer_head *bh;
 	uint16_t ident;
-	int ret;
+	int ret = -ENOMEM;
 	struct timestamp *ts;
 
 	outstr = kmalloc(128, GFP_NOFS);
@@ -1006,10 +1006,18 @@ int udf_compute_nr_groups(struct super_block *sb, u32 partition)
 static struct udf_bitmap *udf_sb_alloc_bitmap(struct super_block *sb, u32 index)
 {
 	struct udf_bitmap *bitmap;
-	int nr_groups = udf_compute_nr_groups(sb, index);
+	int nr_groups;
+	int size;
 
-	bitmap = kvzalloc(struct_size(bitmap, s_block_bitmap, nr_groups),
-			  GFP_KERNEL);
+	nr_groups = udf_compute_nr_groups(sb, index);
+	size = sizeof(struct udf_bitmap) +
+		(sizeof(struct buffer_head *) * nr_groups);
+
+	if (size <= PAGE_SIZE)
+		bitmap = kzalloc(size, GFP_KERNEL);
+	else
+		bitmap = vzalloc(size); /* TODO: get rid of vzalloc */
+
 	if (!bitmap)
 		return NULL;
 
@@ -1202,7 +1210,7 @@ static int udf_load_vat(struct super_block *sb, int p_index, int type1_index)
 			vat20 = (struct virtualAllocationTable20 *)bh->b_data;
 		} else {
 			vat20 = (struct virtualAllocationTable20 *)
-							vati->i_data;
+							vati->i_ext.i_data;
 		}
 
 		map->s_type_specific.s_virtual.s_start_offset =
@@ -1343,12 +1351,6 @@ static int udf_load_sparable_map(struct super_block *sb,
 		udf_err(sb, "error loading logical volume descriptor: "
 			"Too many sparing tables (%d)\n",
 			(int)spm->numSparingTables);
-		return -EIO;
-	}
-	if (le32_to_cpu(spm->sizeSparingTable) > sb->s_blocksize) {
-		udf_err(sb, "error loading logical volume descriptor: "
-			"Too big sparing table size (%u)\n",
-			le32_to_cpu(spm->sizeSparingTable));
 		return -EIO;
 	}
 
@@ -1696,8 +1698,7 @@ static noinline int udf_process_sequence(
 					"Pointers (max %u supported)\n",
 					UDF_MAX_TD_NESTING);
 				brelse(bh);
-				ret = -EIO;
-				goto out;
+				return -EIO;
 			}
 
 			vdp = (struct volDescPtr *)bh->b_data;
@@ -1717,8 +1718,7 @@ static noinline int udf_process_sequence(
 			curr = get_volume_descriptor_record(ident, bh, &data);
 			if (IS_ERR(curr)) {
 				brelse(bh);
-				ret = PTR_ERR(curr);
-				goto out;
+				return PTR_ERR(curr);
 			}
 			/* Descriptor we don't care about? */
 			if (!curr)
@@ -1740,31 +1740,28 @@ static noinline int udf_process_sequence(
 	 */
 	if (!data.vds[VDS_POS_PRIMARY_VOL_DESC].block) {
 		udf_err(sb, "Primary Volume Descriptor not found!\n");
-		ret = -EAGAIN;
-		goto out;
+		return -EAGAIN;
 	}
 	ret = udf_load_pvoldesc(sb, data.vds[VDS_POS_PRIMARY_VOL_DESC].block);
 	if (ret < 0)
-		goto out;
+		return ret;
 
 	if (data.vds[VDS_POS_LOGICAL_VOL_DESC].block) {
 		ret = udf_load_logicalvol(sb,
 				data.vds[VDS_POS_LOGICAL_VOL_DESC].block,
 				fileset);
 		if (ret < 0)
-			goto out;
+			return ret;
 	}
 
 	/* Now handle prevailing Partition Descriptors */
 	for (i = 0; i < data.num_part_descs; i++) {
 		ret = udf_load_partdesc(sb, data.part_descs_loc[i].rec.block);
 		if (ret < 0)
-			goto out;
+			return ret;
 	}
-	ret = 0;
-out:
-	kfree(data.part_descs_loc);
-	return ret;
+
+	return 0;
 }
 
 /*
@@ -2414,7 +2411,8 @@ static int udf_statfs(struct dentry *dentry, struct kstatfs *buf)
 			+ buf->f_bfree;
 	buf->f_ffree = buf->f_bfree;
 	buf->f_namelen = UDF_NAME_LEN;
-	buf->f_fsid = u64_to_fsid(id);
+	buf->f_fsid.val[0] = (u32)id;
+	buf->f_fsid.val[1] = (u32)(id >> 32);
 
 	return 0;
 }

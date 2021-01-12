@@ -34,12 +34,12 @@
 #include <linux/delay.h>
 #include <linux/hardirq.h>
 #include <linux/ratelimit.h>
-#include <linux/pgtable.h>
 
 #include <asm/stacktrace.h>
 #include <asm/ptrace.h>
 #include <asm/timex.h>
 #include <linux/uaccess.h>
+#include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/traps.h>
 #include <asm/hw_breakpoint.h>
@@ -479,29 +479,25 @@ void show_regs(struct pt_regs * regs)
 
 static int show_trace_cb(struct stackframe *frame, void *data)
 {
-	const char *loglvl = data;
-
 	if (kernel_text_address(frame->pc))
-		printk("%s [<%08lx>] %pB\n",
-			loglvl, frame->pc, (void *)frame->pc);
+		pr_cont(" [<%08lx>] %pB\n", frame->pc, (void *)frame->pc);
 	return 0;
 }
 
-static void show_trace(struct task_struct *task, unsigned long *sp,
-		       const char *loglvl)
+void show_trace(struct task_struct *task, unsigned long *sp)
 {
 	if (!sp)
 		sp = stack_pointer(task);
 
-	printk("%sCall Trace:\n", loglvl);
-	walk_stackframe(sp, show_trace_cb, (void *)loglvl);
+	pr_info("Call Trace:\n");
+	walk_stackframe(sp, show_trace_cb, NULL);
 }
 
 #define STACK_DUMP_ENTRY_SIZE 4
 #define STACK_DUMP_LINE_SIZE 32
 static size_t kstack_depth_to_print = CONFIG_PRINT_STACK_DEPTH;
 
-void show_stack(struct task_struct *task, unsigned long *sp, const char *loglvl)
+void show_stack(struct task_struct *task, unsigned long *sp)
 {
 	size_t len;
 
@@ -511,11 +507,11 @@ void show_stack(struct task_struct *task, unsigned long *sp, const char *loglvl)
 	len = min((-(size_t)sp) & (THREAD_SIZE - STACK_DUMP_ENTRY_SIZE),
 		  kstack_depth_to_print * STACK_DUMP_ENTRY_SIZE);
 
-	printk("%sStack:\n", loglvl);
-	print_hex_dump(loglvl, " ", DUMP_PREFIX_NONE,
+	pr_info("Stack:\n");
+	print_hex_dump(KERN_INFO, " ", DUMP_PREFIX_NONE,
 		       STACK_DUMP_LINE_SIZE, STACK_DUMP_ENTRY_SIZE,
 		       sp, len, false);
-	show_trace(task, sp, loglvl);
+	show_trace(task, sp);
 }
 
 DEFINE_SPINLOCK(die_lock);
@@ -534,7 +530,7 @@ void die(const char * str, struct pt_regs * regs, long err)
 	pr_info("%s: sig: %ld [#%d]%s\n", str, err, ++die_counter, pr);
 	show_regs(regs);
 	if (!user_mode(regs))
-		show_stack(NULL, (unsigned long *)regs->areg[1], KERN_INFO);
+		show_stack(NULL, (unsigned long*)regs->areg[1]);
 
 	add_taint(TAINT_DIE, LOCKDEP_NOW_UNRELIABLE);
 	spin_unlock_irq(&die_lock);

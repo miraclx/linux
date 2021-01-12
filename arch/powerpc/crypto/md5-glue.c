@@ -11,6 +11,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/mm.h>
+#include <linux/cryptohash.h>
 #include <linux/types.h>
 #include <crypto/md5.h>
 #include <asm/byteorder.h>

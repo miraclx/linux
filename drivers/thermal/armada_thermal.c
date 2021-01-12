@@ -874,12 +874,6 @@ static int armada_thermal_probe(struct platform_device *pdev)
 			return PTR_ERR(tz);
 		}
 
-		ret = thermal_zone_device_enable(tz);
-		if (ret) {
-			thermal_zone_device_unregister(tz);
-			return ret;
-		}
-
 		drvdata->type = LEGACY;
 		drvdata->data.tz = tz;
 		platform_set_drvdata(pdev, drvdata);

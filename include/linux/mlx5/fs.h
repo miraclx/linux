@@ -42,7 +42,6 @@ enum {
 	MLX5_FLOW_CONTEXT_ACTION_FWD_NEXT_PRIO	= 1 << 16,
 	MLX5_FLOW_CONTEXT_ACTION_ENCRYPT	= 1 << 17,
 	MLX5_FLOW_CONTEXT_ACTION_DECRYPT	= 1 << 18,
-	MLX5_FLOW_CONTEXT_ACTION_FWD_NEXT_NS	= 1 << 19,
 };
 
 enum {
@@ -50,7 +49,6 @@ enum {
 	MLX5_FLOW_TABLE_TUNNEL_EN_DECAP = BIT(1),
 	MLX5_FLOW_TABLE_TERMINATION = BIT(2),
 	MLX5_FLOW_TABLE_UNMANAGED = BIT(3),
-	MLX5_FLOW_TABLE_OTHER_VPORT = BIT(4),
 };
 
 #define LEFTOVERS_RULE_NUM	 2
@@ -77,7 +75,6 @@ enum mlx5_flow_namespace_type {
 	MLX5_FLOW_NAMESPACE_SNIFFER_RX,
 	MLX5_FLOW_NAMESPACE_SNIFFER_TX,
 	MLX5_FLOW_NAMESPACE_EGRESS,
-	MLX5_FLOW_NAMESPACE_EGRESS_KERNEL,
 	MLX5_FLOW_NAMESPACE_RDMA_RX,
 	MLX5_FLOW_NAMESPACE_RDMA_RX_KERNEL,
 	MLX5_FLOW_NAMESPACE_RDMA_TX,
@@ -133,7 +130,6 @@ struct mlx5_flow_destination {
 			struct mlx5_pkt_reformat *pkt_reformat;
 			u8		flags;
 		} vport;
-		u32			sampler_id;
 	};
 };
 
@@ -175,7 +171,9 @@ mlx5_create_auto_grouped_flow_table(struct mlx5_flow_namespace *ns,
 
 struct mlx5_flow_table *
 mlx5_create_vport_flow_table(struct mlx5_flow_namespace *ns,
-			     struct mlx5_flow_table_attr *ft_attr, u16 vport);
+			     int prio,
+			     int num_flow_table_entries,
+			     u32 level, u16 vport);
 struct mlx5_flow_table *mlx5_create_lag_demux_flow_table(
 					       struct mlx5_flow_namespace *ns,
 					       int prio, u32 level);
@@ -208,10 +206,7 @@ struct mlx5_flow_act {
 	u32 action;
 	struct mlx5_modify_hdr  *modify_hdr;
 	struct mlx5_pkt_reformat *pkt_reformat;
-	union {
-		u32 ipsec_obj_id;
-		uintptr_t esp_id;
-	};
+	uintptr_t esp_id;
 	u32 flags;
 	struct mlx5_fs_vlan vlan[MLX5_FS_VLAN_DEPTH];
 	struct ib_counters *counters;

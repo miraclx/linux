@@ -165,10 +165,7 @@ static struct list_head *remove_irq_handler(struct amdgpu_device *adev,
 		handler = list_entry(entry, struct amdgpu_dm_irq_handler_data,
 				     list);
 
-		if (handler == NULL)
-			continue;
-
-		if (ih == handler->handler) {
+		if (ih == handler) {
 			/* Found our handler. Remove it from the list. */
 			list_del(&handler->list);
 			handler_removed = true;
@@ -722,7 +719,7 @@ void amdgpu_dm_set_irq_funcs(struct amdgpu_device *adev)
  */
 void amdgpu_dm_hpd_init(struct amdgpu_device *adev)
 {
-	struct drm_device *dev = adev_to_drm(adev);
+	struct drm_device *dev = adev->ddev;
 	struct drm_connector *connector;
 	struct drm_connector_list_iter iter;
 
@@ -758,7 +755,7 @@ void amdgpu_dm_hpd_init(struct amdgpu_device *adev)
  */
 void amdgpu_dm_hpd_fini(struct amdgpu_device *adev)
 {
-	struct drm_device *dev = adev_to_drm(adev);
+	struct drm_device *dev = adev->ddev;
 	struct drm_connector *connector;
 	struct drm_connector_list_iter iter;
 

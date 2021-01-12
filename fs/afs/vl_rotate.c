@@ -45,7 +45,7 @@ static bool afs_start_vl_iteration(struct afs_vl_cursor *vc)
 	    cell->dns_expiry <= ktime_get_real_seconds()) {
 		dns_lookup_count = smp_load_acquire(&cell->dns_lookup_count);
 		set_bit(AFS_CELL_FL_DO_LOOKUP, &cell->flags);
-		afs_queue_cell(cell, afs_cell_trace_get_queue_dns);
+		queue_work(afs_wq, &cell->manager);
 
 		if (cell->dns_source == DNS_RECORD_UNAVAILABLE) {
 			if (wait_var_event_interruptible(
@@ -151,10 +151,6 @@ bool afs_select_vlserver(struct afs_vl_cursor *vc)
 		vc->error = error;
 		vc->flags |= AFS_VL_CURSOR_RETRY;
 		goto next_server;
-
-	case -EOPNOTSUPP:
-		_debug("notsupp");
-		goto next_server;
 	}
 
 restart_from_beginning:
@@ -192,8 +188,7 @@ pick_server:
 	for (i = 0; i < vc->server_list->nr_servers; i++) {
 		struct afs_vlserver *s = vc->server_list->servers[i].server;
 
-		if (!test_bit(i, &vc->untried) ||
-		    !test_bit(AFS_VLSERVER_FL_RESPONDING, &s->flags))
+		if (!test_bit(i, &vc->untried) || !s->probe.responded)
 			continue;
 		if (s->probe.rtt < rtt) {
 			vc->index = i;
@@ -263,13 +258,9 @@ no_more_servers:
 	for (i = 0; i < vc->server_list->nr_servers; i++) {
 		struct afs_vlserver *s = vc->server_list->servers[i].server;
 
-		if (test_bit(AFS_VLSERVER_FL_RESPONDING, &s->flags))
-			e.responded = true;
 		afs_prioritise_error(&e, READ_ONCE(s->probe.error),
 				     s->probe.abort_code);
 	}
-
-	error = e.error;
 
 failed_set_error:
 	vc->error = error;

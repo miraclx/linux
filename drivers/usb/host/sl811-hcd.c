@@ -1614,16 +1614,10 @@ sl811h_probe(struct platform_device *dev)
 	void __iomem		*addr_reg;
 	void __iomem		*data_reg;
 	int			retval;
-	u8			tmp, ioaddr;
+	u8			tmp, ioaddr = 0;
 	unsigned long		irqflags;
 
 	if (usb_disabled())
-		return -ENODEV;
-
-	/* the chip may be wired for either kind of addressing */
-	addr = platform_get_mem_or_io(dev, 0);
-	data = platform_get_mem_or_io(dev, 1);
-	if (!addr || !data || resource_type(addr) != resource_type(data))
 		return -ENODEV;
 
 	/* basic sanity checks first.  board-specific init logic should
@@ -1638,8 +1632,16 @@ sl811h_probe(struct platform_device *dev)
 	irq = ires->start;
 	irqflags = ires->flags & IRQF_TRIGGER_MASK;
 
-	ioaddr = resource_type(addr) == IORESOURCE_IO;
-	if (ioaddr) {
+	/* the chip may be wired for either kind of addressing */
+	addr = platform_get_resource(dev, IORESOURCE_MEM, 0);
+	data = platform_get_resource(dev, IORESOURCE_MEM, 1);
+	retval = -EBUSY;
+	if (!addr || !data) {
+		addr = platform_get_resource(dev, IORESOURCE_IO, 0);
+		data = platform_get_resource(dev, IORESOURCE_IO, 1);
+		if (!addr || !data)
+			return -ENODEV;
+		ioaddr = 1;
 		/*
 		 * NOTE: 64-bit resource->start is getting truncated
 		 * to avoid compiler warning, assuming that ->start

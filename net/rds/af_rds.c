@@ -290,7 +290,8 @@ static int rds_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	return 0;
 }
 
-static int rds_cancel_sent_to(struct rds_sock *rs, sockptr_t optval, int len)
+static int rds_cancel_sent_to(struct rds_sock *rs, char __user *optval,
+			      int len)
 {
 	struct sockaddr_in6 sin6;
 	struct sockaddr_in sin;
@@ -307,15 +308,14 @@ static int rds_cancel_sent_to(struct rds_sock *rs, sockptr_t optval, int len)
 		goto out;
 	} else if (len < sizeof(struct sockaddr_in6)) {
 		/* Assume IPv4 */
-		if (copy_from_sockptr(&sin, optval,
-				sizeof(struct sockaddr_in))) {
+		if (copy_from_user(&sin, optval, sizeof(struct sockaddr_in))) {
 			ret = -EFAULT;
 			goto out;
 		}
 		ipv6_addr_set_v4mapped(sin.sin_addr.s_addr, &sin6.sin6_addr);
 		sin6.sin6_port = sin.sin_port;
 	} else {
-		if (copy_from_sockptr(&sin6, optval,
+		if (copy_from_user(&sin6, optval,
 				   sizeof(struct sockaddr_in6))) {
 			ret = -EFAULT;
 			goto out;
@@ -327,20 +327,21 @@ out:
 	return ret;
 }
 
-static int rds_set_bool_option(unsigned char *optvar, sockptr_t optval,
+static int rds_set_bool_option(unsigned char *optvar, char __user *optval,
 			       int optlen)
 {
 	int value;
 
 	if (optlen < sizeof(int))
 		return -EINVAL;
-	if (copy_from_sockptr(&value, optval, sizeof(int)))
+	if (get_user(value, (int __user *) optval))
 		return -EFAULT;
 	*optvar = !!value;
 	return 0;
 }
 
-static int rds_cong_monitor(struct rds_sock *rs, sockptr_t optval, int optlen)
+static int rds_cong_monitor(struct rds_sock *rs, char __user *optval,
+			    int optlen)
 {
 	int ret;
 
@@ -357,7 +358,8 @@ static int rds_cong_monitor(struct rds_sock *rs, sockptr_t optval, int optlen)
 	return ret;
 }
 
-static int rds_set_transport(struct rds_sock *rs, sockptr_t optval, int optlen)
+static int rds_set_transport(struct rds_sock *rs, char __user *optval,
+			     int optlen)
 {
 	int t_type;
 
@@ -367,7 +369,7 @@ static int rds_set_transport(struct rds_sock *rs, sockptr_t optval, int optlen)
 	if (optlen != sizeof(int))
 		return -EINVAL;
 
-	if (copy_from_sockptr(&t_type, optval, sizeof(t_type)))
+	if (copy_from_user(&t_type, (int __user *)optval, sizeof(t_type)))
 		return -EFAULT;
 
 	if (t_type < 0 || t_type >= RDS_TRANS_COUNT)
@@ -378,7 +380,7 @@ static int rds_set_transport(struct rds_sock *rs, sockptr_t optval, int optlen)
 	return rs->rs_transport ? 0 : -ENOPROTOOPT;
 }
 
-static int rds_enable_recvtstamp(struct sock *sk, sockptr_t optval,
+static int rds_enable_recvtstamp(struct sock *sk, char __user *optval,
 				 int optlen, int optname)
 {
 	int val, valbool;
@@ -386,7 +388,7 @@ static int rds_enable_recvtstamp(struct sock *sk, sockptr_t optval,
 	if (optlen != sizeof(int))
 		return -EFAULT;
 
-	if (copy_from_sockptr(&val, optval, sizeof(int)))
+	if (get_user(val, (int __user *)optval))
 		return -EFAULT;
 
 	valbool = val ? 1 : 0;
@@ -402,7 +404,7 @@ static int rds_enable_recvtstamp(struct sock *sk, sockptr_t optval,
 	return 0;
 }
 
-static int rds_recv_track_latency(struct rds_sock *rs, sockptr_t optval,
+static int rds_recv_track_latency(struct rds_sock *rs, char __user *optval,
 				  int optlen)
 {
 	struct rds_rx_trace_so trace;
@@ -411,7 +413,7 @@ static int rds_recv_track_latency(struct rds_sock *rs, sockptr_t optval,
 	if (optlen != sizeof(struct rds_rx_trace_so))
 		return -EFAULT;
 
-	if (copy_from_sockptr(&trace, optval, sizeof(trace)))
+	if (copy_from_user(&trace, optval, sizeof(trace)))
 		return -EFAULT;
 
 	if (trace.rx_traces > RDS_MSG_RX_DGRAM_TRACE_MAX)
@@ -430,7 +432,7 @@ static int rds_recv_track_latency(struct rds_sock *rs, sockptr_t optval,
 }
 
 static int rds_setsockopt(struct socket *sock, int level, int optname,
-			  sockptr_t optval, unsigned int optlen)
+			  char __user *optval, unsigned int optlen)
 {
 	struct rds_sock *rs = rds_sk_to_rs(sock->sk);
 	int ret;

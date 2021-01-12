@@ -9,6 +9,7 @@
 #include <asm/assembler.h>
 
 	.macro SMCCC instr
+	.cfi_startproc
 	\instr	#0
 	ldr	x4, [sp]
 	stp	x0, x1, [x4, #ARM_SMCCC_RES_X0_OFFS]
@@ -20,6 +21,7 @@
 	b.ne	1f
 	str	x6, [x4, ARM_SMCCC_QUIRK_STATE_OFFS]
 1:	ret
+	.cfi_endproc
 	.endm
 
 /*
@@ -28,9 +30,9 @@
  *		  unsigned long a6, unsigned long a7, struct arm_smccc_res *res,
  *		  struct arm_smccc_quirk *quirk)
  */
-SYM_FUNC_START(__arm_smccc_smc)
+ENTRY(__arm_smccc_smc)
 	SMCCC	smc
-SYM_FUNC_END(__arm_smccc_smc)
+ENDPROC(__arm_smccc_smc)
 EXPORT_SYMBOL(__arm_smccc_smc)
 
 /*
@@ -39,7 +41,7 @@ EXPORT_SYMBOL(__arm_smccc_smc)
  *		  unsigned long a6, unsigned long a7, struct arm_smccc_res *res,
  *		  struct arm_smccc_quirk *quirk)
  */
-SYM_FUNC_START(__arm_smccc_hvc)
+ENTRY(__arm_smccc_hvc)
 	SMCCC	hvc
-SYM_FUNC_END(__arm_smccc_hvc)
+ENDPROC(__arm_smccc_hvc)
 EXPORT_SYMBOL(__arm_smccc_hvc)

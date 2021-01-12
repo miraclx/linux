@@ -28,11 +28,11 @@
 
 #include "virtgpu_drv.h"
 
-static int virtio_gpu_gem_create(struct drm_file *file,
-				 struct drm_device *dev,
-				 struct virtio_gpu_object_params *params,
-				 struct drm_gem_object **obj_p,
-				 uint32_t *handle_p)
+int virtio_gpu_gem_create(struct drm_file *file,
+			  struct drm_device *dev,
+			  struct virtio_gpu_object_params *params,
+			  struct drm_gem_object **obj_p,
+			  uint32_t *handle_p)
 {
 	struct virtio_gpu_device *vgdev = dev->dev_private;
 	struct virtio_gpu_object *obj;
@@ -55,7 +55,7 @@ static int virtio_gpu_gem_create(struct drm_file *file,
 	*obj_p = &obj->base.base;
 
 	/* drop reference from allocate - handle holds it now */
-	drm_gem_object_put(&obj->base.base);
+	drm_gem_object_put_unlocked(&obj->base.base);
 
 	*handle_p = handle;
 	return 0;
@@ -105,7 +105,7 @@ int virtio_gpu_mode_dumb_mmap(struct drm_file *file_priv,
 	if (gobj == NULL)
 		return -ENOENT;
 	*offset_p = drm_vma_node_offset_addr(&gobj->vma_node);
-	drm_gem_object_put(gobj);
+	drm_gem_object_put_unlocked(gobj);
 	return 0;
 }
 
@@ -117,7 +117,7 @@ int virtio_gpu_gem_object_open(struct drm_gem_object *obj,
 	struct virtio_gpu_object_array *objs;
 
 	if (!vgdev->has_virgl_3d)
-		goto out_notify;
+		return 0;
 
 	objs = virtio_gpu_array_alloc(1);
 	if (!objs)
@@ -126,7 +126,6 @@ int virtio_gpu_gem_object_open(struct drm_gem_object *obj,
 
 	virtio_gpu_cmd_context_attach_resource(vgdev, vfpriv->ctx_id,
 					       objs);
-out_notify:
 	virtio_gpu_notify(vgdev);
 	return 0;
 }
@@ -154,8 +153,9 @@ void virtio_gpu_gem_object_close(struct drm_gem_object *obj,
 struct virtio_gpu_object_array *virtio_gpu_array_alloc(u32 nents)
 {
 	struct virtio_gpu_object_array *objs;
+	size_t size = sizeof(*objs) + sizeof(objs->objs[0]) * nents;
 
-	objs = kmalloc(struct_size(objs, objs, nents), GFP_KERNEL);
+	objs = kmalloc(size, GFP_KERNEL);
 	if (!objs)
 		return NULL;
 
@@ -239,7 +239,7 @@ void virtio_gpu_array_put_free(struct virtio_gpu_object_array *objs)
 	u32 i;
 
 	for (i = 0; i < objs->nents; i++)
-		drm_gem_object_put(objs->objs[i]);
+		drm_gem_object_put_unlocked(objs->objs[i]);
 	virtio_gpu_array_free(objs);
 }
 

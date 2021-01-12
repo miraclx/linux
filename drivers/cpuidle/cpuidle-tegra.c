@@ -172,7 +172,7 @@ static int tegra_cpuidle_coupled_barrier(struct cpuidle_device *dev)
 static int tegra_cpuidle_state_enter(struct cpuidle_device *dev,
 				     int index, unsigned int cpu)
 {
-	int err;
+	int ret;
 
 	/*
 	 * CC6 state is the "CPU cluster power-off" state.  In order to
@@ -183,34 +183,34 @@ static int tegra_cpuidle_state_enter(struct cpuidle_device *dev,
 	 * CPU cores, GIC and L2 cache).
 	 */
 	if (index == TEGRA_CC6) {
-		err = tegra_cpuidle_coupled_barrier(dev);
-		if (err)
-			return err;
+		ret = tegra_cpuidle_coupled_barrier(dev);
+		if (ret)
+			return ret;
 	}
 
 	local_fiq_disable();
-	RCU_NONIDLE(tegra_pm_set_cpu_in_lp2());
+	tegra_pm_set_cpu_in_lp2();
 	cpu_pm_enter();
 
 	switch (index) {
 	case TEGRA_C7:
-		err = tegra_cpuidle_c7_enter();
+		ret = tegra_cpuidle_c7_enter();
 		break;
 
 	case TEGRA_CC6:
-		err = tegra_cpuidle_cc6_enter(cpu);
+		ret = tegra_cpuidle_cc6_enter(cpu);
 		break;
 
 	default:
-		err = -EINVAL;
+		ret = -EINVAL;
 		break;
 	}
 
 	cpu_pm_exit();
-	RCU_NONIDLE(tegra_pm_clear_cpu_in_lp2());
+	tegra_pm_clear_cpu_in_lp2();
 	local_fiq_enable();
 
-	return err ?: index;
+	return ret;
 }
 
 static int tegra_cpuidle_adjust_state_index(int index, unsigned int cpu)
@@ -236,36 +236,28 @@ static int tegra_cpuidle_enter(struct cpuidle_device *dev,
 			       int index)
 {
 	unsigned int cpu = cpu_logical_map(dev->cpu);
-	int ret;
+	int err;
 
 	index = tegra_cpuidle_adjust_state_index(index, cpu);
 	if (dev->states_usage[index].disable)
 		return -1;
 
 	if (index == TEGRA_C1)
-		ret = arm_cpuidle_simple_enter(dev, drv, index);
+		err = arm_cpuidle_simple_enter(dev, drv, index);
 	else
-		ret = tegra_cpuidle_state_enter(dev, index, cpu);
+		err = tegra_cpuidle_state_enter(dev, index, cpu);
 
-	if (ret < 0) {
-		if (ret != -EINTR || index != TEGRA_CC6)
-			pr_err_once("failed to enter state %d err: %d\n",
-				    index, ret);
-		index = -1;
-	} else {
-		index = ret;
-	}
+	if (err && (err != -EINTR || index != TEGRA_CC6))
+		pr_err_once("failed to enter state %d err: %d\n", index, err);
 
-	return index;
+	return err ? -1 : index;
 }
 
-static int tegra114_enter_s2idle(struct cpuidle_device *dev,
-				 struct cpuidle_driver *drv,
-				 int index)
+static void tegra114_enter_s2idle(struct cpuidle_device *dev,
+				  struct cpuidle_driver *drv,
+				  int index)
 {
 	tegra_cpuidle_enter(dev, drv, index);
-
-	return 0;
 }
 
 /*
@@ -373,6 +365,7 @@ static int tegra_cpuidle_probe(struct platform_device *pdev)
 		break;
 
 	case TEGRA30:
+		tegra_cpuidle_disable_state(TEGRA_CC6);
 		break;
 
 	case TEGRA114:

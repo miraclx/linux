@@ -190,7 +190,9 @@ static int hibvt_pwm_probe(struct platform_device *pdev)
 	const struct hibvt_pwm_soc *soc =
 				of_device_get_match_data(&pdev->dev);
 	struct hibvt_pwm_chip *pwm_chip;
-	int ret, i;
+	struct resource *res;
+	int ret;
+	int i;
 
 	pwm_chip = devm_kzalloc(&pdev->dev, sizeof(*pwm_chip), GFP_KERNEL);
 	if (pwm_chip == NULL)
@@ -211,7 +213,8 @@ static int hibvt_pwm_probe(struct platform_device *pdev)
 	pwm_chip->chip.of_pwm_n_cells = 3;
 	pwm_chip->soc = soc;
 
-	pwm_chip->base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	pwm_chip->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(pwm_chip->base))
 		return PTR_ERR(pwm_chip->base);
 

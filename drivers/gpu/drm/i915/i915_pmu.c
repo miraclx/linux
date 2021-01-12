@@ -4,6 +4,7 @@
  * Copyright © 2017-2018 Intel Corporation
  */
 
+#include <linux/irq.h>
 #include <linux/pm_runtime.h>
 
 #include "gt/intel_engine.h"
@@ -29,7 +30,6 @@
 #define ENGINE_SAMPLE_BITS (1 << I915_PMU_SAMPLE_BITS)
 
 static cpumask_t i915_pmu_cpumask;
-static unsigned int i915_pmu_target_cpu = -1;
 
 static u8 engine_config_sample(u64 config)
 {
@@ -269,48 +269,12 @@ static bool exclusive_mmio_access(const struct drm_i915_private *i915)
 	return IS_GEN(i915, 7);
 }
 
-static void engine_sample(struct intel_engine_cs *engine, unsigned int period_ns)
-{
-	struct intel_engine_pmu *pmu = &engine->pmu;
-	bool busy;
-	u32 val;
-
-	val = ENGINE_READ_FW(engine, RING_CTL);
-	if (val == 0) /* powerwell off => engine idle */
-		return;
-
-	if (val & RING_WAIT)
-		add_sample(&pmu->sample[I915_SAMPLE_WAIT], period_ns);
-	if (val & RING_WAIT_SEMAPHORE)
-		add_sample(&pmu->sample[I915_SAMPLE_SEMA], period_ns);
-
-	/* No need to sample when busy stats are supported. */
-	if (intel_engine_supports_stats(engine))
-		return;
-
-	/*
-	 * While waiting on a semaphore or event, MI_MODE reports the
-	 * ring as idle. However, previously using the seqno, and with
-	 * execlists sampling, we account for the ring waiting as the
-	 * engine being busy. Therefore, we record the sample as being
-	 * busy if either waiting or !idle.
-	 */
-	busy = val & (RING_WAIT_SEMAPHORE | RING_WAIT);
-	if (!busy) {
-		val = ENGINE_READ_FW(engine, RING_MI_MODE);
-		busy = !(val & MODE_IDLE);
-	}
-	if (busy)
-		add_sample(&pmu->sample[I915_SAMPLE_BUSY], period_ns);
-}
-
 static void
 engines_sample(struct intel_gt *gt, unsigned int period_ns)
 {
 	struct drm_i915_private *i915 = gt->i915;
 	struct intel_engine_cs *engine;
 	enum intel_engine_id id;
-	unsigned long flags;
 
 	if ((i915->pmu.enable & ENGINE_SAMPLE_MASK) == 0)
 		return;
@@ -319,17 +283,53 @@ engines_sample(struct intel_gt *gt, unsigned int period_ns)
 		return;
 
 	for_each_engine(engine, gt, id) {
+		struct intel_engine_pmu *pmu = &engine->pmu;
+		spinlock_t *mmio_lock;
+		unsigned long flags;
+		bool busy;
+		u32 val;
+
 		if (!intel_engine_pm_get_if_awake(engine))
 			continue;
 
-		if (exclusive_mmio_access(i915)) {
-			spin_lock_irqsave(&engine->uncore->lock, flags);
-			engine_sample(engine, period_ns);
-			spin_unlock_irqrestore(&engine->uncore->lock, flags);
-		} else {
-			engine_sample(engine, period_ns);
-		}
+		mmio_lock = NULL;
+		if (exclusive_mmio_access(i915))
+			mmio_lock = &engine->uncore->lock;
 
+		if (unlikely(mmio_lock))
+			spin_lock_irqsave(mmio_lock, flags);
+
+		val = ENGINE_READ_FW(engine, RING_CTL);
+		if (val == 0) /* powerwell off => engine idle */
+			goto skip;
+
+		if (val & RING_WAIT)
+			add_sample(&pmu->sample[I915_SAMPLE_WAIT], period_ns);
+		if (val & RING_WAIT_SEMAPHORE)
+			add_sample(&pmu->sample[I915_SAMPLE_SEMA], period_ns);
+
+		/* No need to sample when busy stats are supported. */
+		if (intel_engine_supports_stats(engine))
+			goto skip;
+
+		/*
+		 * While waiting on a semaphore or event, MI_MODE reports the
+		 * ring as idle. However, previously using the seqno, and with
+		 * execlists sampling, we account for the ring waiting as the
+		 * engine being busy. Therefore, we record the sample as being
+		 * busy if either waiting or !idle.
+		 */
+		busy = val & (RING_WAIT_SEMAPHORE | RING_WAIT);
+		if (!busy) {
+			val = ENGINE_READ_FW(engine, RING_MI_MODE);
+			busy = !(val & MODE_IDLE);
+		}
+		if (busy)
+			add_sample(&pmu->sample[I915_SAMPLE_BUSY], period_ns);
+
+skip:
+		if (unlikely(mmio_lock))
+			spin_unlock_irqrestore(mmio_lock, flags);
 		intel_engine_pm_put_async(engine);
 	}
 }
@@ -423,14 +423,45 @@ static enum hrtimer_restart i915_sample(struct hrtimer *hrtimer)
 	return HRTIMER_RESTART;
 }
 
-static void i915_pmu_event_destroy(struct perf_event *event)
+static u64 count_interrupts(struct drm_i915_private *i915)
+{
+	/* open-coded kstat_irqs() */
+	struct irq_desc *desc = irq_to_desc(i915->drm.pdev->irq);
+	u64 sum = 0;
+	int cpu;
+
+	if (!desc || !desc->kstat_irqs)
+		return 0;
+
+	for_each_possible_cpu(cpu)
+		sum += *per_cpu_ptr(desc->kstat_irqs, cpu);
+
+	return sum;
+}
+
+static void engine_event_destroy(struct perf_event *event)
 {
 	struct drm_i915_private *i915 =
 		container_of(event->pmu, typeof(*i915), pmu.base);
+	struct intel_engine_cs *engine;
 
-	drm_WARN_ON(&i915->drm, event->parent);
+	engine = intel_engine_lookup_user(i915,
+					  engine_event_class(event),
+					  engine_event_instance(event));
+	if (drm_WARN_ON_ONCE(&i915->drm, !engine))
+		return;
 
-	drm_dev_put(&i915->drm);
+	if (engine_event_sample(event) == I915_SAMPLE_BUSY &&
+	    intel_engine_supports_stats(engine))
+		intel_disable_engine_stats(engine);
+}
+
+static void i915_pmu_event_destroy(struct perf_event *event)
+{
+	WARN_ON(event->parent);
+
+	if (is_engine_event(event))
+		engine_event_destroy(event);
 }
 
 static int
@@ -460,7 +491,7 @@ config_status(struct drm_i915_private *i915, u64 config)
 		if (IS_VALLEYVIEW(i915) || IS_CHERRYVIEW(i915))
 			/* Requires a mutex for sampling! */
 			return -ENODEV;
-		fallthrough;
+		/* Fall-through. */
 	case I915_PMU_REQUESTED_FREQUENCY:
 		if (INTEL_GEN(i915) < 6)
 			return -ENODEV;
@@ -483,24 +514,30 @@ static int engine_event_init(struct perf_event *event)
 	struct drm_i915_private *i915 =
 		container_of(event->pmu, typeof(*i915), pmu.base);
 	struct intel_engine_cs *engine;
+	u8 sample;
+	int ret;
 
 	engine = intel_engine_lookup_user(i915, engine_event_class(event),
 					  engine_event_instance(event));
 	if (!engine)
 		return -ENODEV;
 
-	return engine_event_status(engine, engine_event_sample(event));
+	sample = engine_event_sample(event);
+	ret = engine_event_status(engine, sample);
+	if (ret)
+		return ret;
+
+	if (sample == I915_SAMPLE_BUSY && intel_engine_supports_stats(engine))
+		ret = intel_enable_engine_stats(engine);
+
+	return ret;
 }
 
 static int i915_pmu_event_init(struct perf_event *event)
 {
 	struct drm_i915_private *i915 =
 		container_of(event->pmu, typeof(*i915), pmu.base);
-	struct i915_pmu *pmu = &i915->pmu;
 	int ret;
-
-	if (pmu->closed)
-		return -ENODEV;
 
 	if (event->attr.type != event->pmu->type)
 		return -ENOENT;
@@ -526,10 +563,8 @@ static int i915_pmu_event_init(struct perf_event *event)
 	if (ret)
 		return ret;
 
-	if (!event->parent) {
-		drm_dev_get(&i915->drm);
+	if (!event->parent)
 		event->destroy = i915_pmu_event_destroy;
-	}
 
 	return 0;
 }
@@ -553,10 +588,7 @@ static u64 __i915_pmu_event_read(struct perf_event *event)
 			/* Do nothing */
 		} else if (sample == I915_SAMPLE_BUSY &&
 			   intel_engine_supports_stats(engine)) {
-			ktime_t unused;
-
-			val = ktime_to_ns(intel_engine_get_busy_time(engine,
-								     &unused));
+			val = ktime_to_ns(intel_engine_get_busy_time(engine));
 		} else {
 			val = engine->pmu.sample[sample].cur;
 		}
@@ -573,7 +605,7 @@ static u64 __i915_pmu_event_read(struct perf_event *event)
 				   USEC_PER_SEC /* to MHz */);
 			break;
 		case I915_PMU_INTERRUPTS:
-			val = READ_ONCE(pmu->irq_count);
+			val = count_interrupts(i915);
 			break;
 		case I915_PMU_RC6_RESIDENCY:
 			val = get_rc6(&i915->gt);
@@ -586,16 +618,9 @@ static u64 __i915_pmu_event_read(struct perf_event *event)
 
 static void i915_pmu_event_read(struct perf_event *event)
 {
-	struct drm_i915_private *i915 =
-		container_of(event->pmu, typeof(*i915), pmu.base);
 	struct hw_perf_event *hwc = &event->hw;
-	struct i915_pmu *pmu = &i915->pmu;
 	u64 prev, new;
 
-	if (pmu->closed) {
-		event->hw.state = PERF_HES_STOPPED;
-		return;
-	}
 again:
 	prev = local64_read(&hwc->prev_count);
 	new = __i915_pmu_event_read(event);
@@ -723,13 +748,6 @@ static void i915_pmu_disable(struct perf_event *event)
 
 static void i915_pmu_event_start(struct perf_event *event, int flags)
 {
-	struct drm_i915_private *i915 =
-		container_of(event->pmu, typeof(*i915), pmu.base);
-	struct i915_pmu *pmu = &i915->pmu;
-
-	if (pmu->closed)
-		return;
-
 	i915_pmu_enable(event);
 	event->hw.state = 0;
 }
@@ -744,13 +762,6 @@ static void i915_pmu_event_stop(struct perf_event *event, int flags)
 
 static int i915_pmu_event_add(struct perf_event *event, int flags)
 {
-	struct drm_i915_private *i915 =
-		container_of(event->pmu, typeof(*i915), pmu.base);
-	struct i915_pmu *pmu = &i915->pmu;
-
-	if (pmu->closed)
-		return -ENODEV;
-
 	if (flags & PERF_EF_START)
 		i915_pmu_event_start(event, flags);
 
@@ -1033,39 +1044,25 @@ static int i915_pmu_cpu_online(unsigned int cpu, struct hlist_node *node)
 static int i915_pmu_cpu_offline(unsigned int cpu, struct hlist_node *node)
 {
 	struct i915_pmu *pmu = hlist_entry_safe(node, typeof(*pmu), cpuhp.node);
-	unsigned int target = i915_pmu_target_cpu;
+	unsigned int target;
 
 	GEM_BUG_ON(!pmu->base.event_init);
 
-	/*
-	 * Unregistering an instance generates a CPU offline event which we must
-	 * ignore to avoid incorrectly modifying the shared i915_pmu_cpumask.
-	 */
-	if (pmu->closed)
-		return 0;
-
 	if (cpumask_test_and_clear_cpu(cpu, &i915_pmu_cpumask)) {
 		target = cpumask_any_but(topology_sibling_cpumask(cpu), cpu);
-
 		/* Migrate events if there is a valid target */
 		if (target < nr_cpu_ids) {
 			cpumask_set_cpu(target, &i915_pmu_cpumask);
-			i915_pmu_target_cpu = target;
+			perf_pmu_migrate_context(&pmu->base, cpu, target);
 		}
-	}
-
-	if (target < nr_cpu_ids && target != pmu->cpuhp.cpu) {
-		perf_pmu_migrate_context(&pmu->base, cpu, target);
-		pmu->cpuhp.cpu = target;
 	}
 
 	return 0;
 }
 
-static enum cpuhp_state cpuhp_slot = CPUHP_INVALID;
-
-void i915_pmu_init(void)
+static int i915_pmu_register_cpuhp_state(struct i915_pmu *pmu)
 {
+	enum cpuhp_state slot;
 	int ret;
 
 	ret = cpuhp_setup_state_multi(CPUHP_AP_ONLINE_DYN,
@@ -1073,29 +1070,25 @@ void i915_pmu_init(void)
 				      i915_pmu_cpu_online,
 				      i915_pmu_cpu_offline);
 	if (ret < 0)
-		pr_notice("Failed to setup cpuhp state for i915 PMU! (%d)\n",
-			  ret);
-	else
-		cpuhp_slot = ret;
-}
+		return ret;
 
-void i915_pmu_exit(void)
-{
-	if (cpuhp_slot != CPUHP_INVALID)
-		cpuhp_remove_multi_state(cpuhp_slot);
-}
+	slot = ret;
+	ret = cpuhp_state_add_instance(slot, &pmu->cpuhp.node);
+	if (ret) {
+		cpuhp_remove_multi_state(slot);
+		return ret;
+	}
 
-static int i915_pmu_register_cpuhp_state(struct i915_pmu *pmu)
-{
-	if (cpuhp_slot == CPUHP_INVALID)
-		return -EINVAL;
-
-	return cpuhp_state_add_instance(cpuhp_slot, &pmu->cpuhp.node);
+	pmu->cpuhp.slot = slot;
+	return 0;
 }
 
 static void i915_pmu_unregister_cpuhp_state(struct i915_pmu *pmu)
 {
-	cpuhp_state_remove_instance(cpuhp_slot, &pmu->cpuhp.node);
+	WARN_ON(pmu->cpuhp.slot == CPUHP_INVALID);
+	WARN_ON(cpuhp_state_remove_instance(pmu->cpuhp.slot, &pmu->cpuhp.node));
+	cpuhp_remove_multi_state(pmu->cpuhp.slot);
+	pmu->cpuhp.slot = CPUHP_INVALID;
 }
 
 static bool is_igp(struct drm_i915_private *i915)
@@ -1122,14 +1115,14 @@ void i915_pmu_register(struct drm_i915_private *i915)
 	int ret = -ENOMEM;
 
 	if (INTEL_GEN(i915) <= 2) {
-		drm_info(&i915->drm, "PMU not supported for this GPU.");
+		dev_info(i915->drm.dev, "PMU not supported for this GPU.");
 		return;
 	}
 
 	spin_lock_init(&pmu->lock);
 	hrtimer_init(&pmu->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	pmu->timer.function = i915_sample;
-	pmu->cpuhp.cpu = -1;
+	pmu->cpuhp.slot = CPUHP_INVALID;
 
 	if (!is_igp(i915)) {
 		pmu->name = kasprintf(GFP_KERNEL,
@@ -1155,7 +1148,6 @@ void i915_pmu_register(struct drm_i915_private *i915)
 	if (!pmu->base.attr_groups)
 		goto err_attr;
 
-	pmu->base.module	= THIS_MODULE;
 	pmu->base.task_ctx_nr	= perf_invalid_context;
 	pmu->base.event_init	= i915_pmu_event_init;
 	pmu->base.add		= i915_pmu_event_add;
@@ -1186,7 +1178,7 @@ err_name:
 	if (!is_igp(i915))
 		kfree(pmu->name);
 err:
-	drm_notice(&i915->drm, "Failed to register PMU!\n");
+	dev_notice(i915->drm.dev, "Failed to register PMU!\n");
 }
 
 void i915_pmu_unregister(struct drm_i915_private *i915)
@@ -1196,13 +1188,7 @@ void i915_pmu_unregister(struct drm_i915_private *i915)
 	if (!pmu->base.event_init)
 		return;
 
-	/*
-	 * "Disconnect" the PMU callbacks - since all are atomic synchronize_rcu
-	 * ensures all currently executing ones will have exited before we
-	 * proceed with unregistration.
-	 */
-	pmu->closed = true;
-	synchronize_rcu();
+	drm_WARN_ON(&i915->drm, pmu->enable);
 
 	hrtimer_cancel(&pmu->timer);
 

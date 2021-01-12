@@ -231,21 +231,9 @@ void vlv_ccu_write(struct drm_i915_private *i915, u32 reg, u32 val)
 			SB_CRWRDA_NP, reg, &val);
 }
 
-static u32 vlv_dpio_phy_iosf_port(struct drm_i915_private *i915, enum dpio_phy phy)
-{
-	/*
-	 * IOSF_PORT_DPIO: VLV x2 PHY (DP/HDMI B and C), CHV x1 PHY (DP/HDMI D)
-	 * IOSF_PORT_DPIO_2: CHV x2 PHY (DP/HDMI B and C)
-	 */
-	if (IS_CHERRYVIEW(i915))
-		return phy == DPIO_PHY0 ? IOSF_PORT_DPIO_2 : IOSF_PORT_DPIO;
-	else
-		return IOSF_PORT_DPIO;
-}
-
 u32 vlv_dpio_read(struct drm_i915_private *i915, enum pipe pipe, int reg)
 {
-	u32 port = vlv_dpio_phy_iosf_port(i915, DPIO_PHY(pipe));
+	int port = i915->dpio_phy_iosf_port[DPIO_PHY(pipe)];
 	u32 val = 0;
 
 	vlv_sideband_rw(i915, DPIO_DEVFN, port, SB_MRD_NP, reg, &val);
@@ -264,7 +252,7 @@ u32 vlv_dpio_read(struct drm_i915_private *i915, enum pipe pipe, int reg)
 void vlv_dpio_write(struct drm_i915_private *i915,
 		    enum pipe pipe, int reg, u32 val)
 {
-	u32 port = vlv_dpio_phy_iosf_port(i915, DPIO_PHY(pipe));
+	int port = i915->dpio_phy_iosf_port[DPIO_PHY(pipe)];
 
 	vlv_sideband_rw(i915, DPIO_DEVFN, port, SB_MWR_NP, reg, &val);
 }
@@ -348,7 +336,7 @@ void intel_sbi_write(struct drm_i915_private *i915, u16 reg, u32 value,
 	intel_sbi_rw(i915, reg, destination, &value, false);
 }
 
-static int gen6_check_mailbox_status(u32 mbox)
+static inline int gen6_check_mailbox_status(u32 mbox)
 {
 	switch (mbox & GEN6_PCODE_ERROR_MASK) {
 	case GEN6_PCODE_SUCCESS:
@@ -368,7 +356,7 @@ static int gen6_check_mailbox_status(u32 mbox)
 	}
 }
 
-static int gen7_check_mailbox_status(u32 mbox)
+static inline int gen7_check_mailbox_status(u32 mbox)
 {
 	switch (mbox & GEN6_PCODE_ERROR_MASK) {
 	case GEN6_PCODE_SUCCESS:
@@ -383,8 +371,6 @@ static int gen7_check_mailbox_status(u32 mbox)
 		return -ENXIO;
 	case GEN11_PCODE_LOCKED:
 		return -EBUSY;
-	case GEN11_PCODE_REJECTED:
-		return -EACCES;
 	case GEN7_PCODE_MIN_FREQ_TABLE_GT_RATIO_OUT_OF_RANGE:
 		return -EOVERFLOW;
 	default:
@@ -443,7 +429,7 @@ int sandybridge_pcode_read(struct drm_i915_private *i915, u32 mbox,
 
 	mutex_lock(&i915->sb_lock);
 	err = __sandybridge_pcode_rw(i915, mbox, val, val1,
-				     500, 20,
+				     500, 0,
 				     true);
 	mutex_unlock(&i915->sb_lock);
 
@@ -554,19 +540,4 @@ out:
 	mutex_unlock(&i915->sb_lock);
 	return ret ? ret : status;
 #undef COND
-}
-
-void intel_pcode_init(struct drm_i915_private *i915)
-{
-	int ret;
-
-	if (!IS_DGFX(i915))
-		return;
-
-	ret = skl_pcode_request(i915, DG1_PCODE_STATUS,
-				DG1_UNCORE_GET_INIT_STATUS,
-				DG1_UNCORE_INIT_STATUS_COMPLETE,
-				DG1_UNCORE_INIT_STATUS_COMPLETE, 50);
-	if (ret)
-		drm_err(&i915->drm, "Pcode did not report uncore initialization completion!\n");
 }

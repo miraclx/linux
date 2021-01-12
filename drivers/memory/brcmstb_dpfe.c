@@ -23,7 +23,7 @@
  *     - BE kernel + LE firmware image
  *     - BE kernel + BE firmware image
  *
- * The DPCU always runs in big endian mode. The firmware image, however, can
+ * The DPCU always runs in big endian mode. The firwmare image, however, can
  * be in either format. Also, communication between host CPU and DCPU is
  * always in little endian.
  */
@@ -188,6 +188,11 @@ struct brcmstb_dpfe_priv {
 	struct mutex lock;
 };
 
+static const char *error_text[] = {
+	"Success", "Header code incorrect", "Unknown command or argument",
+	"Incorrect checksum", "Malformed command", "Timed out",
+};
+
 /*
  * Forward declaration of our sysfs attribute functions, so we can declare the
  * attribute data structures early.
@@ -302,20 +307,6 @@ static const struct dpfe_api dpfe_api_v3 = {
 	},
 };
 
-static const char *get_error_text(unsigned int i)
-{
-	static const char * const error_text[] = {
-		"Success", "Header code incorrect",
-		"Unknown command or argument", "Incorrect checksum",
-		"Malformed command", "Timed out", "Unknown error",
-	};
-
-	if (unlikely(i >= ARRAY_SIZE(error_text)))
-		i = ARRAY_SIZE(error_text) - 1;
-
-	return error_text[i];
-}
-
 static bool is_dcpu_enabled(struct brcmstb_dpfe_priv *priv)
 {
 	u32 val;
@@ -388,8 +379,9 @@ static void __iomem *get_msg_ptr(struct brcmstb_dpfe_priv *priv, u32 response,
 	void __iomem *ptr = NULL;
 
 	/* There is no need to use this function for API v3 or later. */
-	if (unlikely(priv->dpfe_api->version >= 3))
+	if (unlikely(priv->dpfe_api->version >= 3)) {
 		return NULL;
+	}
 
 	msg_type = (response >> DRAM_MSG_TYPE_OFFSET) & DRAM_MSG_TYPE_MASK;
 	offset = (response >> DRAM_MSG_ADDR_OFFSET) & DRAM_MSG_ADDR_MASK;
@@ -454,7 +446,7 @@ static int __send_command(struct brcmstb_dpfe_priv *priv, unsigned int cmd,
 	}
 	if (resp != 0) {
 		mutex_unlock(&priv->lock);
-		return -ffs(DCPU_RET_ERR_TIMEDOUT);
+		return -ETIMEDOUT;
 	}
 
 	/* Compute checksum over the message */
@@ -656,10 +648,8 @@ static int brcmstb_dpfe_download_firmware(struct brcmstb_dpfe_priv *priv)
 		return (ret == -ENOENT) ? -EPROBE_DEFER : ret;
 
 	ret = __verify_firmware(&init, fw);
-	if (ret) {
-		ret = -EFAULT;
-		goto release_fw;
-	}
+	if (ret)
+		return -EFAULT;
 
 	__disable_dcpu(priv);
 
@@ -678,20 +668,18 @@ static int brcmstb_dpfe_download_firmware(struct brcmstb_dpfe_priv *priv)
 
 	ret = __write_firmware(priv->dmem, dmem, dmem_size, is_big_endian);
 	if (ret)
-		goto release_fw;
+		return ret;
 	ret = __write_firmware(priv->imem, imem, imem_size, is_big_endian);
 	if (ret)
-		goto release_fw;
+		return ret;
 
 	ret = __verify_fw_checksum(&init, priv, header, init.chksum);
 	if (ret)
-		goto release_fw;
+		return ret;
 
 	__enable_dcpu(priv);
 
-release_fw:
-	release_firmware(fw);
-	return ret;
+	return 0;
 }
 
 static ssize_t generic_show(unsigned int command, u32 response[],
@@ -704,7 +692,7 @@ static ssize_t generic_show(unsigned int command, u32 response[],
 
 	ret = __send_command(priv, command, response);
 	if (ret < 0)
-		return sprintf(buf, "ERROR: %s\n", get_error_text(-ret));
+		return sprintf(buf, "ERROR: %s\n", error_text[-ret]);
 
 	return 0;
 }
@@ -901,8 +889,11 @@ static int brcmstb_dpfe_probe(struct platform_device *pdev)
 	}
 
 	ret = brcmstb_dpfe_download_firmware(priv);
-	if (ret)
-		return dev_err_probe(dev, ret, "Couldn't download firmware\n");
+	if (ret) {
+		if (ret != -EPROBE_DEFER)
+			dev_err(dev, "Couldn't download firmware -- %d\n", ret);
+		return ret;
+	}
 
 	ret = sysfs_create_groups(&pdev->dev.kobj, priv->dpfe_api->sysfs_attrs);
 	if (!ret)

@@ -13,7 +13,6 @@
  */
 
 #include <linux/linkage.h>
-#include <linux/pgtable.h>
 #include <asm/asm-offsets.h>
 #include <asm/asmmacro.h>
 #include <asm/processor.h>
@@ -23,6 +22,7 @@
 #include <asm/unistd.h>
 #include <asm/ptrace.h>
 #include <asm/current.h>
+#include <asm/pgtable.h>
 #include <asm/page.h>
 #include <asm/signal.h>
 #include <asm/tlbflush.h>
@@ -374,11 +374,6 @@ common_exception:
 	s32i	a2, a1, PT_LCOUNT
 #endif
 
-#if XCHAL_HAVE_EXCLUSIVE
-	/* Clear exclusive access monitor set by interrupted code */
-	clrex
-#endif
-
 	/* It is now save to restore the EXC_TABLE_FIXUP variable. */
 
 	rsr	a2, exccause
@@ -500,8 +495,8 @@ common_exception_return:
 	 */
 
 	_bbsi.l	a4, TIF_NEED_RESCHED, 3f
-	movi	a2, _TIF_SIGPENDING | _TIF_NOTIFY_RESUME | _TIF_NOTIFY_SIGNAL
-	bnone	a4, a2, 5f
+	_bbsi.l	a4, TIF_NOTIFY_RESUME, 2f
+	_bbci.l	a4, TIF_SIGPENDING, 5f
 
 2:	l32i	a4, a1, PT_DEPC
 	bgeui	a4, VALID_DOUBLE_EXCEPTION_ADDRESS, 4f
@@ -964,14 +959,14 @@ ENDPROC(unrecoverable_exception)
  * of the proper size instead.
  *
  * This algorithm simply backs out the register changes started by the user
- * exception handler, makes it appear that we have started a window underflow
+ * excpetion handler, makes it appear that we have started a window underflow
  * by rotating the window back and then setting the old window base (OWB) in
  * the 'ps' register with the rolled back window base. The 'movsp' instruction
  * will be re-executed and this time since the next window frames is in the
  * active AR registers it won't cause an exception.
  *
  * If the WindowUnderflow code gets a TLB miss the page will get mapped
- * the partial WindowUnderflow will be handled in the double exception
+ * the the partial windeowUnderflow will be handeled in the double exception
  * handler.
  *
  * Entry condition:
@@ -2023,12 +2018,6 @@ ENTRY(_switch_to)
 	l32i	a3, a5, THREAD_CPENABLE
 	xsr	a3, cpenable
 	s32i	a3, a4, THREAD_CPENABLE
-#endif
-
-#if XCHAL_HAVE_EXCLUSIVE
-	l32i	a3, a5, THREAD_ATOMCTL8
-	getex	a3
-	s32i	a3, a4, THREAD_ATOMCTL8
 #endif
 
 	/* Flush register file. */

@@ -339,6 +339,7 @@ static const struct drm_display_mode td043mtea1_mode = {
 	.vsync_start = 480 + 39,
 	.vsync_end = 480 + 39 + 1,
 	.vtotal = 480 + 39 + 1 + 34,
+	.vrefresh = 60,
 	.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
 	.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 	.width_mm = 94,
@@ -460,7 +461,11 @@ static int td043mtea1_probe(struct spi_device *spi)
 	drm_panel_init(&lcd->panel, &lcd->spi->dev, &td043mtea1_funcs,
 		       DRM_MODE_CONNECTOR_DPI);
 
-	drm_panel_add(&lcd->panel);
+	ret = drm_panel_add(&lcd->panel);
+	if (ret < 0) {
+		sysfs_remove_group(&spi->dev.kobj, &td043mtea1_attr_group);
+		return ret;
+	}
 
 	return 0;
 }

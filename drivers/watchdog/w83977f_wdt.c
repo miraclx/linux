@@ -422,7 +422,7 @@ static long wdt_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EINVAL;
 
 		wdt_keepalive();
-		fallthrough;
+		/* Fall through */
 
 	case WDIOC_GETTIMEOUT:
 		return put_user(timeout, uarg.i);

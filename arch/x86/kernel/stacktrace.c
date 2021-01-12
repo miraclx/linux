@@ -18,13 +18,13 @@ void arch_stack_walk(stack_trace_consume_fn consume_entry, void *cookie,
 	struct unwind_state state;
 	unsigned long addr;
 
-	if (regs && !consume_entry(cookie, regs->ip))
+	if (regs && !consume_entry(cookie, regs->ip, false))
 		return;
 
 	for (unwind_start(&state, task, regs, NULL); !unwind_done(&state);
 	     unwind_next_frame(&state)) {
 		addr = unwind_get_return_address(&state);
-		if (!addr || !consume_entry(cookie, addr))
+		if (!addr || !consume_entry(cookie, addr, false))
 			break;
 	}
 }
@@ -58,6 +58,7 @@ int arch_stack_walk_reliable(stack_trace_consume_fn consume_entry,
 			 * or a page fault), which can make frame pointers
 			 * unreliable.
 			 */
+
 			if (IS_ENABLED(CONFIG_FRAME_POINTER))
 				return -EINVAL;
 		}
@@ -72,12 +73,16 @@ int arch_stack_walk_reliable(stack_trace_consume_fn consume_entry,
 		if (!addr)
 			return -EINVAL;
 
-		if (!consume_entry(cookie, addr))
+		if (!consume_entry(cookie, addr, false))
 			return -EINVAL;
 	}
 
 	/* Check for stack corruption */
 	if (unwind_error(&state))
+		return -EINVAL;
+
+	/* Success path for non-user tasks, i.e. kthreads and idle tasks */
+	if (!(task->flags & (PF_KTHREAD | PF_IDLE)))
 		return -EINVAL;
 
 	return 0;
@@ -114,7 +119,7 @@ void arch_stack_walk_user(stack_trace_consume_fn consume_entry, void *cookie,
 {
 	const void __user *fp = (const void __user *)regs->bp;
 
-	if (!consume_entry(cookie, regs->ip))
+	if (!consume_entry(cookie, regs->ip, false))
 		return;
 
 	while (1) {
@@ -128,7 +133,7 @@ void arch_stack_walk_user(stack_trace_consume_fn consume_entry, void *cookie,
 			break;
 		if (!frame.ret_addr)
 			break;
-		if (!consume_entry(cookie, frame.ret_addr))
+		if (!consume_entry(cookie, frame.ret_addr, false))
 			break;
 		fp = frame.next_fp;
 	}

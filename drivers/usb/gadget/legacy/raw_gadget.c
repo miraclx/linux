@@ -564,12 +564,9 @@ static int raw_ioctl_event_fetch(struct raw_dev *dev, unsigned long value)
 		return -ENODEV;
 	}
 	length = min(arg.length, event->length);
-	if (copy_to_user((void __user *)value, event, sizeof(*event) + length)) {
-		kfree(event);
+	if (copy_to_user((void __user *)value, event, sizeof(*event) + length))
 		return -EFAULT;
-	}
 
-	kfree(event);
 	return 0;
 }
 

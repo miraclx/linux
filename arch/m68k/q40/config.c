@@ -29,6 +29,7 @@
 
 #include <asm/io.h>
 #include <asm/bootinfo.h>
+#include <asm/pgtable.h>
 #include <asm/setup.h>
 #include <asm/irq.h>
 #include <asm/traps.h>
@@ -37,7 +38,7 @@
 
 extern void q40_init_IRQ(void);
 static void q40_get_model(char *model);
-extern void q40_sched_init(void);
+extern void q40_sched_init(irq_handler_t handler);
 
 static int q40_hwclk(int, struct rtc_time *);
 static unsigned int q40_get_ss(void);
@@ -185,6 +186,11 @@ void __init config_q40(void)
 
 	/* disable a few things that SMSQ might have left enabled */
 	q40_disable_irqs();
+
+	/* no DMA at all, but ide-scsi requires it.. make sure
+	 * all physical RAM fits into the boundary - otherwise
+	 * allocator may play costly and useless tricks */
+	mach_max_dma_address = 1024*1024*1024;
 }
 
 

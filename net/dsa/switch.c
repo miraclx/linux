@@ -89,16 +89,11 @@ static int dsa_switch_mtu(struct dsa_switch *ds,
 static int dsa_switch_bridge_join(struct dsa_switch *ds,
 				  struct dsa_notifier_bridge_info *info)
 {
-	struct dsa_switch_tree *dst = ds->dst;
-
-	if (dst->index == info->tree_index && ds->index == info->sw_index &&
-	    ds->ops->port_bridge_join)
+	if (ds->index == info->sw_index && ds->ops->port_bridge_join)
 		return ds->ops->port_bridge_join(ds, info->port, info->br);
 
-	if ((dst->index != info->tree_index || ds->index != info->sw_index) &&
-	    ds->ops->crosschip_bridge_join)
-		return ds->ops->crosschip_bridge_join(ds, info->tree_index,
-						      info->sw_index,
+	if (ds->index != info->sw_index && ds->ops->crosschip_bridge_join)
+		return ds->ops->crosschip_bridge_join(ds, info->sw_index,
 						      info->port, info->br);
 
 	return 0;
@@ -108,17 +103,13 @@ static int dsa_switch_bridge_leave(struct dsa_switch *ds,
 				   struct dsa_notifier_bridge_info *info)
 {
 	bool unset_vlan_filtering = br_vlan_enabled(info->br);
-	struct dsa_switch_tree *dst = ds->dst;
 	int err, i;
 
-	if (dst->index == info->tree_index && ds->index == info->sw_index &&
-	    ds->ops->port_bridge_join)
+	if (ds->index == info->sw_index && ds->ops->port_bridge_leave)
 		ds->ops->port_bridge_leave(ds, info->port, info->br);
 
-	if ((dst->index != info->tree_index || ds->index != info->sw_index) &&
-	    ds->ops->crosschip_bridge_join)
-		ds->ops->crosschip_bridge_leave(ds, info->tree_index,
-						info->sw_index, info->port,
+	if (ds->index != info->sw_index && ds->ops->crosschip_bridge_leave)
+		ds->ops->crosschip_bridge_leave(ds, info->sw_index, info->port,
 						info->br);
 
 	/* If the bridge was vlan_filtering, the bridge core doesn't trigger an
@@ -139,15 +130,8 @@ static int dsa_switch_bridge_leave(struct dsa_switch *ds,
 		}
 	}
 	if (unset_vlan_filtering) {
-		struct switchdev_trans trans;
+		struct switchdev_trans trans = {0};
 
-		trans.ph_prepare = true;
-		err = dsa_port_vlan_filtering(dsa_to_port(ds, info->port),
-					      false, &trans);
-		if (err && err != EOPNOTSUPP)
-			return err;
-
-		trans.ph_prepare = false;
 		err = dsa_port_vlan_filtering(dsa_to_port(ds, info->port),
 					      false, &trans);
 		if (err && err != EOPNOTSUPP)
@@ -239,6 +223,43 @@ static int dsa_switch_mdb_del(struct dsa_switch *ds,
 	return 0;
 }
 
+static int dsa_port_vlan_device_check(struct net_device *vlan_dev,
+				      int vlan_dev_vid,
+				      void *arg)
+{
+	struct switchdev_obj_port_vlan *vlan = arg;
+	u16 vid;
+
+	for (vid = vlan->vid_begin; vid <= vlan->vid_end; ++vid) {
+		if (vid == vlan_dev_vid)
+			return -EBUSY;
+	}
+
+	return 0;
+}
+
+static int dsa_port_vlan_check(struct dsa_switch *ds, int port,
+			       const struct switchdev_obj_port_vlan *vlan)
+{
+	const struct dsa_port *dp = dsa_to_port(ds, port);
+	int err = 0;
+
+	/* Device is not bridged, let it proceed with the VLAN device
+	 * creation.
+	 */
+	if (!dp->bridge_dev)
+		return err;
+
+	/* dsa_slave_vlan_rx_{add,kill}_vid() cannot use the prepare phase and
+	 * already checks whether there is an overlapping bridge VLAN entry
+	 * with the same VID, so here we only need to check that if we are
+	 * adding a bridge VLAN entry there is not an overlapping VLAN device
+	 * claiming that VID.
+	 */
+	return vlan_for_each(dp->slave, dsa_port_vlan_device_check,
+			     (void *)vlan);
+}
+
 static bool dsa_switch_vlan_match(struct dsa_switch *ds, int port,
 				  struct dsa_notifier_vlan_info *info)
 {
@@ -261,6 +282,10 @@ static int dsa_switch_vlan_prepare(struct dsa_switch *ds,
 
 	for (port = 0; port < ds->num_ports; port++) {
 		if (dsa_switch_vlan_match(ds, port, info)) {
+			err = dsa_port_vlan_check(ds, port, info->vlan);
+			if (err)
+				return err;
+
 			err = ds->ops->port_vlan_prepare(ds, port, info->vlan);
 			if (err)
 				return err;

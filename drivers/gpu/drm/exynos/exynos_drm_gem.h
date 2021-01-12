@@ -21,15 +21,20 @@
  * @base: a gem object.
  *	- a new handle to this gem object would be created
  *	by drm_gem_handle_create().
+ * @buffer: a pointer to exynos_drm_gem_buffer object.
+ *	- contain the information to memory region allocated
+ *	by user request or at framebuffer creation.
+ *	continuous memory region allocated by user request
+ *	or at framebuffer creation.
  * @flags: indicate memory type to allocated buffer and cache attruibute.
  * @size: size requested from user, in bytes and this size is aligned
  *	in page unit.
  * @cookie: cookie returned by dma_alloc_attrs
- * @kvaddr: kernel virtual address to allocated memory region (for fbdev)
+ * @kvaddr: kernel virtual address to allocated memory region.
  * @dma_addr: bus address(accessed by dma) to allocated memory region.
  *	- this address could be physical address without IOMMU and
  *	device address with IOMMU.
- * @dma_attrs: attrs passed dma mapping framework
+ * @pages: Array of backing pages.
  * @sgt: Imported sg_table.
  *
  * P.S. this object would be transferred to user as kms_bo.handle so
@@ -40,9 +45,10 @@ struct exynos_drm_gem {
 	unsigned int		flags;
 	unsigned long		size;
 	void			*cookie;
-	void			*kvaddr;
+	void __iomem		*kvaddr;
 	dma_addr_t		dma_addr;
 	unsigned long		dma_attrs;
+	struct page		**pages;
 	struct sg_table		*sgt;
 };
 
@@ -52,8 +58,7 @@ void exynos_drm_gem_destroy(struct exynos_drm_gem *exynos_gem);
 /* create a new buffer with gem object */
 struct exynos_drm_gem *exynos_drm_gem_create(struct drm_device *dev,
 					     unsigned int flags,
-					     unsigned long size,
-					     bool kvmap);
+					     unsigned long size);
 
 /*
  * request gem object creation and buffer allocation as the size
@@ -81,7 +86,7 @@ struct exynos_drm_gem *exynos_drm_gem_get(struct drm_file *filp,
  */
 static inline void exynos_drm_gem_put(struct exynos_drm_gem *exynos_gem)
 {
-	drm_gem_object_put(&exynos_gem->base);
+	drm_gem_object_put_unlocked(&exynos_gem->base);
 }
 
 /* get buffer information to memory region allocated by gem. */
@@ -96,6 +101,9 @@ int exynos_drm_gem_dumb_create(struct drm_file *file_priv,
 			       struct drm_device *dev,
 			       struct drm_mode_create_dumb *args);
 
+/* page fault handler and mmap fault address(virtual) to physical memory. */
+vm_fault_t exynos_drm_gem_fault(struct vm_fault *vmf);
+
 /* set vm_flags and we can change the vm attribute to other one at here. */
 int exynos_drm_gem_mmap(struct file *filp, struct vm_area_struct *vma);
 
@@ -107,6 +115,8 @@ struct drm_gem_object *
 exynos_drm_gem_prime_import_sg_table(struct drm_device *dev,
 				     struct dma_buf_attachment *attach,
 				     struct sg_table *sgt);
+void *exynos_drm_gem_prime_vmap(struct drm_gem_object *obj);
+void exynos_drm_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr);
 int exynos_drm_gem_prime_mmap(struct drm_gem_object *obj,
 			      struct vm_area_struct *vma);
 

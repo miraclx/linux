@@ -103,9 +103,7 @@ EXPORT_SYMBOL_GPL(enclosure_for_each_device);
  * enclosure_register - register device as an enclosure
  *
  * @dev:	device containing the enclosure
- * @name:	chosen device name
  * @components:	number of components in the enclosure
- * @cb:         platform call-backs
  *
  * This sets up the device for being an enclosure.  Note that @dev does
  * not have to be a dedicated enclosure device.  It may be some other type
@@ -268,7 +266,7 @@ static const struct attribute_group *enclosure_component_groups[];
 /**
  * enclosure_component_alloc - prepare a new enclosure component
  * @edev:	the enclosure to add the component
- * @number:	the device number
+ * @num:	the device number
  * @type:	the type of component being added
  * @name:	an optional name to appear in sysfs (leave NULL if none)
  *
@@ -349,7 +347,7 @@ EXPORT_SYMBOL_GPL(enclosure_component_register);
 /**
  * enclosure_add_device - add a device as being part of an enclosure
  * @edev:	the enclosure device being added to.
- * @component:	the number of the component
+ * @num:	the number of the component
  * @dev:	the device being added
  *
  * Declares a real device to reside in slot (or identifier) @num of an
@@ -391,7 +389,7 @@ EXPORT_SYMBOL_GPL(enclosure_add_device);
 /**
  * enclosure_remove_device - remove a device from an enclosure
  * @edev:	the enclosure device
- * @dev:	device to remove/put
+ * @num:	the number of the component to remove
  *
  * Returns zero on success or an error.
  *

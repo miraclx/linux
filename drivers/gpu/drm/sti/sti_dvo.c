@@ -196,16 +196,16 @@ static struct drm_info_list dvo_debugfs_files[] = {
 	{ "dvo", dvo_dbg_show, 0, NULL },
 };
 
-static void dvo_debugfs_init(struct sti_dvo *dvo, struct drm_minor *minor)
+static int dvo_debugfs_init(struct sti_dvo *dvo, struct drm_minor *minor)
 {
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(dvo_debugfs_files); i++)
 		dvo_debugfs_files[i].data = dvo;
 
-	drm_debugfs_create_files(dvo_debugfs_files,
-				 ARRAY_SIZE(dvo_debugfs_files),
-				 minor->debugfs_root, minor);
+	return drm_debugfs_create_files(dvo_debugfs_files,
+					ARRAY_SIZE(dvo_debugfs_files),
+					minor->debugfs_root, minor);
 }
 
 static void sti_dvo_disable(struct drm_bridge *bridge)
@@ -389,6 +389,8 @@ sti_dvo_connector_detect(struct drm_connector *connector, bool force)
 		dvo->panel = of_drm_find_panel(dvo->panel_node);
 		if (IS_ERR(dvo->panel))
 			dvo->panel = NULL;
+		else
+			drm_panel_attach(dvo->panel, connector);
 	}
 
 	if (dvo->panel)
@@ -403,7 +405,10 @@ static int sti_dvo_late_register(struct drm_connector *connector)
 		= to_sti_dvo_connector(connector);
 	struct sti_dvo *dvo = dvo_connector->dvo;
 
-	dvo_debugfs_init(dvo, dvo->drm_dev->primary);
+	if (dvo_debugfs_init(dvo, dvo->drm_dev->primary)) {
+		DRM_ERROR("DVO debugfs setup failed\n");
+		return -EINVAL;
+	}
 
 	return 0;
 }

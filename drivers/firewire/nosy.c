@@ -52,7 +52,7 @@ struct pcl {
 
 struct packet {
 	unsigned int length;
-	char data[];
+	char data[0];
 };
 
 struct packet_buffer {

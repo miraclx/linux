@@ -12,6 +12,8 @@ MOD_TARGET_BUSY=test_klp_callbacks_busy
 setup_config
 
 
+# TEST: target module before livepatch
+#
 # Test a combination of loading a kernel module and a livepatch that
 # patches a function in the first module.  Load the target module
 # before the livepatch module.  Unload them in the same order.
@@ -26,7 +28,8 @@ setup_config
 #   unpatching transition starts.  klp_objects are reverted, post-patch
 #   callbacks execute and the transition completes.
 
-start_test "target module before livepatch"
+echo -n "TEST: target module before livepatch ... "
+dmesg -C
 
 load_mod $MOD_TARGET
 load_lp $MOD_LIVEPATCH
@@ -60,6 +63,8 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 $MOD_TARGET: ${MOD_TARGET}_exit"
 
 
+# TEST: module_coming notifier
+#
 # This test is similar to the previous test, but (un)load the livepatch
 # module before the target kernel module.  This tests the livepatch
 # core's module_coming handler.
@@ -73,7 +78,8 @@ $MOD_TARGET: ${MOD_TARGET}_exit"
 # - On livepatch disable, all currently loaded klp_objects' (vmlinux and
 #   $MOD_TARGET) pre/post-unpatch callbacks are executed.
 
-start_test "module_coming notifier"
+echo -n "TEST: module_coming notifier ... "
+dmesg -C
 
 load_lp $MOD_LIVEPATCH
 load_mod $MOD_TARGET
@@ -108,6 +114,8 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 $MOD_TARGET: ${MOD_TARGET}_exit"
 
 
+# TEST: module_going notifier
+#
 # Test loading the livepatch after a targeted kernel module, then unload
 # the kernel module before disabling the livepatch.  This tests the
 # livepatch core's module_going handler.
@@ -121,7 +129,8 @@ $MOD_TARGET: ${MOD_TARGET}_exit"
 # - When the livepatch is disabled, pre and post-unpatch callbacks are
 #   run for the remaining klp_object, vmlinux.
 
-start_test "module_going notifier"
+echo -n "TEST: module_going notifier ... "
+dmesg -C
 
 load_mod $MOD_TARGET
 load_lp $MOD_LIVEPATCH
@@ -156,6 +165,8 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 % rmmod $MOD_LIVEPATCH"
 
 
+# TEST: module_coming and module_going notifiers
+#
 # This test is similar to the previous test, however the livepatch is
 # loaded first.  This tests the livepatch core's module_coming and
 # module_going handlers.
@@ -169,7 +180,8 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 #   from the $MOD_TARGET klp_object.  As such, only pre and
 #   post-unpatch callbacks are executed when this occurs.
 
-start_test "module_coming and module_going notifiers"
+echo -n "TEST: module_coming and module_going notifiers ... "
+dmesg -C
 
 load_lp $MOD_LIVEPATCH
 load_mod $MOD_TARGET
@@ -205,6 +217,8 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 % rmmod $MOD_LIVEPATCH"
 
 
+# TEST: target module not present
+#
 # A simple test of loading a livepatch without one of its patch target
 # klp_objects ever loaded ($MOD_TARGET).
 #
@@ -213,7 +227,8 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 # - As expected, only pre/post-(un)patch handlers are executed for
 #   vmlinux.
 
-start_test "target module not present"
+echo -n "TEST: target module not present ... "
+dmesg -C
 
 load_lp $MOD_LIVEPATCH
 disable_lp $MOD_LIVEPATCH
@@ -237,6 +252,8 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 % rmmod $MOD_LIVEPATCH"
 
 
+# TEST: pre-patch callback -ENODEV
+#
 # Test a scenario where a vmlinux pre-patch callback returns a non-zero
 # status (ie, failure).
 #
@@ -248,7 +265,8 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 #   The result is that the insmod command refuses to load the livepatch
 #   module.
 
-start_test "pre-patch callback -ENODEV"
+echo -n "TEST: pre-patch callback -ENODEV ... "
+dmesg -C
 
 load_mod $MOD_TARGET
 load_failing_mod $MOD_LIVEPATCH pre_patch_ret=-19
@@ -270,6 +288,8 @@ modprobe: ERROR: could not insert '$MOD_LIVEPATCH': No such device
 $MOD_TARGET: ${MOD_TARGET}_exit"
 
 
+# TEST: module_coming + pre-patch callback -ENODEV
+#
 # Similar to the previous test, setup a livepatch such that its vmlinux
 # pre-patch callback returns success.  However, when a targeted kernel
 # module is later loaded, have the livepatch return a failing status
@@ -287,7 +307,8 @@ $MOD_TARGET: ${MOD_TARGET}_exit"
 #
 # - Pre/post-unpatch callbacks are run for the vmlinux klp_object.
 
-start_test "module_coming + pre-patch callback -ENODEV"
+echo -n "TEST: module_coming + pre-patch callback -ENODEV ... "
+dmesg -C
 
 load_lp $MOD_LIVEPATCH
 set_pre_patch_ret $MOD_LIVEPATCH -19
@@ -320,6 +341,8 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 % rmmod $MOD_LIVEPATCH"
 
 
+# TEST: multiple target modules
+#
 # Test loading multiple targeted kernel modules.  This test-case is
 # mainly for comparing with the next test-case.
 #
@@ -330,9 +353,12 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 #   module.  Post-patch callbacks are executed and the transition
 #   completes quickly.
 
-start_test "multiple target modules"
+echo -n "TEST: multiple target modules ... "
+dmesg -C
 
-load_mod $MOD_TARGET_BUSY block_transition=N
+load_mod $MOD_TARGET_BUSY sleep_secs=0
+# give $MOD_TARGET_BUSY::busymod_work_func() a chance to run
+sleep 5
 load_lp $MOD_LIVEPATCH
 load_mod $MOD_TARGET
 unload_mod $MOD_TARGET
@@ -340,9 +366,9 @@ disable_lp $MOD_LIVEPATCH
 unload_lp $MOD_LIVEPATCH
 unload_mod $MOD_TARGET_BUSY
 
-check_result "% modprobe $MOD_TARGET_BUSY block_transition=N
+check_result "% modprobe $MOD_TARGET_BUSY sleep_secs=0
 $MOD_TARGET_BUSY: ${MOD_TARGET_BUSY}_init
-$MOD_TARGET_BUSY: busymod_work_func enter
+$MOD_TARGET_BUSY: busymod_work_func, sleeping 0 seconds ...
 $MOD_TARGET_BUSY: busymod_work_func exit
 % modprobe $MOD_LIVEPATCH
 livepatch: enabling patch '$MOD_LIVEPATCH'
@@ -378,8 +404,11 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 $MOD_TARGET_BUSY: ${MOD_TARGET_BUSY}_exit"
 
 
+
+# TEST: busy target module
+#
 # A similar test as the previous one, but force the "busy" kernel module
-# to block the livepatch transition.
+# to do longer work.
 #
 # The livepatching core will refuse to patch a task that is currently
 # executing a to-be-patched function -- the consistency model stalls the
@@ -388,7 +417,8 @@ $MOD_TARGET_BUSY: ${MOD_TARGET_BUSY}_exit"
 # function for a long time.  Meanwhile, load and unload other target
 # kernel modules while the livepatch transition is in progress.
 #
-# - Load the "busy" kernel module, this time make its work function loop
+# - Load the "busy" kernel module, this time make it do 10 seconds worth
+#   of work.
 #
 # - Meanwhile, the livepatch is loaded.  Notice that the patch
 #   transition does not complete as the targeted "busy" module is
@@ -405,25 +435,23 @@ $MOD_TARGET_BUSY: ${MOD_TARGET_BUSY}_exit"
 #   klp_object's post-patch callbacks executed, the remaining
 #   klp_object's pre-unpatch callbacks are skipped.
 
-start_test "busy target module"
+echo -n "TEST: busy target module ... "
+dmesg -C
 
-load_mod $MOD_TARGET_BUSY block_transition=Y
+load_mod $MOD_TARGET_BUSY sleep_secs=10
 load_lp_nowait $MOD_LIVEPATCH
-
-# Wait until the livepatch reports in-transition state, i.e. that it's
-# stalled on $MOD_TARGET_BUSY::busymod_work_func()
-loop_until 'grep -q '^1$' /sys/kernel/livepatch/$MOD_LIVEPATCH/transition' ||
-	die "failed to stall transition"
-
+# Don't wait for transition, load $MOD_TARGET while the transition
+# is still stalled in $MOD_TARGET_BUSY::busymod_work_func()
+sleep 5
 load_mod $MOD_TARGET
 unload_mod $MOD_TARGET
 disable_lp $MOD_LIVEPATCH
 unload_lp $MOD_LIVEPATCH
 unload_mod $MOD_TARGET_BUSY
 
-check_result "% modprobe $MOD_TARGET_BUSY block_transition=Y
+check_result "% modprobe $MOD_TARGET_BUSY sleep_secs=10
 $MOD_TARGET_BUSY: ${MOD_TARGET_BUSY}_init
-$MOD_TARGET_BUSY: busymod_work_func enter
+$MOD_TARGET_BUSY: busymod_work_func, sleeping 10 seconds ...
 % modprobe $MOD_LIVEPATCH
 livepatch: enabling patch '$MOD_LIVEPATCH'
 livepatch: '$MOD_LIVEPATCH': initializing patching transition
@@ -451,6 +479,8 @@ $MOD_TARGET_BUSY: busymod_work_func exit
 $MOD_TARGET_BUSY: ${MOD_TARGET_BUSY}_exit"
 
 
+# TEST: multiple livepatches
+#
 # Test loading multiple livepatches.  This test-case is mainly for comparing
 # with the next test-case.
 #
@@ -458,7 +488,8 @@ $MOD_TARGET_BUSY: ${MOD_TARGET_BUSY}_exit"
 #   execute as each patch progresses through its (un)patching
 #   transition.
 
-start_test "multiple livepatches"
+echo -n "TEST: multiple livepatches ... "
+dmesg -C
 
 load_lp $MOD_LIVEPATCH
 load_lp $MOD_LIVEPATCH2
@@ -501,6 +532,8 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 % rmmod $MOD_LIVEPATCH"
 
 
+# TEST: atomic replace
+#
 # Load multiple livepatches, but the second as an 'atomic-replace'
 # patch.  When the latter loads, the original livepatch should be
 # disabled and *none* of its pre/post-unpatch callbacks executed.  On
@@ -515,7 +548,8 @@ livepatch: '$MOD_LIVEPATCH': unpatching complete
 # - Once the atomic replace module is loaded, only its pre and post
 #   unpatch callbacks are executed.
 
-start_test "atomic replace"
+echo -n "TEST: atomic replace ... "
+dmesg -C
 
 load_lp $MOD_LIVEPATCH
 load_lp $MOD_LIVEPATCH2 replace=1

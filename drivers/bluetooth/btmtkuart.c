@@ -695,7 +695,8 @@ static int btmtkuart_change_baudrate(struct hci_dev *hdev)
 
 	/* Send a dummy byte 0xff to activate the new baudrate */
 	param = 0xff;
-	err = serdev_device_write_buf(bdev->serdev, &param, sizeof(param));
+	err = serdev_device_write(bdev->serdev, &param, sizeof(param),
+				  MAX_SCHEDULE_TIMEOUT);
 	if (err < 0 || err < sizeof(param))
 		return err;
 
@@ -1014,7 +1015,7 @@ static int btmtkuart_probe(struct serdev_device *serdev)
 	if (btmtkuart_is_standalone(bdev)) {
 		err = clk_prepare_enable(bdev->osc);
 		if (err < 0)
-			goto err_hci_free_dev;
+			return err;
 
 		if (bdev->boot) {
 			gpiod_set_value_cansleep(bdev->boot, 1);
@@ -1027,8 +1028,10 @@ static int btmtkuart_probe(struct serdev_device *serdev)
 
 		/* Power on */
 		err = regulator_enable(bdev->vcc);
-		if (err < 0)
-			goto err_clk_disable_unprepare;
+		if (err < 0) {
+			clk_disable_unprepare(bdev->osc);
+			return err;
+		}
 
 		/* Reset if the reset-gpios is available otherwise the board
 		 * -level design should be guaranteed.
@@ -1060,6 +1063,7 @@ static int btmtkuart_probe(struct serdev_device *serdev)
 	err = hci_register_dev(hdev);
 	if (err < 0) {
 		dev_err(&serdev->dev, "Can't register HCI device\n");
+		hci_free_dev(hdev);
 		goto err_regulator_disable;
 	}
 
@@ -1068,11 +1072,6 @@ static int btmtkuart_probe(struct serdev_device *serdev)
 err_regulator_disable:
 	if (btmtkuart_is_standalone(bdev))
 		regulator_disable(bdev->vcc);
-err_clk_disable_unprepare:
-	if (btmtkuart_is_standalone(bdev))
-		clk_disable_unprepare(bdev->osc);
-err_hci_free_dev:
-	hci_free_dev(hdev);
 
 	return err;
 }

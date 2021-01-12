@@ -11,7 +11,7 @@
 /*
  * Linux saves the floating-point registers according to the ISA Linux is
  * executing on, as opposed to the ISA the user program is compiled for.  This
- * is necessary for a handful of esoteric use cases: for example, userspace
+ * is necessary for a handful of esoteric use cases: for example, userpsace
  * threading libraries must be able to examine the actual machine state in
  * order to fully reconstruct the state of a thread.
  */

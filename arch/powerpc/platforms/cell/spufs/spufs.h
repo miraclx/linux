@@ -337,7 +337,8 @@ void spufs_dma_callback(struct spu *spu, int type);
 extern struct spu_coredump_calls spufs_coredump_calls;
 struct spufs_coredump_reader {
 	char *name;
-	ssize_t (*dump)(struct spu_context *ctx, struct coredump_params *cprm);
+	ssize_t (*read)(struct spu_context *ctx,
+			char __user *buffer, size_t size, loff_t *pos);
 	u64 (*get)(struct spu_context *ctx);
 	size_t size;
 };

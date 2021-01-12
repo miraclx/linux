@@ -163,13 +163,13 @@ static int aci_busy_wait(struct snd_miro_aci *aci)
 			switch (timeout-ACI_MINTIME) {
 			case 0 ... 9:
 				out /= 10;
-				fallthrough;
+				/* fall through */
 			case 10 ... 19:
 				out /= 10;
-				fallthrough;
+				/* fall through */
 			case 20 ... 30:
 				out /= 10;
-				fallthrough;
+				/* fall through */
 			default:
 				set_current_state(TASK_UNINTERRUPTIBLE);
 				schedule_timeout(out);
@@ -824,7 +824,7 @@ static unsigned char snd_miro_read(struct snd_miro *chip,
 			retval = inb(chip->mc_base + 9);
 			break;
 		}
-		fallthrough;
+		/* fall through */
 
 	case OPTi9XX_HW_82C929:
 		retval = inb(chip->mc_base + reg);
@@ -854,7 +854,7 @@ static void snd_miro_write(struct snd_miro *chip, unsigned char reg,
 			outb(value, chip->mc_base + 9);
 			break;
 		}
-		fallthrough;
+		/* fall through */
 
 	case OPTi9XX_HW_82C929:
 		outb(value, chip->mc_base + reg);

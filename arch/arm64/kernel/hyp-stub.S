@@ -21,7 +21,7 @@
 
 	.align 11
 
-SYM_CODE_START(__hyp_stub_vectors)
+ENTRY(__hyp_stub_vectors)
 	ventry	el2_sync_invalid		// Synchronous EL2t
 	ventry	el2_irq_invalid			// IRQ EL2t
 	ventry	el2_fiq_invalid			// FIQ EL2t
@@ -41,11 +41,11 @@ SYM_CODE_START(__hyp_stub_vectors)
 	ventry	el1_irq_invalid			// IRQ 32-bit EL1
 	ventry	el1_fiq_invalid			// FIQ 32-bit EL1
 	ventry	el1_error_invalid		// Error 32-bit EL1
-SYM_CODE_END(__hyp_stub_vectors)
+ENDPROC(__hyp_stub_vectors)
 
 	.align 11
 
-SYM_CODE_START_LOCAL(el1_sync)
+el1_sync:
 	cmp	x0, #HVC_SET_VECTORS
 	b.ne	2f
 	msr	vbar_el2, x1
@@ -68,12 +68,12 @@ SYM_CODE_START_LOCAL(el1_sync)
 
 9:	mov	x0, xzr
 	eret
-SYM_CODE_END(el1_sync)
+ENDPROC(el1_sync)
 
 .macro invalid_vector	label
-SYM_CODE_START_LOCAL(\label)
+\label:
 	b \label
-SYM_CODE_END(\label)
+ENDPROC(\label)
 .endm
 
 	invalid_vector	el2_sync_invalid
@@ -106,15 +106,15 @@ SYM_CODE_END(\label)
  * initialisation entry point.
  */
 
-SYM_FUNC_START(__hyp_set_vectors)
+ENTRY(__hyp_set_vectors)
 	mov	x1, x0
 	mov	x0, #HVC_SET_VECTORS
 	hvc	#0
 	ret
-SYM_FUNC_END(__hyp_set_vectors)
+ENDPROC(__hyp_set_vectors)
 
-SYM_FUNC_START(__hyp_reset_vectors)
+ENTRY(__hyp_reset_vectors)
 	mov	x0, #HVC_RESET_VECTORS
 	hvc	#0
 	ret
-SYM_FUNC_END(__hyp_reset_vectors)
+ENDPROC(__hyp_reset_vectors)

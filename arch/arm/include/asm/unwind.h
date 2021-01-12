@@ -36,8 +36,7 @@ extern struct unwind_table *unwind_table_add(unsigned long start,
 					     unsigned long text_addr,
 					     unsigned long text_size);
 extern void unwind_table_del(struct unwind_table *tab);
-extern void unwind_backtrace(struct pt_regs *regs, struct task_struct *tsk,
-			     const char *loglvl);
+extern void unwind_backtrace(struct pt_regs *regs, struct task_struct *tsk);
 
 #endif	/* !__ASSEMBLY__ */
 

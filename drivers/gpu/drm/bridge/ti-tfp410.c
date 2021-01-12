@@ -51,15 +51,11 @@ static int tfp410_get_modes(struct drm_connector *connector)
 	struct edid *edid;
 	int ret;
 
-	if (dvi->next_bridge->ops & DRM_BRIDGE_OP_EDID) {
-		edid = drm_bridge_get_edid(dvi->next_bridge, connector);
-		if (!edid)
+	edid = drm_bridge_get_edid(dvi->next_bridge, connector);
+	if (IS_ERR_OR_NULL(edid)) {
+		if (edid != ERR_PTR(-ENOTSUPP))
 			DRM_INFO("EDID read failed. Fallback to standard modes\n");
-	} else {
-		edid = NULL;
-	}
 
-	if (!edid) {
 		/*
 		 * No EDID, fallback on the XGA standard modes and prefer a mode
 		 * pretty much anything can handle.
@@ -192,7 +188,6 @@ static void tfp410_disable(struct drm_bridge *bridge)
 }
 
 static enum drm_mode_status tfp410_mode_valid(struct drm_bridge *bridge,
-					      const struct drm_display_info *info,
 					      const struct drm_display_mode *mode)
 {
 	if (mode->clock < 25000)
@@ -225,7 +220,7 @@ static int tfp410_parse_timings(struct tfp410 *dvi, bool i2c)
 	struct device_node *ep;
 	u32 pclk_sample = 0;
 	u32 bus_width = 24;
-	u32 deskew = 0;
+	s32 deskew = 0;
 
 	/* Start with defaults. */
 	*timings = tfp410_default_timings;
@@ -279,12 +274,12 @@ static int tfp410_parse_timings(struct tfp410 *dvi, bool i2c)
 	}
 
 	/* Get the setup and hold time from vendor-specific properties. */
-	of_property_read_u32(dvi->dev->of_node, "ti,deskew", &deskew);
-	if (deskew > 7)
+	of_property_read_u32(dvi->dev->of_node, "ti,deskew", (u32 *)&deskew);
+	if (deskew < -4 || deskew > 3)
 		return -EINVAL;
 
-	timings->setup_time_ps = 1200 - 350 * ((s32)deskew - 4);
-	timings->hold_time_ps = max(0, 1300 + 350 * ((s32)deskew - 4));
+	timings->setup_time_ps = min(0, 1200 - 350 * deskew);
+	timings->hold_time_ps = min(0, 1300 + 350 * deskew);
 
 	return 0;
 }

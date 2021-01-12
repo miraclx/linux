@@ -11,21 +11,22 @@ LDLIBS += $(VAR_LDLIBS)
 
 TEST_PROGS := gpio-mockup.sh
 TEST_FILES := gpio-mockup-sysfs.sh
-TEST_GEN_PROGS_EXTENDED := gpio-mockup-chardev
+TEST_PROGS_EXTENDED := gpio-mockup-chardev
+
+GPIODIR := $(realpath ../../../gpio)
+GPIOOBJ := gpio-utils.o
+
+all: $(TEST_PROGS_EXTENDED)
+
+override define CLEAN
+	$(RM) $(TEST_PROGS_EXTENDED)
+	$(MAKE) -C $(GPIODIR) OUTPUT=$(GPIODIR)/ clean
+endef
 
 KSFT_KHDR_INSTALL := 1
 include ../lib.mk
 
-GPIODIR := $(realpath ../../../gpio)
-GPIOOUT := $(OUTPUT)/tools-gpio/
-GPIOOBJ := $(GPIOOUT)/gpio-utils.o
+$(TEST_PROGS_EXTENDED): $(GPIODIR)/$(GPIOOBJ)
 
-CLEAN += ; $(RM) -rf $(GPIOOUT)
-
-$(TEST_GEN_PROGS_EXTENDED): $(GPIOOBJ)
-
-$(GPIOOUT):
-	mkdir -p $@
-
-$(GPIOOBJ): $(GPIOOUT)
-	$(MAKE) OUTPUT=$(GPIOOUT) -C $(GPIODIR)
+$(GPIODIR)/$(GPIOOBJ):
+	$(MAKE) OUTPUT=$(GPIODIR)/ -C $(GPIODIR)

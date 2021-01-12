@@ -482,11 +482,11 @@ static void snoop_urb(struct usb_device *udev,
 
 	if (userurb) {		/* Async */
 		if (when == SUBMIT)
-			dev_info(&udev->dev, "userurb %px, ep%d %s-%s, "
+			dev_info(&udev->dev, "userurb %pK, ep%d %s-%s, "
 					"length %u\n",
 					userurb, ep, t, d, length);
 		else
-			dev_info(&udev->dev, "userurb %px, ep%d %s-%s, "
+			dev_info(&udev->dev, "userurb %pK, ep%d %s-%s, "
 					"actual_length %u status %d\n",
 					userurb, ep, t, d, length,
 					timeout_or_status);
@@ -1102,20 +1102,22 @@ static int usbdev_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int do_proc_control(struct usb_dev_state *ps,
-		struct usbdevfs_ctrltransfer *ctrl)
+static int proc_control(struct usb_dev_state *ps, void __user *arg)
 {
 	struct usb_device *dev = ps->dev;
+	struct usbdevfs_ctrltransfer ctrl;
 	unsigned int tmo;
 	unsigned char *tbuf;
 	unsigned wLength;
 	int i, pipe, ret;
 
-	ret = check_ctrlrecip(ps, ctrl->bRequestType, ctrl->bRequest,
-			      ctrl->wIndex);
+	if (copy_from_user(&ctrl, arg, sizeof(ctrl)))
+		return -EFAULT;
+	ret = check_ctrlrecip(ps, ctrl.bRequestType, ctrl.bRequest,
+			      ctrl.wIndex);
 	if (ret)
 		return ret;
-	wLength = ctrl->wLength;	/* To suppress 64k PAGE_SIZE warning */
+	wLength = ctrl.wLength;		/* To suppress 64k PAGE_SIZE warning */
 	if (wLength > PAGE_SIZE)
 		return -EINVAL;
 	ret = usbfs_increase_memory_usage(PAGE_SIZE + sizeof(struct urb) +
@@ -1127,52 +1129,57 @@ static int do_proc_control(struct usb_dev_state *ps,
 		ret = -ENOMEM;
 		goto done;
 	}
-	tmo = ctrl->timeout;
+	tmo = ctrl.timeout;
 	snoop(&dev->dev, "control urb: bRequestType=%02x "
 		"bRequest=%02x wValue=%04x "
 		"wIndex=%04x wLength=%04x\n",
-		ctrl->bRequestType, ctrl->bRequest, ctrl->wValue,
-		ctrl->wIndex, ctrl->wLength);
-	if (ctrl->bRequestType & 0x80) {
+		ctrl.bRequestType, ctrl.bRequest, ctrl.wValue,
+		ctrl.wIndex, ctrl.wLength);
+	if (ctrl.bRequestType & 0x80) {
+		if (ctrl.wLength && !access_ok(ctrl.data,
+					       ctrl.wLength)) {
+			ret = -EINVAL;
+			goto done;
+		}
 		pipe = usb_rcvctrlpipe(dev, 0);
-		snoop_urb(dev, NULL, pipe, ctrl->wLength, tmo, SUBMIT, NULL, 0);
+		snoop_urb(dev, NULL, pipe, ctrl.wLength, tmo, SUBMIT, NULL, 0);
 
 		usb_unlock_device(dev);
-		i = usb_control_msg(dev, pipe, ctrl->bRequest,
-				    ctrl->bRequestType, ctrl->wValue, ctrl->wIndex,
-				    tbuf, ctrl->wLength, tmo);
+		i = usb_control_msg(dev, pipe, ctrl.bRequest,
+				    ctrl.bRequestType, ctrl.wValue, ctrl.wIndex,
+				    tbuf, ctrl.wLength, tmo);
 		usb_lock_device(dev);
 		snoop_urb(dev, NULL, pipe, max(i, 0), min(i, 0), COMPLETE,
 			  tbuf, max(i, 0));
-		if ((i > 0) && ctrl->wLength) {
-			if (copy_to_user(ctrl->data, tbuf, i)) {
+		if ((i > 0) && ctrl.wLength) {
+			if (copy_to_user(ctrl.data, tbuf, i)) {
 				ret = -EFAULT;
 				goto done;
 			}
 		}
 	} else {
-		if (ctrl->wLength) {
-			if (copy_from_user(tbuf, ctrl->data, ctrl->wLength)) {
+		if (ctrl.wLength) {
+			if (copy_from_user(tbuf, ctrl.data, ctrl.wLength)) {
 				ret = -EFAULT;
 				goto done;
 			}
 		}
 		pipe = usb_sndctrlpipe(dev, 0);
-		snoop_urb(dev, NULL, pipe, ctrl->wLength, tmo, SUBMIT,
-			tbuf, ctrl->wLength);
+		snoop_urb(dev, NULL, pipe, ctrl.wLength, tmo, SUBMIT,
+			tbuf, ctrl.wLength);
 
 		usb_unlock_device(dev);
-		i = usb_control_msg(dev, usb_sndctrlpipe(dev, 0), ctrl->bRequest,
-				    ctrl->bRequestType, ctrl->wValue, ctrl->wIndex,
-				    tbuf, ctrl->wLength, tmo);
+		i = usb_control_msg(dev, usb_sndctrlpipe(dev, 0), ctrl.bRequest,
+				    ctrl.bRequestType, ctrl.wValue, ctrl.wIndex,
+				    tbuf, ctrl.wLength, tmo);
 		usb_lock_device(dev);
 		snoop_urb(dev, NULL, pipe, max(i, 0), min(i, 0), COMPLETE, NULL, 0);
 	}
 	if (i < 0 && i != -EPIPE) {
 		dev_printk(KERN_DEBUG, &dev->dev, "usbfs: USBDEVFS_CONTROL "
 			   "failed cmd %s rqt %u rq %u len %u ret %d\n",
-			   current->comm, ctrl->bRequestType, ctrl->bRequest,
-			   ctrl->wLength, i);
+			   current->comm, ctrl.bRequestType, ctrl.bRequest,
+			   ctrl.wLength, i);
 	}
 	ret = i;
  done:
@@ -1182,37 +1189,30 @@ static int do_proc_control(struct usb_dev_state *ps,
 	return ret;
 }
 
-static int proc_control(struct usb_dev_state *ps, void __user *arg)
-{
-	struct usbdevfs_ctrltransfer ctrl;
-
-	if (copy_from_user(&ctrl, arg, sizeof(ctrl)))
-		return -EFAULT;
-	return do_proc_control(ps, &ctrl);
-}
-
-static int do_proc_bulk(struct usb_dev_state *ps,
-		struct usbdevfs_bulktransfer *bulk)
+static int proc_bulk(struct usb_dev_state *ps, void __user *arg)
 {
 	struct usb_device *dev = ps->dev;
+	struct usbdevfs_bulktransfer bulk;
 	unsigned int tmo, len1, pipe;
 	int len2;
 	unsigned char *tbuf;
 	int i, ret;
 
-	ret = findintfep(ps->dev, bulk->ep);
+	if (copy_from_user(&bulk, arg, sizeof(bulk)))
+		return -EFAULT;
+	ret = findintfep(ps->dev, bulk.ep);
 	if (ret < 0)
 		return ret;
 	ret = checkintf(ps, ret);
 	if (ret)
 		return ret;
-	if (bulk->ep & USB_DIR_IN)
-		pipe = usb_rcvbulkpipe(dev, bulk->ep & 0x7f);
+	if (bulk.ep & USB_DIR_IN)
+		pipe = usb_rcvbulkpipe(dev, bulk.ep & 0x7f);
 	else
-		pipe = usb_sndbulkpipe(dev, bulk->ep & 0x7f);
-	if (!usb_maxpacket(dev, pipe, !(bulk->ep & USB_DIR_IN)))
+		pipe = usb_sndbulkpipe(dev, bulk.ep & 0x7f);
+	if (!usb_maxpacket(dev, pipe, !(bulk.ep & USB_DIR_IN)))
 		return -EINVAL;
-	len1 = bulk->len;
+	len1 = bulk.len;
 	if (len1 >= (INT_MAX - sizeof(struct urb)))
 		return -EINVAL;
 	ret = usbfs_increase_memory_usage(len1 + sizeof(struct urb));
@@ -1223,8 +1223,12 @@ static int do_proc_bulk(struct usb_dev_state *ps,
 		ret = -ENOMEM;
 		goto done;
 	}
-	tmo = bulk->timeout;
-	if (bulk->ep & 0x80) {
+	tmo = bulk.timeout;
+	if (bulk.ep & 0x80) {
+		if (len1 && !access_ok(bulk.data, len1)) {
+			ret = -EINVAL;
+			goto done;
+		}
 		snoop_urb(dev, NULL, pipe, len1, tmo, SUBMIT, NULL, 0);
 
 		usb_unlock_device(dev);
@@ -1233,14 +1237,14 @@ static int do_proc_bulk(struct usb_dev_state *ps,
 		snoop_urb(dev, NULL, pipe, len2, i, COMPLETE, tbuf, len2);
 
 		if (!i && len2) {
-			if (copy_to_user(bulk->data, tbuf, len2)) {
+			if (copy_to_user(bulk.data, tbuf, len2)) {
 				ret = -EFAULT;
 				goto done;
 			}
 		}
 	} else {
 		if (len1) {
-			if (copy_from_user(tbuf, bulk->data, len1)) {
+			if (copy_from_user(tbuf, bulk.data, len1)) {
 				ret = -EFAULT;
 				goto done;
 			}
@@ -1257,15 +1261,6 @@ static int do_proc_bulk(struct usb_dev_state *ps,
 	kfree(tbuf);
 	usbfs_decrease_memory_usage(len1 + sizeof(struct urb));
 	return ret;
-}
-
-static int proc_bulk(struct usb_dev_state *ps, void __user *arg)
-{
-	struct usbdevfs_bulktransfer bulk;
-
-	if (copy_from_user(&bulk, arg, sizeof(bulk)))
-		return -EFAULT;
-	return do_proc_bulk(ps, &bulk);
 }
 
 static void check_reset_of_active_ep(struct usb_device *udev,
@@ -1997,7 +1992,7 @@ static int proc_reapurb(struct usb_dev_state *ps, void __user *arg)
 	if (as) {
 		int retval;
 
-		snoop(&ps->dev->dev, "reap %px\n", as->userurb);
+		snoop(&ps->dev->dev, "reap %pK\n", as->userurb);
 		retval = processcompl(as, (void __user * __user *)arg);
 		free_async(as);
 		return retval;
@@ -2014,7 +2009,7 @@ static int proc_reapurbnonblock(struct usb_dev_state *ps, void __user *arg)
 
 	as = async_getcompleted(ps);
 	if (as) {
-		snoop(&ps->dev->dev, "reap %px\n", as->userurb);
+		snoop(&ps->dev->dev, "reap %pK\n", as->userurb);
 		retval = processcompl(as, (void __user * __user *)arg);
 		free_async(as);
 	} else {
@@ -2027,31 +2022,33 @@ static int proc_reapurbnonblock(struct usb_dev_state *ps, void __user *arg)
 static int proc_control_compat(struct usb_dev_state *ps,
 				struct usbdevfs_ctrltransfer32 __user *p32)
 {
-	struct usbdevfs_ctrltransfer ctrl;
-	u32 udata;
-
-	if (copy_from_user(&ctrl, p32, sizeof(*p32) - sizeof(compat_caddr_t)) ||
-	    get_user(udata, &p32->data))
+	struct usbdevfs_ctrltransfer __user *p;
+	__u32 udata;
+	p = compat_alloc_user_space(sizeof(*p));
+	if (copy_in_user(p, p32, (sizeof(*p32) - sizeof(compat_caddr_t))) ||
+	    get_user(udata, &p32->data) ||
+	    put_user(compat_ptr(udata), &p->data))
 		return -EFAULT;
-	ctrl.data = compat_ptr(udata);
-	return do_proc_control(ps, &ctrl);
+	return proc_control(ps, p);
 }
 
 static int proc_bulk_compat(struct usb_dev_state *ps,
 			struct usbdevfs_bulktransfer32 __user *p32)
 {
-	struct usbdevfs_bulktransfer bulk;
+	struct usbdevfs_bulktransfer __user *p;
+	compat_uint_t n;
 	compat_caddr_t addr;
 
-	if (get_user(bulk.ep, &p32->ep) ||
-	    get_user(bulk.len, &p32->len) ||
-	    get_user(bulk.timeout, &p32->timeout) ||
-	    get_user(addr, &p32->data))
-		return -EFAULT;
-	bulk.data = compat_ptr(addr);
-	return do_proc_bulk(ps, &bulk);
-}
+	p = compat_alloc_user_space(sizeof(*p));
 
+	if (get_user(n, &p32->ep) || put_user(n, &p->ep) ||
+	    get_user(n, &p32->len) || put_user(n, &p->len) ||
+	    get_user(n, &p32->timeout) || put_user(n, &p->timeout) ||
+	    get_user(addr, &p32->data) || put_user(compat_ptr(addr), &p->data))
+		return -EFAULT;
+
+	return proc_bulk(ps, p);
+}
 static int proc_disconnectsignal_compat(struct usb_dev_state *ps, void __user *arg)
 {
 	struct usbdevfs_disconnectsignal32 ds;
@@ -2142,7 +2139,7 @@ static int proc_reapurb_compat(struct usb_dev_state *ps, void __user *arg)
 	if (as) {
 		int retval;
 
-		snoop(&ps->dev->dev, "reap %px\n", as->userurb);
+		snoop(&ps->dev->dev, "reap %pK\n", as->userurb);
 		retval = processcompl_compat(as, (void __user * __user *)arg);
 		free_async(as);
 		return retval;
@@ -2159,7 +2156,7 @@ static int proc_reapurbnonblock_compat(struct usb_dev_state *ps, void __user *ar
 
 	as = async_getcompleted(ps);
 	if (as) {
-		snoop(&ps->dev->dev, "reap %px\n", as->userurb);
+		snoop(&ps->dev->dev, "reap %pK\n", as->userurb);
 		retval = processcompl_compat(as, (void __user * __user *)arg);
 		free_async(as);
 	} else {
@@ -2624,7 +2621,7 @@ static long usbdev_do_ioctl(struct file *file, unsigned int cmd,
 #endif
 
 	case USBDEVFS_DISCARDURB:
-		snoop(&dev->dev, "%s: DISCARDURB %px\n", __func__, p);
+		snoop(&dev->dev, "%s: DISCARDURB %pK\n", __func__, p);
 		ret = proc_unlinkurb(ps, p);
 		break;
 

@@ -61,16 +61,8 @@ struct tegra_gpio_info;
 struct tegra_gpio_bank {
 	unsigned int bank;
 	unsigned int irq;
-
-	/*
-	 * IRQ-core code uses raw locking, and thus, nested locking also
-	 * should be raw in order not to trip spinlock debug warnings.
-	 */
-	raw_spinlock_t lvl_lock[4];
-
-	/* Lock for updating debounce count register */
-	spinlock_t dbc_lock[4];
-
+	spinlock_t lvl_lock[4];
+	spinlock_t dbc_lock[4];	/* Lock for updating debounce count register */
 #ifdef CONFIG_PM_SLEEP
 	u32 cnf[4];
 	u32 out[4];
@@ -342,14 +334,14 @@ static int tegra_gpio_irq_set_type(struct irq_data *d, unsigned int type)
 		return -EINVAL;
 	}
 
-	raw_spin_lock_irqsave(&bank->lvl_lock[port], flags);
+	spin_lock_irqsave(&bank->lvl_lock[port], flags);
 
 	val = tegra_gpio_readl(tgi, GPIO_INT_LVL(tgi, gpio));
 	val &= ~(GPIO_INT_LVL_MASK << GPIO_BIT(gpio));
 	val |= lvl_type << GPIO_BIT(gpio);
 	tegra_gpio_writel(tgi, val, GPIO_INT_LVL(tgi, gpio));
 
-	raw_spin_unlock_irqrestore(&bank->lvl_lock[port], flags);
+	spin_unlock_irqrestore(&bank->lvl_lock[port], flags);
 
 	tegra_gpio_mask_write(tgi, GPIO_MSK_OE(tgi, gpio), gpio, 0);
 	tegra_gpio_enable(tgi, gpio);
@@ -568,9 +560,6 @@ static const struct dev_pm_ops tegra_gpio_pm_ops = {
 	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(tegra_gpio_suspend, tegra_gpio_resume)
 };
 
-static struct lock_class_key gpio_lock_class;
-static struct lock_class_key gpio_request_class;
-
 static int tegra_gpio_probe(struct platform_device *pdev)
 {
 	struct tegra_gpio_info *tgi;
@@ -672,7 +661,6 @@ static int tegra_gpio_probe(struct platform_device *pdev)
 		bank = &tgi->bank_info[GPIO_BANK(gpio)];
 
 		irq_set_chip_data(irq, bank);
-		irq_set_lockdep_class(irq, &gpio_lock_class, &gpio_request_class);
 		irq_set_chip_and_handler(irq, &tgi->ic, handle_simple_irq);
 	}
 
@@ -683,7 +671,7 @@ static int tegra_gpio_probe(struct platform_device *pdev)
 						 tegra_gpio_irq_handler, bank);
 
 		for (j = 0; j < 4; j++) {
-			raw_spin_lock_init(&bank->lvl_lock[j]);
+			spin_lock_init(&bank->lvl_lock[j]);
 			spin_lock_init(&bank->dbc_lock[j]);
 		}
 	}

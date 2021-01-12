@@ -21,7 +21,12 @@
  */
 int rt2x00pci_probe(struct pci_dev *pci_dev, const struct rt2x00_ops *ops);
 void rt2x00pci_remove(struct pci_dev *pci_dev);
-
-extern const struct dev_pm_ops rt2x00pci_pm_ops;
+#ifdef CONFIG_PM
+int rt2x00pci_suspend(struct pci_dev *pci_dev, pm_message_t state);
+int rt2x00pci_resume(struct pci_dev *pci_dev);
+#else
+#define rt2x00pci_suspend	NULL
+#define rt2x00pci_resume	NULL
+#endif /* CONFIG_PM */
 
 #endif /* RT2X00PCI_H */

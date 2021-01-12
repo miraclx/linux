@@ -35,6 +35,7 @@
 #include <asm/machdep.h>
 #include <asm/xmon.h>
 #include <asm/processor.h>
+#include <asm/pgtable.h>
 #include <asm/mmu.h>
 #include <asm/mmu_context.h>
 #include <asm/plpar_wrappers.h>
@@ -53,7 +54,6 @@
 #include <asm/firmware.h>
 #include <asm/code-patching.h>
 #include <asm/sections.h>
-#include <asm/inst.h>
 
 #ifdef CONFIG_PPC64
 #include <asm/hvcall.h>
@@ -62,7 +62,6 @@
 
 #include "nonstdio.h"
 #include "dis-asm.h"
-#include "xmon_bpts.h"
 
 #ifdef CONFIG_SMP
 static cpumask_t cpus_in_xmon = CPU_MASK_NONE;
@@ -99,7 +98,7 @@ static long *xmon_fault_jmp[NR_CPUS];
 /* Breakpoint stuff */
 struct bpt {
 	unsigned long	address;
-	struct ppc_inst	*instr;
+	unsigned int	instr[2];
 	atomic_t	ref_count;
 	int		enabled;
 	unsigned long	pad;
@@ -110,8 +109,9 @@ struct bpt {
 #define BP_TRAP		2
 #define BP_DABR		4
 
+#define NBPTS	256
 static struct bpt bpts[NBPTS];
-static struct bpt dabr[HBP_NUM_MAX];
+static struct bpt dabr;
 static struct bpt *iabr;
 static unsigned bpinstr = 0x7fe00008;	/* trap */
 
@@ -121,7 +121,6 @@ static unsigned bpinstr = 0x7fe00008;	/* trap */
 static int cmds(struct pt_regs *);
 static int mread(unsigned long, void *, int);
 static int mwrite(unsigned long, void *, int);
-static int mread_instr(unsigned long, struct ppc_inst *);
 static int handle_fault(struct pt_regs *);
 static void byterev(unsigned char *, int);
 static void memex(void);
@@ -327,6 +326,11 @@ static inline void sync(void)
 	asm volatile("sync; isync");
 }
 
+static inline void store_inst(void *p)
+{
+	asm volatile ("dcbst 0,%0; sync; icbi 0,%0; isync" : : "r" (p));
+}
+
 static inline void cflush(void *p)
 {
 	asm volatile ("dcbf 0,%0; icbi 0,%0" : : "r" (p));
@@ -479,13 +483,6 @@ static inline int unrecoverable_excp(struct pt_regs *regs)
 #else
 	return ((regs->msr & MSR_RI) == 0);
 #endif
-}
-
-static void xmon_touch_watchdogs(void)
-{
-	touch_softlockup_watchdog_sync();
-	rcu_cpu_stall_reset();
-	touch_nmi_watchdog();
 }
 
 static int xmon_core(struct pt_regs *regs, int fromipi)
@@ -709,13 +706,13 @@ static int xmon_core(struct pt_regs *regs, int fromipi)
 	if ((regs->msr & (MSR_IR|MSR_PR|MSR_64BIT)) == (MSR_IR|MSR_64BIT)) {
 		bp = at_breakpoint(regs->nip);
 		if (bp != NULL) {
-			int stepped = emulate_step(regs, ppc_inst_read(bp->instr));
+			int stepped = emulate_step(regs, bp->instr[0]);
 			if (stepped == 0) {
 				regs->nip = (unsigned long) &bp->instr[0];
 				atomic_inc(&bp->ref_count);
 			} else if (stepped < 0) {
 				printf("Couldn't single-step %s instruction\n",
-				    IS_RFID(ppc_inst_read(bp->instr))? "rfid": "mtmsrd");
+				    (IS_RFID(bp->instr[0])? "rfid": "mtmsrd"));
 			}
 		}
 	}
@@ -725,7 +722,7 @@ static int xmon_core(struct pt_regs *regs, int fromipi)
 	else
 		insert_cpu_bpts();
 
-	xmon_touch_watchdogs();
+	touch_nmi_watchdog();
 	local_irq_restore(flags);
 
 	return cmd != 'X' && cmd != EOF;
@@ -764,8 +761,8 @@ static int xmon_bpt(struct pt_regs *regs)
 
 	/* Are we at the trap at bp->instr[1] for some bp? */
 	bp = in_breakpoint_table(regs->nip, &offset);
-	if (bp != NULL && (offset == 4 || offset == 8)) {
-		regs->nip = bp->address + offset;
+	if (bp != NULL && offset == 4) {
+		regs->nip = bp->address + 4;
 		atomic_dec(&bp->ref_count);
 		return 1;
 	}
@@ -790,17 +787,10 @@ static int xmon_sstep(struct pt_regs *regs)
 
 static int xmon_break_match(struct pt_regs *regs)
 {
-	int i;
-
 	if ((regs->msr & (MSR_IR|MSR_PR|MSR_64BIT)) != (MSR_IR|MSR_64BIT))
 		return 0;
-	for (i = 0; i < nr_wp_slots(); i++) {
-		if (dabr[i].enabled)
-			goto found;
-	}
-	return 0;
-
-found:
+	if (dabr.enabled == 0)
+		return 0;
 	xmon_core(regs, 0);
 	return 1;
 }
@@ -869,13 +859,15 @@ static struct bpt *in_breakpoint_table(unsigned long nip, unsigned long *offp)
 {
 	unsigned long off;
 
-	off = nip - (unsigned long)bpt_table;
-	if (off >= sizeof(bpt_table))
+	off = nip - (unsigned long) bpts;
+	if (off >= sizeof(bpts))
 		return NULL;
-	*offp = off & (BPT_SIZE - 1);
-	if (off & 3)
+	off %= sizeof(struct bpt);
+	if (off != offsetof(struct bpt, instr[0])
+	    && off != offsetof(struct bpt, instr[1]))
 		return NULL;
-	return bpts + (off / BPT_SIZE);
+	*offp = off - offsetof(struct bpt, instr[0]);
+	return (struct bpt *) (nip - off);
 }
 
 static struct bpt *new_breakpoint(unsigned long a)
@@ -890,7 +882,8 @@ static struct bpt *new_breakpoint(unsigned long a)
 	for (bp = bpts; bp < &bpts[NBPTS]; ++bp) {
 		if (!bp->enabled && atomic_read(&bp->ref_count) == 0) {
 			bp->address = a;
-			bp->instr = (void *)(bpt_table + ((bp - bpts) * BPT_WORDS));
+			bp->instr[1] = bpinstr;
+			store_inst(&bp->instr[1]);
 			return bp;
 		}
 	}
@@ -902,76 +895,47 @@ static struct bpt *new_breakpoint(unsigned long a)
 static void insert_bpts(void)
 {
 	int i;
-	struct ppc_inst instr, instr2;
-	struct bpt *bp, *bp2;
+	struct bpt *bp;
 
 	bp = bpts;
 	for (i = 0; i < NBPTS; ++i, ++bp) {
 		if ((bp->enabled & (BP_TRAP|BP_CIABR)) == 0)
 			continue;
-		if (!mread_instr(bp->address, &instr)) {
+		if (mread(bp->address, &bp->instr[0], 4) != 4) {
 			printf("Couldn't read instruction at %lx, "
 			       "disabling breakpoint there\n", bp->address);
 			bp->enabled = 0;
 			continue;
 		}
-		if (IS_MTMSRD(instr) || IS_RFID(instr)) {
+		if (IS_MTMSRD(bp->instr[0]) || IS_RFID(bp->instr[0])) {
 			printf("Breakpoint at %lx is on an mtmsrd or rfid "
 			       "instruction, disabling it\n", bp->address);
 			bp->enabled = 0;
 			continue;
 		}
-		/*
-		 * Check the address is not a suffix by looking for a prefix in
-		 * front of it.
-		 */
-		if (mread_instr(bp->address - 4, &instr2) == 8) {
-			printf("Breakpoint at %lx is on the second word of a prefixed instruction, disabling it\n",
-			       bp->address);
-			bp->enabled = 0;
-			continue;
-		}
-		/*
-		 * We might still be a suffix - if the prefix has already been
-		 * replaced by a breakpoint we won't catch it with the above
-		 * test.
-		 */
-		bp2 = at_breakpoint(bp->address - 4);
-		if (bp2 && ppc_inst_prefixed(ppc_inst_read(bp2->instr))) {
-			printf("Breakpoint at %lx is on the second word of a prefixed instruction, disabling it\n",
-			       bp->address);
-			bp->enabled = 0;
-			continue;
-		}
-
-		patch_instruction(bp->instr, instr);
-		patch_instruction(ppc_inst_next(bp->instr, &instr),
-				  ppc_inst(bpinstr));
+		store_inst(&bp->instr[0]);
 		if (bp->enabled & BP_CIABR)
 			continue;
-		if (patch_instruction((struct ppc_inst *)bp->address,
-				      ppc_inst(bpinstr)) != 0) {
+		if (patch_instruction((unsigned int *)bp->address,
+							bpinstr) != 0) {
 			printf("Couldn't write instruction at %lx, "
 			       "disabling breakpoint there\n", bp->address);
 			bp->enabled &= ~BP_TRAP;
 			continue;
 		}
+		store_inst((void *)bp->address);
 	}
 }
 
 static void insert_cpu_bpts(void)
 {
-	int i;
 	struct arch_hw_breakpoint brk;
 
-	for (i = 0; i < nr_wp_slots(); i++) {
-		if (dabr[i].enabled) {
-			brk.address = dabr[i].address;
-			brk.type = (dabr[i].enabled & HW_BRK_TYPE_DABR) | HW_BRK_TYPE_PRIV_ALL;
-			brk.len = 8;
-			brk.hw_len = 8;
-			__set_breakpoint(i, &brk);
-		}
+	if (dabr.enabled) {
+		brk.address = dabr.address;
+		brk.type = (dabr.enabled & HW_BRK_TYPE_DABR) | HW_BRK_TYPE_PRIV_ALL;
+		brk.len = DABR_MAX_LEN;
+		__set_breakpoint(&brk);
 	}
 
 	if (iabr)
@@ -982,18 +946,20 @@ static void remove_bpts(void)
 {
 	int i;
 	struct bpt *bp;
-	struct ppc_inst instr;
+	unsigned instr;
 
 	bp = bpts;
 	for (i = 0; i < NBPTS; ++i, ++bp) {
 		if ((bp->enabled & (BP_TRAP|BP_CIABR)) != BP_TRAP)
 			continue;
-		if (mread_instr(bp->address, &instr)
-		    && ppc_inst_equal(instr, ppc_inst(bpinstr))
+		if (mread(bp->address, &instr, 4) == 4
+		    && instr == bpinstr
 		    && patch_instruction(
-			(struct ppc_inst *)bp->address, ppc_inst_read(bp->instr)) != 0)
+			(unsigned int *)bp->address, bp->instr[0]) != 0)
 			printf("Couldn't remove breakpoint at %lx\n",
 			       bp->address);
+		else
+			store_inst((void *)bp->address);
 	}
 }
 
@@ -1198,13 +1164,13 @@ static int do_step(struct pt_regs *regs)
  */
 static int do_step(struct pt_regs *regs)
 {
-	struct ppc_inst instr;
+	unsigned int instr;
 	int stepped;
 
 	force_enable_xmon();
 	/* check we are in 64-bit kernel mode, translation enabled */
 	if ((regs->msr & (MSR_64BIT|MSR_PR|MSR_IR)) == (MSR_64BIT|MSR_IR)) {
-		if (mread_instr(regs->nip, &instr)) {
+		if (mread(regs->nip, &instr, 4) == 4) {
 			stepped = emulate_step(regs, instr);
 			if (stepped < 0) {
 				printf("Couldn't single-step %s instruction\n",
@@ -1212,7 +1178,7 @@ static int do_step(struct pt_regs *regs)
 				return 0;
 			}
 			if (stepped > 0) {
-				set_trap(regs, 0xd00);
+				regs->trap = 0xd00 | (regs->trap & 1);
 				printf("stepped to ");
 				xmon_print_symbol(regs->nip, " ", "\n");
 				ppc_inst_dump(regs->nip, 1, 0);
@@ -1364,14 +1330,14 @@ csum(void)
  */
 static long check_bp_loc(unsigned long addr)
 {
-	struct ppc_inst instr;
+	unsigned int instr;
 
 	addr &= ~3;
 	if (!is_kernel_addr(addr)) {
 		printf("Breakpoints may only be placed at kernel addresses\n");
 		return 0;
 	}
-	if (!mread_instr(addr, &instr)) {
+	if (!mread(addr, &instr, sizeof(instr))) {
 		printf("Can't read instruction at address %lx\n", addr);
 		return 0;
 	}
@@ -1381,37 +1347,6 @@ static long check_bp_loc(unsigned long addr)
 		return 0;
 	}
 	return 1;
-}
-
-#ifndef CONFIG_PPC_8xx
-static int find_free_data_bpt(void)
-{
-	int i;
-
-	for (i = 0; i < nr_wp_slots(); i++) {
-		if (!dabr[i].enabled)
-			return i;
-	}
-	printf("Couldn't find free breakpoint register\n");
-	return -1;
-}
-#endif
-
-static void print_data_bpts(void)
-{
-	int i;
-
-	for (i = 0; i < nr_wp_slots(); i++) {
-		if (!dabr[i].enabled)
-			continue;
-
-		printf("   data   "REG"  [", dabr[i].address);
-		if (dabr[i].enabled & 1)
-			printf("r");
-		if (dabr[i].enabled & 2)
-			printf("w");
-		printf("]\n");
-	}
 }
 
 static char *breakpoint_help_string =
@@ -1447,9 +1382,6 @@ bpt_cmds(void)
 			printf("Hardware data breakpoint not supported on this cpu\n");
 			break;
 		}
-		i = find_free_data_bpt();
-		if (i < 0)
-			break;
 		mode = 7;
 		cmd = inchar();
 		if (cmd == 'r')
@@ -1458,15 +1390,15 @@ bpt_cmds(void)
 			mode = 6;
 		else
 			termch = cmd;
-		dabr[i].address = 0;
-		dabr[i].enabled = 0;
-		if (scanhex(&dabr[i].address)) {
-			if (!is_kernel_addr(dabr[i].address)) {
+		dabr.address = 0;
+		dabr.enabled = 0;
+		if (scanhex(&dabr.address)) {
+			if (!is_kernel_addr(dabr.address)) {
 				printf(badaddr);
 				break;
 			}
-			dabr[i].address &= ~HW_BRK_TYPE_DABR;
-			dabr[i].enabled = mode | BP_DABR;
+			dabr.address &= ~HW_BRK_TYPE_DABR;
+			dabr.enabled = mode | BP_DABR;
 		}
 
 		force_enable_xmon();
@@ -1505,9 +1437,7 @@ bpt_cmds(void)
 			for (i = 0; i < NBPTS; ++i)
 				bpts[i].enabled = 0;
 			iabr = NULL;
-			for (i = 0; i < nr_wp_slots(); i++)
-				dabr[i].enabled = 0;
-
+			dabr.enabled = 0;
 			printf("All breakpoints cleared\n");
 			break;
 		}
@@ -1541,7 +1471,14 @@ bpt_cmds(void)
 		if (xmon_is_ro || !scanhex(&a)) {
 			/* print all breakpoints */
 			printf("   type            address\n");
-			print_data_bpts();
+			if (dabr.enabled) {
+				printf("   data   "REG"  [", dabr.address);
+				if (dabr.enabled & 1)
+					printf("r");
+				if (dabr.enabled & 2)
+					printf("w");
+				printf("]\n");
+			}
 			for (bp = bpts; bp < &bpts[NBPTS]; ++bp) {
 				if (!bp->enabled)
 					continue;
@@ -1603,7 +1540,6 @@ const char *getvecname(unsigned long vec)
 	case 0x1300:	ret = "(Instruction Breakpoint)"; break;
 	case 0x1500:	ret = "(Denormalisation)"; break;
 	case 0x1700:	ret = "(Altivec Assist)"; break;
-	case 0x3000:	ret = "(System Call Vectored)"; break;
 	default: ret = "";
 	}
 	return ret;
@@ -1747,9 +1683,9 @@ static void print_bug_trap(struct pt_regs *regs)
 
 #ifdef CONFIG_DEBUG_BUGVERBOSE
 	printf("kernel BUG at %s:%u!\n",
-	       (char *)bug + bug->file_disp, bug->line);
+	       bug->file, bug->line);
 #else
-	printf("kernel BUG at %px!\n", (void *)bug + bug->bug_addr_disp);
+	printf("kernel BUG at %px!\n", (void *)bug->bug_addr);
 #endif
 #endif /* CONFIG_BUG */
 }
@@ -1840,7 +1776,7 @@ static void prregs(struct pt_regs *fp)
 #endif
 	printf("pc  = ");
 	xmon_print_symbol(fp->nip, " ", "\n");
-	if (!trap_is_syscall(fp) && cpu_has_feature(CPU_FTR_CFAR)) {
+	if (TRAP(fp) != 0xc00 && cpu_has_feature(CPU_FTR_CFAR)) {
 		printf("cfar= ");
 		xmon_print_symbol(fp->orig_gpr3, " ", "\n");
 	}
@@ -1872,7 +1808,7 @@ static void cacheflush(void)
 		catch_memory_errors = 1;
 		sync();
 
-		if (cmd != 'i' || IS_ENABLED(CONFIG_PPC_BOOK3S_64)) {
+		if (cmd != 'i') {
 			for (; nflush > 0; --nflush, adrs += L1_CACHE_BYTES)
 				cflush((void *) adrs);
 		} else {
@@ -2002,13 +1938,8 @@ static void dump_207_sprs(void)
 
 	printf("hfscr  = %.16lx  dhdes = %.16lx rpr    = %.16lx\n",
 		mfspr(SPRN_HFSCR), mfspr(SPRN_DHDES), mfspr(SPRN_RPR));
-	printf("dawr0  = %.16lx dawrx0 = %.16lx\n",
-	       mfspr(SPRN_DAWR0), mfspr(SPRN_DAWRX0));
-	if (nr_wp_slots() > 1) {
-		printf("dawr1  = %.16lx dawrx1 = %.16lx\n",
-		       mfspr(SPRN_DAWR1), mfspr(SPRN_DAWRX1));
-	}
-	printf("ciabr  = %.16lx\n", mfspr(SPRN_CIABR));
+	printf("dawr   = %.16lx  dawrx = %.16lx ciabr  = %.16lx\n",
+		mfspr(SPRN_DAWR), mfspr(SPRN_DAWRX), mfspr(SPRN_CIABR));
 #endif
 }
 
@@ -2030,18 +1961,6 @@ static void dump_300_sprs(void)
 
 	printf("ptcr   = %.16lx  asdr  = %.16lx\n",
 		mfspr(SPRN_PTCR), mfspr(SPRN_ASDR));
-#endif
-}
-
-static void dump_310_sprs(void)
-{
-#ifdef CONFIG_PPC64
-	if (!cpu_has_feature(CPU_FTR_ARCH_31))
-		return;
-
-	printf("mmcr3  = %.16lx, sier2  = %.16lx, sier3  = %.16lx\n",
-		mfspr(SPRN_MMCR3), mfspr(SPRN_SIER2), mfspr(SPRN_SIER3));
-
 #endif
 }
 
@@ -2099,7 +2018,6 @@ static void super_regs(void)
 		dump_206_sprs();
 		dump_207_sprs();
 		dump_300_sprs();
-		dump_310_sprs();
 
 		return;
 	}
@@ -2207,25 +2125,6 @@ mwrite(unsigned long adrs, void *buf, int size)
 		n = size;
 	} else {
 		printf("*** Error writing address "REG"\n", adrs + n);
-	}
-	catch_memory_errors = 0;
-	return n;
-}
-
-static int
-mread_instr(unsigned long adrs, struct ppc_inst *instr)
-{
-	volatile int n;
-
-	n = 0;
-	if (setjmp(bus_error_jmp) == 0) {
-		catch_memory_errors = 1;
-		sync();
-		*instr = ppc_inst_read((struct ppc_inst *)adrs);
-		sync();
-		/* wait a little while to see if we get a machine check */
-		__delay(200);
-		n = ppc_inst_len(*instr);
 	}
 	catch_memory_errors = 0;
 	return n;
@@ -2957,11 +2856,12 @@ generic_inst_dump(unsigned long adr, long count, int praddr,
 {
 	int nr, dotted;
 	unsigned long first_adr;
-	struct ppc_inst inst, last_inst = ppc_inst(0);
+	unsigned int inst, last_inst = 0;
+	unsigned char val[4];
 
 	dotted = 0;
-	for (first_adr = adr; count > 0; --count, adr += ppc_inst_len(inst)) {
-		nr = mread_instr(adr, &inst);
+	for (first_adr = adr; count > 0; --count, adr += 4) {
+		nr = mread(adr, val, 4);
 		if (nr == 0) {
 			if (praddr) {
 				const char *x = fault_chars[fault_type];
@@ -2969,7 +2869,8 @@ generic_inst_dump(unsigned long adr, long count, int praddr,
 			}
 			break;
 		}
-		if (adr > first_adr && ppc_inst_equal(inst, last_inst)) {
+		inst = GETWORD(val);
+		if (adr > first_adr && inst == last_inst) {
 			if (!dotted) {
 				printf(" ...\n");
 				dotted = 1;
@@ -2979,12 +2880,9 @@ generic_inst_dump(unsigned long adr, long count, int praddr,
 		dotted = 0;
 		last_inst = inst;
 		if (praddr)
-			printf(REG"  %s", adr, ppc_inst_as_str(inst));
+			printf(REG"  %.8x", adr, inst);
 		printf("\t");
-		if (!ppc_inst_prefixed(inst))
-			dump_func(ppc_inst_val(inst), adr);
-		else
-			dump_func(ppc_inst_as_u64(inst), adr);
+		dump_func(inst, adr);
 		printf("\n");
 	}
 	return adr - first_adr;
@@ -3209,8 +3107,8 @@ static void show_task(struct task_struct *tsk)
 		(tsk->exit_state & EXIT_DEAD) ? 'E' :
 		(tsk->state & TASK_INTERRUPTIBLE) ? 'S' : '?';
 
-	printf("%16px %16lx %16px %6d %6d %c %2d %s\n", tsk,
-		tsk->thread.ksp, tsk->thread.regs,
+	printf("%px %016lx %6d %6d %c %2d %s\n", tsk,
+		tsk->thread.ksp,
 		tsk->pid, rcu_dereference(tsk->parent)->pid,
 		state, task_cpu(tsk),
 		tsk->comm);
@@ -3237,8 +3135,7 @@ static void show_pte(unsigned long addr)
 	unsigned long tskv = 0;
 	struct task_struct *tsk = NULL;
 	struct mm_struct *mm;
-	pgd_t *pgdp;
-	p4d_t *p4dp;
+	pgd_t *pgdp, *pgdir;
 	pud_t *pudp;
 	pmd_t *pmdp;
 	pte_t *ptep;
@@ -3262,26 +3159,28 @@ static void show_pte(unsigned long addr)
 	catch_memory_errors = 1;
 	sync();
 
-	if (mm == &init_mm)
+	if (mm == &init_mm) {
 		pgdp = pgd_offset_k(addr);
-	else
+		pgdir = pgd_offset_k(0);
+	} else {
 		pgdp = pgd_offset(mm, addr);
+		pgdir = pgd_offset(mm, 0);
+	}
 
-	p4dp = p4d_offset(pgdp, addr);
-
-	if (p4d_none(*p4dp)) {
-		printf("No valid P4D\n");
+	if (pgd_none(*pgdp)) {
+		printf("no linux page table for address\n");
 		return;
 	}
 
-	if (p4d_is_leaf(*p4dp)) {
-		format_pte(p4dp, p4d_val(*p4dp));
+	printf("pgd  @ 0x%px\n", pgdir);
+
+	if (pgd_is_leaf(*pgdp)) {
+		format_pte(pgdp, pgd_val(*pgdp));
 		return;
 	}
+	printf("pgdp @ 0x%px = 0x%016lx\n", pgdp, pgd_val(*pgdp));
 
-	printf("p4dp @ 0x%px = 0x%016lx\n", p4dp, p4d_val(*p4dp));
-
-	pudp = pud_offset(p4dp, addr);
+	pudp = pud_offset(pgdp, addr);
 
 	if (pud_none(*pudp)) {
 		printf("No valid PUD\n");
@@ -3332,7 +3231,7 @@ static void show_tasks(void)
 	unsigned long tskv;
 	struct task_struct *tsk = NULL;
 
-	printf("     task_struct     ->thread.ksp    ->thread.regs    PID   PPID S  P CMD\n");
+	printf("     task_struct     ->thread.ksp    PID   PPID S  P CMD\n");
 
 	if (scanhex(&tskv))
 		tsk = (struct task_struct *)tskv;
@@ -3943,7 +3842,7 @@ static void sysrq_handle_xmon(int key)
 		xmon_init(0);
 }
 
-static const struct sysrq_key_op sysrq_xmon_op = {
+static struct sysrq_key_op sysrq_xmon_op = {
 	.handler =	sysrq_handle_xmon,
 	.help_msg =	"xmon(x)",
 	.action_msg =	"Entering xmon",
@@ -3970,9 +3869,10 @@ static void clear_all_bpt(void)
 		bpts[i].enabled = 0;
 
 	/* Clear any data or iabr breakpoints */
-	iabr = NULL;
-	for (i = 0; i < nr_wp_slots(); i++)
-		dabr[i].enabled = 0;
+	if (iabr || dabr.enabled) {
+		iabr = NULL;
+		dabr.enabled = 0;
+	}
 }
 
 #ifdef CONFIG_DEBUG_FS
@@ -4281,7 +4181,7 @@ static int do_spu_cmd(void)
 		subcmd = inchar();
 		if (isxdigit(subcmd) || subcmd == '\n')
 			termch = subcmd;
-		fallthrough;
+		/* fall through */
 	case 'f':
 		scanhex(&num);
 		if (num >= XMON_NUM_SPUS || !spu_info[num].spu) {

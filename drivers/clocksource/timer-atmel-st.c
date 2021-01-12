@@ -139,6 +139,7 @@ static int
 clkevt32k_next_event(unsigned long delta, struct clock_event_device *dev)
 {
 	u32		alm;
+	int		status = 0;
 	unsigned int	val;
 
 	BUG_ON(delta < 2);
@@ -162,7 +163,7 @@ clkevt32k_next_event(unsigned long delta, struct clock_event_device *dev)
 	alm += delta;
 	regmap_write(regmap_st, AT91_ST_RTAR, alm);
 
-	return 0;
+	return status;
 }
 
 static struct clock_event_device clkevt = {

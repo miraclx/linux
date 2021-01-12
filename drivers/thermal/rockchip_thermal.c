@@ -1068,10 +1068,8 @@ rockchip_thermal_toggle_sensor(struct rockchip_thermal_sensor *sensor, bool on)
 {
 	struct thermal_zone_device *tzd = sensor->tzd;
 
-	if (on)
-		thermal_zone_device_enable(tzd);
-	else
-		thermal_zone_device_disable(tzd);
+	tzd->ops->set_mode(tzd,
+		on ? THERMAL_DEVICE_ENABLED : THERMAL_DEVICE_DISABLED);
 }
 
 static irqreturn_t rockchip_thermal_alarm_irq_thread(int irq, void *dev)
@@ -1243,8 +1241,10 @@ static int rockchip_thermal_probe(struct platform_device *pdev)
 		return -ENXIO;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&pdev->dev, "no irq resource?\n");
 		return -EINVAL;
+	}
 
 	thermal = devm_kzalloc(&pdev->dev, sizeof(struct rockchip_thermal_data),
 			       GFP_KERNEL);

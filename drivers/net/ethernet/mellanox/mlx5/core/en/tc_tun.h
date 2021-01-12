@@ -16,7 +16,6 @@ enum {
 	MLX5E_TC_TUNNEL_TYPE_VXLAN,
 	MLX5E_TC_TUNNEL_TYPE_GENEVE,
 	MLX5E_TC_TUNNEL_TYPE_GRETAP,
-	MLX5E_TC_TUNNEL_TYPE_MPLSOUDP,
 };
 
 struct mlx5e_tc_tunnel {
@@ -47,7 +46,6 @@ struct mlx5e_tc_tunnel {
 extern struct mlx5e_tc_tunnel vxlan_tunnel;
 extern struct mlx5e_tc_tunnel geneve_tunnel;
 extern struct mlx5e_tc_tunnel gre_tunnel;
-extern struct mlx5e_tc_tunnel mplsoudp_tunnel;
 
 struct mlx5e_tc_tunnel *mlx5e_get_tc_tun(struct net_device *tunnel_dev);
 

@@ -64,19 +64,6 @@
 	status = "okay";
 };
 
-&srab {
+&usb3_phy {
 	status = "okay";
-
-	ports {
-		port@4 {
-			reg = <4>;
-			label = "lan";
-		};
-
-		port@5 {
-			reg = <5>;
-			label = "cpu";
-			ethernet = <&gmac0>;
-		};
-	};
 };

@@ -1854,7 +1854,7 @@ round_4(unsigned int x)
 		case 1: --x;
 			break;
 		case 2: ++x;
-			fallthrough;
+			/* fall through */
 		case 3: ++x;
 	}
 	return x;

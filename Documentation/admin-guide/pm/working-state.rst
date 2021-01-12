@@ -13,4 +13,3 @@ Working-State Power Management
    intel_pstate
    cpufreq_drivers
    intel_epb
-   intel-speed-select

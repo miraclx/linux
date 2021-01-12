@@ -160,7 +160,7 @@ struct item {
 	struct item	*next;
 	unsigned int	len;
 	unsigned int	hash;
-	char		name[];
+	char		name[0];
 };
 
 #define HASHSZ 256

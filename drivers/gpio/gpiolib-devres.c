@@ -246,8 +246,10 @@ struct gpio_desc *__must_check devm_gpiod_get_index_optional(struct device *dev,
 	struct gpio_desc *desc;
 
 	desc = devm_gpiod_get_index(dev, con_id, index, flags);
-	if (gpiod_not_found(desc))
-		return NULL;
+	if (IS_ERR(desc)) {
+		if (PTR_ERR(desc) == -ENOENT)
+			return NULL;
+	}
 
 	return desc;
 }
@@ -306,7 +308,7 @@ devm_gpiod_get_array_optional(struct device *dev, const char *con_id,
 	struct gpio_descs *descs;
 
 	descs = devm_gpiod_get_array(dev, con_id, flags);
-	if (gpiod_not_found(descs))
+	if (PTR_ERR(descs) == -ENOENT)
 		return NULL;
 
 	return descs;
@@ -477,20 +479,18 @@ void devm_gpio_free(struct device *dev, unsigned int gpio)
 }
 EXPORT_SYMBOL_GPL(devm_gpio_free);
 
-static void devm_gpio_chip_release(void *data)
+static void devm_gpio_chip_release(struct device *dev, void *res)
 {
-	struct gpio_chip *gc = data;
+	struct gpio_chip *gc = *(struct gpio_chip **)res;
 
 	gpiochip_remove(gc);
 }
 
 /**
- * devm_gpiochip_add_data_with_key() - Resource managed gpiochip_add_data_with_key()
+ * devm_gpiochip_add_data() - Resource managed gpiochip_add_data()
  * @dev: pointer to the device that gpio_chip belongs to.
  * @gc: the GPIO chip to register
  * @data: driver-private data associated with this chip
- * @lock_key: lockdep class for IRQ lock
- * @request_key: lockdep class for IRQ request
  *
  * Context: potentially before irqs will work
  *
@@ -501,16 +501,26 @@ static void devm_gpio_chip_release(void *data)
  * gc->base is invalid or already associated with a different chip.
  * Otherwise it returns zero as a success code.
  */
-int devm_gpiochip_add_data_with_key(struct device *dev, struct gpio_chip *gc, void *data,
-				    struct lock_class_key *lock_key,
-				    struct lock_class_key *request_key)
+int devm_gpiochip_add_data(struct device *dev, struct gpio_chip *gc,
+			   void *data)
 {
+	struct gpio_chip **ptr;
 	int ret;
 
-	ret = gpiochip_add_data_with_key(gc, data, lock_key, request_key);
-	if (ret < 0)
-		return ret;
+	ptr = devres_alloc(devm_gpio_chip_release, sizeof(*ptr),
+			     GFP_KERNEL);
+	if (!ptr)
+		return -ENOMEM;
 
-	return devm_add_action_or_reset(dev, devm_gpio_chip_release, gc);
+	ret = gpiochip_add_data(gc, data);
+	if (ret < 0) {
+		devres_free(ptr);
+		return ret;
+	}
+
+	*ptr = gc;
+	devres_add(dev, ptr);
+
+	return 0;
 }
-EXPORT_SYMBOL_GPL(devm_gpiochip_add_data_with_key);
+EXPORT_SYMBOL_GPL(devm_gpiochip_add_data);

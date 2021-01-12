@@ -21,6 +21,7 @@
 
 struct gpio_desc;
 struct pinctrl_map;
+struct madera_codec_pdata;
 
 /**
  * struct madera_pdata - Configuration data for Madera devices

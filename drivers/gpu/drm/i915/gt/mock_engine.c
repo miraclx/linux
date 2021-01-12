@@ -28,6 +28,7 @@
 #include "i915_drv.h"
 #include "intel_context.h"
 #include "intel_engine_pm.h"
+#include "intel_engine_pool.h"
 
 #include "mock_engine.h"
 #include "selftests/mock_request.h"
@@ -131,10 +132,6 @@ static void mock_context_unpin(struct intel_context *ce)
 {
 }
 
-static void mock_context_post_unpin(struct intel_context *ce)
-{
-}
-
 static void mock_context_destroy(struct kref *ref)
 {
 	struct intel_context *ce = container_of(ref, typeof(*ce), ref);
@@ -156,7 +153,8 @@ static int mock_context_alloc(struct intel_context *ce)
 	if (!ce->ring)
 		return -ENOMEM;
 
-	ce->timeline = intel_timeline_create(ce->engine->gt);
+	GEM_BUG_ON(ce->timeline);
+	ce->timeline = intel_timeline_create(ce->engine->gt, NULL);
 	if (IS_ERR(ce->timeline)) {
 		kfree(ce->engine);
 		return PTR_ERR(ce->timeline);
@@ -167,13 +165,7 @@ static int mock_context_alloc(struct intel_context *ce)
 	return 0;
 }
 
-static int mock_context_pre_pin(struct intel_context *ce,
-				struct i915_gem_ww_ctx *ww, void **unused)
-{
-	return 0;
-}
-
-static int mock_context_pin(struct intel_context *ce, void *unused)
+static int mock_context_pin(struct intel_context *ce)
 {
 	return 0;
 }
@@ -185,10 +177,8 @@ static void mock_context_reset(struct intel_context *ce)
 static const struct intel_context_ops mock_context_ops = {
 	.alloc = mock_context_alloc,
 
-	.pre_pin = mock_context_pre_pin,
 	.pin = mock_context_pin,
 	.unpin = mock_context_unpin,
-	.post_unpin = mock_context_post_unpin,
 
 	.enter = intel_context_enter_engine,
 	.exit = intel_context_exit_engine,
@@ -245,39 +235,18 @@ static void mock_reset_rewind(struct intel_engine_cs *engine, bool stalled)
 	GEM_BUG_ON(stalled);
 }
 
-static void mark_eio(struct i915_request *rq)
-{
-	if (i915_request_completed(rq))
-		return;
-
-	GEM_BUG_ON(i915_request_signaled(rq));
-
-	i915_request_set_error_once(rq, -EIO);
-	i915_request_mark_complete(rq);
-}
-
 static void mock_reset_cancel(struct intel_engine_cs *engine)
 {
-	struct mock_engine *mock =
-		container_of(engine, typeof(*mock), base);
-	struct i915_request *rq;
+	struct i915_request *request;
 	unsigned long flags;
-
-	del_timer_sync(&mock->hw_delay);
 
 	spin_lock_irqsave(&engine->active.lock, flags);
 
 	/* Mark all submitted requests as skipped. */
-	list_for_each_entry(rq, &engine->active.requests, sched.link)
-		mark_eio(rq);
-	intel_engine_signal_breadcrumbs(engine);
-
-	/* Cancel and submit all pending requests. */
-	list_for_each_entry(rq, &mock->hw_queue, mock.link) {
-		mark_eio(rq);
-		__i915_request_submit(rq);
+	list_for_each_entry(request, &engine->active.requests, sched.link) {
+		i915_request_set_error_once(request, -EIO);
+		i915_request_mark_complete(request);
 	}
-	INIT_LIST_HEAD(&mock->hw_queue);
 
 	spin_unlock_irqrestore(&engine->active.lock, flags);
 }
@@ -293,12 +262,11 @@ static void mock_engine_release(struct intel_engine_cs *engine)
 
 	GEM_BUG_ON(timer_pending(&mock->hw_delay));
 
-	intel_breadcrumbs_free(engine->breadcrumbs);
-
 	intel_context_unpin(engine->kernel_context);
 	intel_context_put(engine->kernel_context);
 
 	intel_engine_fini_retire(engine);
+	intel_engine_fini_breadcrumbs(engine);
 }
 
 struct intel_engine_cs *mock_engine(struct drm_i915_private *i915,
@@ -356,26 +324,21 @@ int mock_engine_init(struct intel_engine_cs *engine)
 	struct intel_context *ce;
 
 	intel_engine_init_active(engine, ENGINE_MOCK);
+	intel_engine_init_breadcrumbs(engine);
 	intel_engine_init_execlists(engine);
 	intel_engine_init__pm(engine);
 	intel_engine_init_retire(engine);
-
-	engine->breadcrumbs = intel_breadcrumbs_create(NULL);
-	if (!engine->breadcrumbs)
-		return -ENOMEM;
+	intel_engine_pool_init(&engine->pool);
 
 	ce = create_kernel_context(engine);
 	if (IS_ERR(ce))
 		goto err_breadcrumbs;
 
-	/* We insist the kernel context is using the status_page */
-	engine->status_page.vma = ce->timeline->hwsp_ggtt;
-
 	engine->kernel_context = ce;
 	return 0;
 
 err_breadcrumbs:
-	intel_breadcrumbs_free(engine->breadcrumbs);
+	intel_engine_fini_breadcrumbs(engine);
 	return -ENOMEM;
 }
 

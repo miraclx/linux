@@ -320,6 +320,12 @@ static int hfa384x_cmd(struct net_device *dev, u16 cmd, u16 param0,
 	iface = netdev_priv(dev);
 	local = iface->local;
 
+	if (in_interrupt()) {
+		printk(KERN_DEBUG "%s: hfa384x_cmd called from interrupt "
+		       "context\n", dev->name);
+		return -1;
+	}
+
 	if (local->cmd_queue_len >= HOSTAP_CMD_QUEUE_MAX_LEN) {
 		printk(KERN_DEBUG "%s: hfa384x_cmd: cmd_queue full\n",
 		       dev->name);
@@ -1554,6 +1560,12 @@ static void prism2_hw_reset(struct net_device *dev)
 	iface = netdev_priv(dev);
 	local = iface->local;
 
+	if (in_interrupt()) {
+		printk(KERN_DEBUG "%s: driver bug - prism2_hw_reset() called "
+		       "in interrupt context\n", dev->name);
+		return;
+	}
+
 	if (local->hw_downloading)
 		return;
 
@@ -1791,7 +1803,7 @@ static int prism2_tx_80211(struct sk_buff *skb, struct net_device *dev)
 	struct hfa384x_tx_frame txdesc;
 	struct hostap_skb_tx_data *meta;
 	int hdr_len, data_len, idx, res, ret = -1;
-	u16 tx_control;
+	u16 tx_control, fc;
 
 	iface = netdev_priv(dev);
 	local = iface->local;
@@ -1814,6 +1826,7 @@ static int prism2_tx_80211(struct sk_buff *skb, struct net_device *dev)
 	/* skb->data starts with txdesc->frame_control */
 	hdr_len = 24;
 	skb_copy_from_linear_data(skb, &txdesc.frame_control, hdr_len);
+ 	fc = le16_to_cpu(txdesc.frame_control);
 	if (ieee80211_is_data(txdesc.frame_control) &&
 	    ieee80211_has_a4(txdesc.frame_control) &&
 	    skb->len >= 30) {
@@ -2070,9 +2083,9 @@ static void hostap_rx_skb(local_info_t *local, struct sk_buff *skb)
 
 
 /* Called only as a tasklet (software IRQ) */
-static void hostap_rx_tasklet(struct tasklet_struct *t)
+static void hostap_rx_tasklet(unsigned long data)
 {
-	local_info_t *local = from_tasklet(local, t, rx_tasklet);
+	local_info_t *local = (local_info_t *) data;
 	struct sk_buff *skb;
 
 	while ((skb = skb_dequeue(&local->rx_list)) != NULL)
@@ -2275,9 +2288,9 @@ static void prism2_tx_ev(local_info_t *local)
 
 
 /* Called only as a tasklet (software IRQ) */
-static void hostap_sta_tx_exc_tasklet(struct tasklet_struct *t)
+static void hostap_sta_tx_exc_tasklet(unsigned long data)
 {
-	local_info_t *local = from_tasklet(local, t, sta_tx_exc_tasklet);
+	local_info_t *local = (local_info_t *) data;
 	struct sk_buff *skb;
 
 	while ((skb = skb_dequeue(&local->sta_tx_exc_list)) != NULL) {
@@ -2377,9 +2390,9 @@ static void prism2_txexc(local_info_t *local)
 
 
 /* Called only as a tasklet (software IRQ) */
-static void hostap_info_tasklet(struct tasklet_struct *t)
+static void hostap_info_tasklet(unsigned long data)
 {
-	local_info_t *local = from_tasklet(local, t, info_tasklet);
+	local_info_t *local = (local_info_t *) data;
 	struct sk_buff *skb;
 
 	while ((skb = skb_dequeue(&local->info_list)) != NULL) {
@@ -2456,9 +2469,9 @@ static void prism2_info(local_info_t *local)
 
 
 /* Called only as a tasklet (software IRQ) */
-static void hostap_bap_tasklet(struct tasklet_struct *t)
+static void hostap_bap_tasklet(unsigned long data)
 {
-	local_info_t *local = from_tasklet(local, t, bap_tasklet);
+	local_info_t *local = (local_info_t *) data;
 	struct net_device *dev = local->dev;
 	u16 ev;
 	int frames = 30;
@@ -3028,30 +3041,6 @@ static void prism2_clear_set_tim_queue(local_info_t *local)
 	}
 }
 
-
-/*
- * HostAP uses two layers of net devices, where the inner
- * layer gets called all the time from the outer layer.
- * This is a natural nesting, which needs a split lock type.
- */
-static struct lock_class_key hostap_netdev_xmit_lock_key;
-static struct lock_class_key hostap_netdev_addr_lock_key;
-
-static void prism2_set_lockdep_class_one(struct net_device *dev,
-					 struct netdev_queue *txq,
-					 void *_unused)
-{
-	lockdep_set_class(&txq->_xmit_lock,
-			  &hostap_netdev_xmit_lock_key);
-}
-
-static void prism2_set_lockdep_class(struct net_device *dev)
-{
-	lockdep_set_class(&dev->addr_list_lock,
-			  &hostap_netdev_addr_lock_key);
-	netdev_for_each_tx_queue(dev, prism2_set_lockdep_class_one, NULL);
-}
-
 static struct net_device *
 prism2_init_local_data(struct prism2_helper_functions *funcs, int card_idx,
 		       struct device *sdev)
@@ -3169,15 +3158,22 @@ prism2_init_local_data(struct prism2_helper_functions *funcs, int card_idx,
 
 	/* Initialize tasklets for handling hardware IRQ related operations
 	 * outside hw IRQ handler */
-	tasklet_setup(&local->bap_tasklet, hostap_bap_tasklet);
-	tasklet_setup(&local->info_tasklet, hostap_info_tasklet);
+#define HOSTAP_TASKLET_INIT(q, f, d) \
+do { memset((q), 0, sizeof(*(q))); (q)->func = (f); (q)->data = (d); } \
+while (0)
+	HOSTAP_TASKLET_INIT(&local->bap_tasklet, hostap_bap_tasklet,
+			    (unsigned long) local);
+
+	HOSTAP_TASKLET_INIT(&local->info_tasklet, hostap_info_tasklet,
+			    (unsigned long) local);
 	hostap_info_init(local);
 
-	tasklet_setup(&local->rx_tasklet, hostap_rx_tasklet);
+	HOSTAP_TASKLET_INIT(&local->rx_tasklet,
+			    hostap_rx_tasklet, (unsigned long) local);
 	skb_queue_head_init(&local->rx_list);
 
-	tasklet_setup(&local->sta_tx_exc_tasklet,
-			    hostap_sta_tx_exc_tasklet);
+	HOSTAP_TASKLET_INIT(&local->sta_tx_exc_tasklet,
+			    hostap_sta_tx_exc_tasklet, (unsigned long) local);
 	skb_queue_head_init(&local->sta_tx_exc_list);
 
 	INIT_LIST_HEAD(&local->cmd_queue);
@@ -3203,7 +3199,6 @@ prism2_init_local_data(struct prism2_helper_functions *funcs, int card_idx,
 	if (ret >= 0)
 		ret = register_netdevice(dev);
 
-	prism2_set_lockdep_class(dev);
 	rtnl_unlock();
 	if (ret < 0) {
 		printk(KERN_WARNING "%s: register netdevice failed!\n",
@@ -3346,8 +3341,8 @@ static void prism2_free_local_data(struct net_device *dev)
 }
 
 
-#if defined(PRISM2_PCI) || defined(PRISM2_PCCARD)
-static void __maybe_unused prism2_suspend(struct net_device *dev)
+#if (defined(PRISM2_PCI) && defined(CONFIG_PM)) || defined(PRISM2_PCCARD)
+static void prism2_suspend(struct net_device *dev)
 {
 	struct hostap_interface *iface;
 	struct local_info *local;
@@ -3365,7 +3360,7 @@ static void __maybe_unused prism2_suspend(struct net_device *dev)
 	/* Disable hardware and firmware */
 	prism2_hw_shutdown(dev, 0);
 }
-#endif /* PRISM2_PCI || PRISM2_PCCARD */
+#endif /* (PRISM2_PCI && CONFIG_PM) || PRISM2_PCCARD */
 
 
 /* These might at some point be compiled separately and used as separate

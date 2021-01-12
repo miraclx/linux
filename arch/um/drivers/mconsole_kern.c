@@ -648,7 +648,7 @@ static void stack_proc(void *arg)
 {
 	struct task_struct *task = arg;
 
-	show_stack(task, NULL, KERN_INFO);
+	show_stack(task, NULL);
 }
 
 /*
@@ -738,7 +738,7 @@ static int __init mconsole_init(void)
 
 	err = um_request_irq(MCONSOLE_IRQ, sock, IRQ_READ, mconsole_interrupt,
 			     IRQF_SHARED, "mconsole", (void *)sock);
-	if (err < 0) {
+	if (err) {
 		printk(KERN_ERR "Failed to get IRQ for management console\n");
 		goto out;
 	}

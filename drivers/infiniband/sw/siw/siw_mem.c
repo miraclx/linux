@@ -349,11 +349,14 @@ dma_addr_t siw_pbl_get_buffer(struct siw_pbl *pbl, u64 off, int *len, int *idx)
 struct siw_pbl *siw_pbl_alloc(u32 num_buf)
 {
 	struct siw_pbl *pbl;
+	int buf_size = sizeof(*pbl);
 
 	if (num_buf == 0)
 		return ERR_PTR(-EINVAL);
 
-	pbl = kzalloc(struct_size(pbl, pbe, num_buf), GFP_KERNEL);
+	buf_size += ((num_buf - 1) * sizeof(struct siw_pble));
+
+	pbl = kzalloc(buf_size, GFP_KERNEL);
 	if (!pbl)
 		return ERR_PTR(-ENOMEM);
 
@@ -394,7 +397,7 @@ struct siw_umem *siw_umem_get(u64 start, u64 len, bool writable)
 	if (!writable)
 		foll_flags |= FOLL_FORCE;
 
-	mmap_read_lock(mm_s);
+	down_read(&mm_s->mmap_sem);
 
 	mlock_limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
 
@@ -438,7 +441,7 @@ struct siw_umem *siw_umem_get(u64 start, u64 len, bool writable)
 		num_pages -= got;
 	}
 out_sem_up:
-	mmap_read_unlock(mm_s);
+	up_read(&mm_s->mmap_sem);
 
 	if (rv > 0)
 		return umem;

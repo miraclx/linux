@@ -89,6 +89,7 @@ struct i40iw_mr {
 	union {
 		struct ib_mr ibmr;
 		struct ib_mw ibmw;
+		struct ib_fmr ibfmr;
 	};
 	struct ib_umem *region;
 	u16 type;
@@ -139,7 +140,7 @@ struct i40iw_qp {
 	struct i40iw_qp_host_ctx_info ctx_info;
 	struct i40iwarp_offload_info iwarp_info;
 	void *allocated_buffer;
-	refcount_t refcount;
+	atomic_t refcount;
 	struct iw_cm_id *cm_id;
 	void *cm_node;
 	struct ib_mr *lsmm_mr;
@@ -174,6 +175,5 @@ struct i40iw_qp {
 	struct i40iw_dma_mem ietf_mem;
 	struct completion sq_drained;
 	struct completion rq_drained;
-	struct completion free_qp;
 };
 #endif

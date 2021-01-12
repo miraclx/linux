@@ -1,6 +1,5 @@
 /*
  *    Disk Array driver for HP Smart Array SAS controllers
- *    Copyright (c) 2019-2020 Microchip Technology Inc. and its subsidiaries
  *    Copyright 2016 Microsemi Corporation
  *    Copyright 2014-2015 PMC-Sierra, Inc.
  *    Copyright 2000,2009-2015 Hewlett-Packard Development Company, L.P.
@@ -58,7 +57,7 @@ struct hpsa_sas_phy {
 	bool added_to_port;
 };
 
-#define EXTERNAL_QD 128
+#define EXTERNAL_QD 7
 struct hpsa_scsi_dev_t {
 	unsigned int devtype;
 	int bus, target, lun;		/* as presented to the OS */

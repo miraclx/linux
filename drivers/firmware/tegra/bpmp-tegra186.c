@@ -176,7 +176,7 @@ static int tegra186_bpmp_init(struct tegra_bpmp *bpmp)
 	priv->tx.pool = of_gen_pool_get(bpmp->dev->of_node, "shmem", 0);
 	if (!priv->tx.pool) {
 		dev_err(bpmp->dev, "TX shmem pool not found\n");
-		return -EPROBE_DEFER;
+		return -ENOMEM;
 	}
 
 	priv->tx.virt = gen_pool_dma_alloc(priv->tx.pool, 4096, &priv->tx.phys);
@@ -188,7 +188,7 @@ static int tegra186_bpmp_init(struct tegra_bpmp *bpmp)
 	priv->rx.pool = of_gen_pool_get(bpmp->dev->of_node, "shmem", 1);
 	if (!priv->rx.pool) {
 		dev_err(bpmp->dev, "RX shmem pool not found\n");
-		err = -EPROBE_DEFER;
+		err = -ENOMEM;
 		goto free_tx;
 	}
 

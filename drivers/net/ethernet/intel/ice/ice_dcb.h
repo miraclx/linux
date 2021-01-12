@@ -87,7 +87,7 @@
 struct ice_lldp_org_tlv {
 	__be16 typelen;
 	__be32 ouisubtype;
-	u8 tlvinfo[];
+	u8 tlvinfo[1];
 } __packed;
 
 struct ice_cee_tlv_hdr {
@@ -109,7 +109,7 @@ struct ice_cee_feat_tlv {
 #define ICE_CEE_FEAT_TLV_WILLING_M	0x40
 #define ICE_CEE_FEAT_TLV_ERR_M		0x20
 	u8 subtype;
-	u8 tlvinfo[];
+	u8 tlvinfo[1];
 };
 
 struct ice_cee_app_prio {

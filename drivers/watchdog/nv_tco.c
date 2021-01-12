@@ -7,7 +7,7 @@
  *	Based off i8xx_tco.c:
  *	(c) Copyright 2000 kernel concepts <nils@kernelconcepts.de>, All Rights
  *	Reserved.
- *				https://www.kernelconcepts.de
+ *				http://www.kernelconcepts.de
  *
  *	TCO timer driver for NV chipsets
  *	based on softdog.c by Alan Cox <alan@redhat.com>
@@ -250,7 +250,7 @@ static long nv_tco_ioctl(struct file *file, unsigned int cmd,
 		if (tco_timer_set_heartbeat(new_heartbeat))
 			return -EINVAL;
 		tco_timer_keepalive();
-		fallthrough;
+		/* Fall through */
 	case WDIOC_GETTIMEOUT:
 		return put_user(heartbeat, p);
 	default:

@@ -19,9 +19,6 @@ config RAID6_PQ_BENCHMARK
 	  Benchmark all available RAID6 PQ functions on init and choose the
 	  fastest one.
 
-config LINEAR_RANGES
-	tristate
-
 config PACKING
 	bool "Generic bitfield packing and unpacking"
 	default n
@@ -81,9 +78,6 @@ config ARCH_USE_CMPXCHG_LOCKREF
 	bool
 
 config ARCH_HAS_FAST_MULTIPLIER
-	bool
-
-config ARCH_USE_SYM_ANNOTATIONS
 	bool
 
 config INDIRECT_PIO
@@ -342,10 +336,6 @@ config DECOMPRESS_LZ4
 	select LZ4_DECOMPRESS
 	tristate
 
-config DECOMPRESS_ZSTD
-	select ZSTD_DECOMPRESS
-	tristate
-
 #
 # Generic allocator support is selected if needed
 #
@@ -437,7 +427,7 @@ config INTERVAL_TREE
 
 	  See:
 
-		Documentation/core-api/rbtree.rst
+		Documentation/rbtree.txt
 
 	  for more information.
 
@@ -635,12 +625,7 @@ config UACCESS_MEMCPY
 config ARCH_HAS_UACCESS_FLUSHCACHE
 	bool
 
-# arch has a concept of a recoverable synchronous exception due to a
-# memory-read error like x86 machine-check or ARM data-abort, and
-# implements copy_mc_to_{user,kernel} to abort and report
-# 'bytes-transferred' if that exception fires when accessing the source
-# buffer.
-config ARCH_HAS_COPY_MC
+config ARCH_HAS_UACCESS_MCSAFE
 	bool
 
 # Temporary. Goes away when all archs are cleaned up
@@ -685,10 +670,3 @@ config GENERIC_LIB_CMPDI2
 
 config GENERIC_LIB_UCMPDI2
 	bool
-
-config GENERIC_LIB_DEVMEM_IS_ALLOWED
-	bool
-
-config PLDMFW
-	bool
-	default n

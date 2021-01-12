@@ -22,13 +22,13 @@
  * The hardware has four display pipes, and the layout is a little
  * bit like this::
  *
- *   Memory     -> Overlay -> Channel -> FIFO -> 8 formatters -> DSI/DPI
- *   External      0..5       0..3       A,B,    6 x DSI         bridge
+ *   Memory     -> Overlay -> Channel -> FIFO -> 5 formatters -> DSI/DPI
+ *   External      0..5       0..3       A,B,    3 x DSI         bridge
  *   source 0..9                         C0,C1   2 x DPI
  *
  * FIFOs A and B are for LCD and HDMI while FIFO CO/C1 are for
  * panels with embedded buffer.
- * 6 of the formatters are for DSI, 3 pairs for VID/CMD respectively.
+ * 3 of the formatters are for DSI.
  * 2 of the formatters are for DPI.
  *
  * Behind the formatters are the DSI or DPI ports that route to
@@ -63,7 +63,6 @@
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
-#include <linux/delay.h>
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_bridge.h>
@@ -73,7 +72,6 @@
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_cma_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
-#include <drm/drm_managed.h>
 #include <drm/drm_of.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_panel.h>
@@ -82,6 +80,44 @@
 #include "mcde_drm.h"
 
 #define DRIVER_DESC	"DRM module for MCDE"
+
+#define MCDE_CR 0x00000000
+#define MCDE_CR_IFIFOEMPTYLINECOUNT_V422_SHIFT 0
+#define MCDE_CR_IFIFOEMPTYLINECOUNT_V422_MASK 0x0000003F
+#define MCDE_CR_IFIFOCTRLEN BIT(15)
+#define MCDE_CR_UFRECOVERY_MODE_V422 BIT(16)
+#define MCDE_CR_WRAP_MODE_V422_SHIFT BIT(17)
+#define MCDE_CR_AUTOCLKG_EN BIT(30)
+#define MCDE_CR_MCDEEN BIT(31)
+
+#define MCDE_CONF0 0x00000004
+#define MCDE_CONF0_SYNCMUX0 BIT(0)
+#define MCDE_CONF0_SYNCMUX1 BIT(1)
+#define MCDE_CONF0_SYNCMUX2 BIT(2)
+#define MCDE_CONF0_SYNCMUX3 BIT(3)
+#define MCDE_CONF0_SYNCMUX4 BIT(4)
+#define MCDE_CONF0_SYNCMUX5 BIT(5)
+#define MCDE_CONF0_SYNCMUX6 BIT(6)
+#define MCDE_CONF0_SYNCMUX7 BIT(7)
+#define MCDE_CONF0_IFIFOCTRLWTRMRKLVL_SHIFT 12
+#define MCDE_CONF0_IFIFOCTRLWTRMRKLVL_MASK 0x00007000
+#define MCDE_CONF0_OUTMUX0_SHIFT 16
+#define MCDE_CONF0_OUTMUX0_MASK 0x00070000
+#define MCDE_CONF0_OUTMUX1_SHIFT 19
+#define MCDE_CONF0_OUTMUX1_MASK 0x00380000
+#define MCDE_CONF0_OUTMUX2_SHIFT 22
+#define MCDE_CONF0_OUTMUX2_MASK 0x01C00000
+#define MCDE_CONF0_OUTMUX3_SHIFT 25
+#define MCDE_CONF0_OUTMUX3_MASK 0x0E000000
+#define MCDE_CONF0_OUTMUX4_SHIFT 28
+#define MCDE_CONF0_OUTMUX4_MASK 0x70000000
+
+#define MCDE_SSP 0x00000008
+#define MCDE_AIS 0x00000100
+#define MCDE_IMSCERR 0x00000110
+#define MCDE_RISERR 0x00000120
+#define MCDE_MISERR 0x00000130
+#define MCDE_SISERR 0x00000140
 
 #define MCDE_PID 0x000001FC
 #define MCDE_PID_METALFIX_VERSION_SHIFT 0
@@ -127,40 +163,12 @@ static irqreturn_t mcde_irq(int irq, void *data)
 static int mcde_modeset_init(struct drm_device *drm)
 {
 	struct drm_mode_config *mode_config;
-	struct mcde *mcde = to_mcde(drm);
+	struct mcde *mcde = drm->dev_private;
 	int ret;
 
-	/*
-	 * If no other bridge was found, check if we have a DPI panel or
-	 * any other bridge connected directly to the MCDE DPI output.
-	 * If a DSI bridge is found, DSI will take precedence.
-	 *
-	 * TODO: more elaborate bridge selection if we have more than one
-	 * thing attached to the system.
-	 */
 	if (!mcde->bridge) {
-		struct drm_panel *panel;
-		struct drm_bridge *bridge;
-
-		ret = drm_of_find_panel_or_bridge(drm->dev->of_node,
-						  0, 0, &panel, &bridge);
-		if (ret) {
-			dev_err(drm->dev,
-				"Could not locate any output bridge or panel\n");
-			return ret;
-		}
-		if (panel) {
-			bridge = drm_panel_bridge_add_typed(panel,
-					DRM_MODE_CONNECTOR_DPI);
-			if (IS_ERR(bridge)) {
-				dev_err(drm->dev,
-					"Could not connect panel bridge\n");
-				return PTR_ERR(bridge);
-			}
-		}
-		mcde->dpi_output = true;
-		mcde->bridge = bridge;
-		mcde->flow_mode = MCDE_DPI_FORMATTER_FLOW;
+		dev_err(drm->dev, "no display output bridge yet\n");
+		return -EPROBE_DEFER;
 	}
 
 	mode_config = &drm->mode_config;
@@ -175,34 +183,55 @@ static int mcde_modeset_init(struct drm_device *drm)
 	ret = drm_vblank_init(drm, 1);
 	if (ret) {
 		dev_err(drm->dev, "failed to init vblank\n");
-		return ret;
+		goto out_config;
 	}
 
 	ret = mcde_display_init(drm);
 	if (ret) {
 		dev_err(drm->dev, "failed to init display\n");
-		return ret;
+		goto out_config;
 	}
 
-	/* Attach the bridge. */
+	/*
+	 * Attach the DSI bridge
+	 *
+	 * TODO: when adding support for the DPI bridge or several DSI bridges,
+	 * we selectively connect the bridge(s) here instead of this simple
+	 * attachment.
+	 */
 	ret = drm_simple_display_pipe_attach_bridge(&mcde->pipe,
 						    mcde->bridge);
 	if (ret) {
 		dev_err(drm->dev, "failed to attach display output bridge\n");
-		return ret;
+		goto out_config;
 	}
 
 	drm_mode_config_reset(drm);
 	drm_kms_helper_poll_init(drm);
+	drm_fbdev_generic_setup(drm, 32);
 
 	return 0;
+
+out_config:
+	drm_mode_config_cleanup(drm);
+	return ret;
+}
+
+static void mcde_release(struct drm_device *drm)
+{
+	struct mcde *mcde = drm->dev_private;
+
+	drm_mode_config_cleanup(drm);
+	drm_dev_fini(drm);
+	kfree(mcde);
 }
 
 DEFINE_DRM_GEM_CMA_FOPS(drm_fops);
 
-static const struct drm_driver mcde_drm_driver = {
+static struct drm_driver mcde_drm_driver = {
 	.driver_features =
 		DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC,
+	.release = mcde_release,
 	.lastclose = drm_fb_helper_lastclose,
 	.ioctls = NULL,
 	.fops = &drm_fops,
@@ -212,7 +241,17 @@ static const struct drm_driver mcde_drm_driver = {
 	.major = 1,
 	.minor = 0,
 	.patchlevel = 0,
-	DRM_GEM_CMA_DRIVER_OPS,
+	.dumb_create = drm_gem_cma_dumb_create,
+	.gem_free_object_unlocked = drm_gem_cma_free_object,
+	.gem_vm_ops = &drm_gem_cma_vm_ops,
+
+	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
+	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
+	.gem_prime_get_sg_table	= drm_gem_cma_prime_get_sg_table,
+	.gem_prime_import_sg_table = drm_gem_cma_prime_import_sg_table,
+	.gem_prime_vmap = drm_gem_cma_prime_vmap,
+	.gem_prime_vunmap = drm_gem_cma_prime_vunmap,
+	.gem_prime_mmap = drm_gem_cma_prime_mmap,
 };
 
 static int mcde_drm_bind(struct device *dev)
@@ -220,9 +259,7 @@ static int mcde_drm_bind(struct device *dev)
 	struct drm_device *drm = dev_get_drvdata(dev);
 	int ret;
 
-	ret = drmm_mode_config_init(drm);
-	if (ret)
-		return ret;
+	drm_mode_config_init(drm);
 
 	ret = component_bind_all(drm->dev, drm);
 	if (ret) {
@@ -237,8 +274,6 @@ static int mcde_drm_bind(struct device *dev)
 	ret = drm_dev_register(drm, 0);
 	if (ret < 0)
 		goto unbind;
-
-	drm_fbdev_generic_setup(drm, 32);
 
 	return 0;
 
@@ -278,28 +313,40 @@ static int mcde_probe(struct platform_device *pdev)
 	struct component_match *match = NULL;
 	struct resource *res;
 	u32 pid;
+	u32 val;
 	int irq;
 	int ret;
 	int i;
 
-	mcde = devm_drm_dev_alloc(dev, &mcde_drm_driver, struct mcde, drm);
-	if (IS_ERR(mcde))
-		return PTR_ERR(mcde);
-	drm = &mcde->drm;
+	mcde = kzalloc(sizeof(*mcde), GFP_KERNEL);
+	if (!mcde)
+		return -ENOMEM;
 	mcde->dev = dev;
+
+	ret = drm_dev_init(&mcde->drm, &mcde_drm_driver, dev);
+	if (ret) {
+		kfree(mcde);
+		return ret;
+	}
+	drm = &mcde->drm;
+	drm->dev_private = mcde;
 	platform_set_drvdata(pdev, drm);
+
+	/* Enable continuous updates: this is what Linux' framebuffer expects */
+	mcde->oneshot_mode = false;
+	drm->dev_private = mcde;
 
 	/* First obtain and turn on the main power */
 	mcde->epod = devm_regulator_get(dev, "epod");
 	if (IS_ERR(mcde->epod)) {
 		ret = PTR_ERR(mcde->epod);
 		dev_err(dev, "can't get EPOD regulator\n");
-		return ret;
+		goto dev_unref;
 	}
 	ret = regulator_enable(mcde->epod);
 	if (ret) {
 		dev_err(dev, "can't enable EPOD regulator\n");
-		return ret;
+		goto dev_unref;
 	}
 	mcde->vana = devm_regulator_get(dev, "vana");
 	if (IS_ERR(mcde->vana)) {
@@ -353,8 +400,8 @@ static int mcde_probe(struct platform_device *pdev)
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		ret = irq;
+	if (!irq) {
+		ret = -EINVAL;
 		goto clk_disable;
 	}
 
@@ -386,7 +433,27 @@ static int mcde_probe(struct platform_device *pdev)
 		goto clk_disable;
 	}
 
-	/* Disable and clear any pending interrupts */
+	/* Set up the main control, watermark level at 7 */
+	val = 7 << MCDE_CONF0_IFIFOCTRLWTRMRKLVL_SHIFT;
+	/* 24 bits DPI: connect LSB Ch B to D[0:7] */
+	val |= 3 << MCDE_CONF0_OUTMUX0_SHIFT;
+	/* TV out: connect LSB Ch B to D[8:15] */
+	val |= 3 << MCDE_CONF0_OUTMUX1_SHIFT;
+	/* Don't care about this muxing */
+	val |= 0 << MCDE_CONF0_OUTMUX2_SHIFT;
+	/* 24 bits DPI: connect MID Ch B to D[24:31] */
+	val |= 4 << MCDE_CONF0_OUTMUX3_SHIFT;
+	/* 5: 24 bits DPI: connect MSB Ch B to D[32:39] */
+	val |= 5 << MCDE_CONF0_OUTMUX4_SHIFT;
+	/* Syncmux bits zero: DPI channel A and B on output pins A and B resp */
+	writel(val, mcde->regs + MCDE_CONF0);
+
+	/* Enable automatic clock gating */
+	val = readl(mcde->regs + MCDE_CR);
+	val |= MCDE_CR_MCDEEN | MCDE_CR_AUTOCLKG_EN;
+	writel(val, mcde->regs + MCDE_CR);
+
+	/* Clear any pending interrupts */
 	mcde_display_disable_irqs(mcde);
 	writel(0, mcde->regs + MCDE_IMSCERR);
 	writel(0xFFFFFFFF, mcde->regs + MCDE_RISERR);
@@ -416,34 +483,12 @@ static int mcde_probe(struct platform_device *pdev)
 		ret = PTR_ERR(match);
 		goto clk_disable;
 	}
-
-	/*
-	 * Perform an invasive reset of the MCDE and all blocks by
-	 * cutting the power to the subsystem, then bring it back up
-	 * later when we enable the display as a result of
-	 * component_master_add_with_match().
-	 */
-	ret = regulator_disable(mcde->epod);
-	if (ret) {
-		dev_err(dev, "can't disable EPOD regulator\n");
-		return ret;
-	}
-	/* Wait 50 ms so we are sure we cut the power */
-	usleep_range(50000, 70000);
-
 	ret = component_master_add_with_match(&pdev->dev, &mcde_drm_comp_ops,
 					      match);
 	if (ret) {
 		dev_err(dev, "failed to add component master\n");
-		/*
-		 * The EPOD regulator is already disabled at this point so some
-		 * special errorpath code is needed
-		 */
-		clk_disable_unprepare(mcde->mcde_clk);
-		regulator_disable(mcde->vana);
-		return ret;
+		goto clk_disable;
 	}
-
 	return 0;
 
 clk_disable:
@@ -452,6 +497,8 @@ regulator_off:
 	regulator_disable(mcde->vana);
 regulator_epod_off:
 	regulator_disable(mcde->epod);
+dev_unref:
+	drm_dev_put(drm);
 	return ret;
 
 }
@@ -459,12 +506,13 @@ regulator_epod_off:
 static int mcde_remove(struct platform_device *pdev)
 {
 	struct drm_device *drm = platform_get_drvdata(pdev);
-	struct mcde *mcde = to_mcde(drm);
+	struct mcde *mcde = drm->dev_private;
 
 	component_master_del(&pdev->dev, &mcde_drm_comp_ops);
 	clk_disable_unprepare(mcde->mcde_clk);
 	regulator_disable(mcde->vana);
 	regulator_disable(mcde->epod);
+	drm_dev_put(drm);
 
 	return 0;
 }

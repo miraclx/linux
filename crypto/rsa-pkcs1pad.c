@@ -14,7 +14,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/random.h>
-#include <linux/scatterlist.h>
 
 /*
  * Hash algorithm OIDs plus ASN.1 DER wrappings [RFC4880 sec 5.2.2].
@@ -200,7 +199,7 @@ static int pkcs1pad_encrypt_sign_complete(struct akcipher_request *req, int err)
 	sg_copy_from_buffer(req->dst,
 			    sg_nents_for_len(req->dst, ctx->key_size),
 			    out_buf, ctx->key_size);
-	kfree_sensitive(out_buf);
+	kzfree(out_buf);
 
 out:
 	req->dst_len = ctx->key_size;
@@ -323,7 +322,7 @@ static int pkcs1pad_decrypt_complete(struct akcipher_request *req, int err)
 				out_buf + pos, req->dst_len);
 
 done:
-	kfree_sensitive(req_ctx->out_buf);
+	kzfree(req_ctx->out_buf);
 
 	return err;
 }
@@ -501,7 +500,7 @@ static int pkcs1pad_verify_complete(struct akcipher_request *req, int err)
 		   req->dst_len) != 0)
 		err = -EKEYREJECTED;
 done:
-	kfree_sensitive(req_ctx->out_buf);
+	kzfree(req_ctx->out_buf);
 
 	return err;
 }
@@ -597,6 +596,7 @@ static void pkcs1pad_free(struct akcipher_instance *inst)
 
 static int pkcs1pad_create(struct crypto_template *tmpl, struct rtattr **tb)
 {
+	struct crypto_attr_type *algt;
 	u32 mask;
 	struct akcipher_instance *inst;
 	struct pkcs1pad_inst_ctx *ctx;
@@ -604,9 +604,14 @@ static int pkcs1pad_create(struct crypto_template *tmpl, struct rtattr **tb)
 	const char *hash_name;
 	int err;
 
-	err = crypto_check_attr_type(tb, CRYPTO_ALG_TYPE_AKCIPHER, &mask);
-	if (err)
-		return err;
+	algt = crypto_get_attr_type(tb);
+	if (IS_ERR(algt))
+		return PTR_ERR(algt);
+
+	if ((algt->type ^ CRYPTO_ALG_TYPE_AKCIPHER) & algt->mask)
+		return -EINVAL;
+
+	mask = crypto_requires_sync(algt->type, algt->mask);
 
 	inst = kzalloc(sizeof(*inst) + sizeof(*ctx), GFP_KERNEL);
 	if (!inst)
@@ -653,6 +658,7 @@ static int pkcs1pad_create(struct crypto_template *tmpl, struct rtattr **tb)
 			goto err_free_inst;
 	}
 
+	inst->alg.base.cra_flags = rsa_alg->base.cra_flags & CRYPTO_ALG_ASYNC;
 	inst->alg.base.cra_priority = rsa_alg->base.cra_priority;
 	inst->alg.base.cra_ctxsize = sizeof(struct pkcs1pad_ctx);
 

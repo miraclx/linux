@@ -12,8 +12,9 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/mm.h>
+#include <linux/cryptohash.h>
 #include <linux/types.h>
-#include <crypto/sha2.h>
+#include <crypto/sha.h>
 #include <asm/byteorder.h>
 #include <asm/switch_to.h>
 #include <linux/hardirq.h>
@@ -177,7 +178,7 @@ static int ppc_spe_sha256_final(struct shash_desc *desc, u8 *out)
 
 static int ppc_spe_sha224_final(struct shash_desc *desc, u8 *out)
 {
-	__be32 D[SHA256_DIGEST_SIZE >> 2];
+	u32 D[SHA256_DIGEST_SIZE >> 2];
 	__be32 *dst = (__be32 *)out;
 
 	ppc_spe_sha256_final(desc, (u8 *)D);

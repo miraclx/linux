@@ -272,6 +272,14 @@ void buffer_init(void);
  * inline definitions
  */
 
+static inline void attach_page_buffers(struct page *page,
+		struct buffer_head *head)
+{
+	get_page(page);
+	SetPagePrivate(page);
+	set_page_private(page, (unsigned long)head);
+}
+
 static inline void get_bh(struct buffer_head *bh)
 {
         atomic_inc(&bh->b_count);
@@ -406,7 +414,6 @@ static inline int inode_has_buffers(struct inode *inode) { return 0; }
 static inline void invalidate_inode_buffers(struct inode *inode) {}
 static inline int remove_inode_buffers(struct inode *inode) { return 1; }
 static inline int sync_mapping_buffers(struct address_space *mapping) { return 0; }
-#define buffer_heads_over_limit 0
 
 #endif /* CONFIG_BLOCK */
 #endif /* _LINUX_BUFFER_HEAD_H */

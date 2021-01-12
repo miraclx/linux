@@ -40,14 +40,13 @@
 #include <linux/export.h>
 #include <linux/console.h>
 #include <linux/kobject.h>
-#include <linux/dma-map-ops.h>
+#include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/stat.h>
 #include <linux/of_platform.h>
 #include <asm/ibmebus.h>
-#include <asm/machdep.h>
 
 static struct device ibmebus_bus_device = { /* fake "parent" device */
 	.init_name = "ibmebus",
@@ -465,4 +464,4 @@ static int __init ibmebus_bus_init(void)
 
 	return 0;
 }
-machine_postcore_initcall(pseries, ibmebus_bus_init);
+postcore_initcall(ibmebus_bus_init);

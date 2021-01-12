@@ -823,8 +823,7 @@ static int lpc_mii_init(struct netdata_local *pldat)
 	if (err)
 		goto err_out_unregister_bus;
 
-	err = lpc_mii_probe(pldat->ndev);
-	if (err)
+	if (lpc_mii_probe(pldat->ndev) != 0)
 		goto err_out_unregister_bus;
 
 	return 0;
@@ -1030,8 +1029,7 @@ static int lpc_eth_close(struct net_device *ndev)
 	return 0;
 }
 
-static netdev_tx_t lpc_eth_hard_start_xmit(struct sk_buff *skb,
-					   struct net_device *ndev)
+static int lpc_eth_hard_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct netdata_local *pldat = netdev_priv(ndev);
 	u32 len, txidx;

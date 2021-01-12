@@ -309,18 +309,17 @@ bool fib_info_nh_uses_dev(struct fib_info *fi, const struct net_device *dev)
 {
 	bool dev_match = false;
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
-	if (unlikely(fi->nh)) {
-		dev_match = nexthop_uses_dev(fi->nh, dev);
-	} else {
-		int ret;
+	int ret;
 
-		for (ret = 0; ret < fib_info_num_path(fi); ret++) {
-			const struct fib_nh_common *nhc = fib_info_nhc(fi, ret);
+	for (ret = 0; ret < fib_info_num_path(fi); ret++) {
+		const struct fib_nh_common *nhc = fib_info_nhc(fi, ret);
 
-			if (nhc_l3mdev_matches_dev(nhc, dev)) {
-				dev_match = true;
-				break;
-			}
+		if (nhc->nhc_dev == dev) {
+			dev_match = true;
+			break;
+		} else if (l3mdev_master_ifindex_rcu(nhc->nhc_dev) == dev->ifindex) {
+			dev_match = true;
+			break;
 		}
 	}
 #else
@@ -362,7 +361,6 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 	fl4.flowi4_tun_key.tun_id = 0;
 	fl4.flowi4_flags = 0;
 	fl4.flowi4_uid = sock_net_uid(net, NULL);
-	fl4.flowi4_multipath_hash = 0;
 
 	no_addr = idev->ifa_list == NULL;
 
@@ -696,7 +694,7 @@ int fib_gw_from_via(struct fib_config *cfg, struct nlattr *nla,
 		cfg->fc_gw4 = *((__be32 *)via->rtvia_addr);
 		break;
 	case AF_INET6:
-#if IS_ENABLED(CONFIG_IPV6)
+#ifdef CONFIG_IPV6
 		if (alen != sizeof(struct in6_addr)) {
 			NL_SET_ERR_MSG(extack, "Invalid IPv6 address in RTA_VIA");
 			return -EINVAL;
@@ -825,7 +823,7 @@ static int rtm_to_fib_config(struct net *net, struct sk_buff *skb,
 	if (has_gw && has_via) {
 		NL_SET_ERR_MSG(extack,
 			       "Nexthop configuration can not contain both GATEWAY and VIA");
-		return -EINVAL;
+		goto errout;
 	}
 
 	return 0;

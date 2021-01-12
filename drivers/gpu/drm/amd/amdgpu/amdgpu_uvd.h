@@ -67,7 +67,6 @@ struct amdgpu_uvd {
 	unsigned		harvest_config;
 	/* store image width to adjust nb memory state */
 	unsigned		decode_image_width;
-	uint32_t                keyselect;
 };
 
 int amdgpu_uvd_sw_init(struct amdgpu_device *adev);

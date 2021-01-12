@@ -28,9 +28,10 @@ static struct sg_table *mock_map_dma_buf(struct dma_buf_attachment *attachment,
 		sg = sg_next(sg);
 	}
 
-	err = dma_map_sgtable(attachment->dev, st, dir, 0);
-	if (err)
+	if (!dma_map_sg(attachment->dev, st->sgl, st->nents, dir)) {
+		err = -ENOMEM;
 		goto err_st;
+	}
 
 	return st;
 
@@ -45,7 +46,7 @@ static void mock_unmap_dma_buf(struct dma_buf_attachment *attachment,
 			       struct sg_table *st,
 			       enum dma_data_direction dir)
 {
-	dma_unmap_sgtable(attachment->dev, st, dir, 0);
+	dma_unmap_sg(attachment->dev, st->sgl, st->nents, dir);
 	sg_free_table(st);
 	kfree(st);
 }
@@ -61,24 +62,18 @@ static void mock_dmabuf_release(struct dma_buf *dma_buf)
 	kfree(mock);
 }
 
-static int mock_dmabuf_vmap(struct dma_buf *dma_buf, struct dma_buf_map *map)
+static void *mock_dmabuf_vmap(struct dma_buf *dma_buf)
 {
 	struct mock_dmabuf *mock = to_mock(dma_buf);
-	void *vaddr;
 
-	vaddr = vm_map_ram(mock->pages, mock->npages, 0);
-	if (!vaddr)
-		return -ENOMEM;
-	dma_buf_map_set_vaddr(map, vaddr);
-
-	return 0;
+	return vm_map_ram(mock->pages, mock->npages, 0, PAGE_KERNEL);
 }
 
-static void mock_dmabuf_vunmap(struct dma_buf *dma_buf, struct dma_buf_map *map)
+static void mock_dmabuf_vunmap(struct dma_buf *dma_buf, void *vaddr)
 {
 	struct mock_dmabuf *mock = to_mock(dma_buf);
 
-	vm_unmap_ram(map->vaddr, mock->npages);
+	vm_unmap_ram(vaddr, mock->npages);
 }
 
 static int mock_dmabuf_mmap(struct dma_buf *dma_buf, struct vm_area_struct *vma)

@@ -39,6 +39,7 @@
 #include <asm/fpu.h>
 #include <asm/mipsregs.h>
 #include <asm/mipsmtregs.h>
+#include <asm/pgtable.h>
 #include <asm/page.h>
 #include <asm/processor.h>
 #include <asm/syscall.h>
@@ -210,13 +211,15 @@ int ptrace_set_watch_regs(struct task_struct *child,
 
 static int gpr32_get(struct task_struct *target,
 		     const struct user_regset *regset,
-		     struct membuf to)
+		     unsigned int pos, unsigned int count,
+		     void *kbuf, void __user *ubuf)
 {
 	struct pt_regs *regs = task_pt_regs(target);
 	u32 uregs[ELF_NGREG] = {};
 
 	mips_dump_regs32(uregs, regs);
-	return membuf_write(&to, uregs, sizeof(uregs));
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, uregs, 0,
+				   sizeof(uregs));
 }
 
 static int gpr32_set(struct task_struct *target,
@@ -275,13 +278,15 @@ static int gpr32_set(struct task_struct *target,
 
 static int gpr64_get(struct task_struct *target,
 		     const struct user_regset *regset,
-		     struct membuf to)
+		     unsigned int pos, unsigned int count,
+		     void *kbuf, void __user *ubuf)
 {
 	struct pt_regs *regs = task_pt_regs(target);
 	u64 uregs[ELF_NGREG] = {};
 
 	mips_dump_regs64(uregs, regs);
-	return membuf_write(&to, uregs, sizeof(uregs));
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, uregs, 0,
+				   sizeof(uregs));
 }
 
 static int gpr64_set(struct task_struct *target,
@@ -404,11 +409,13 @@ int ptrace_setfpregs(struct task_struct *child, __u32 __user *data)
  * !CONFIG_CPU_HAS_MSA variant.  FP context's general register slots
  * correspond 1:1 to buffer slots.  Only general registers are copied.
  */
-static void fpr_get_fpa(struct task_struct *target,
-		       struct membuf *to)
+static int fpr_get_fpa(struct task_struct *target,
+		       unsigned int *pos, unsigned int *count,
+		       void **kbuf, void __user **ubuf)
 {
-	membuf_write(to, &target->thread.fpu,
-			NUM_FPU_REGS * sizeof(elf_fpreg_t));
+	return user_regset_copyout(pos, count, kbuf, ubuf,
+				   &target->thread.fpu,
+				   0, NUM_FPU_REGS * sizeof(elf_fpreg_t));
 }
 
 /*
@@ -417,13 +424,25 @@ static void fpr_get_fpa(struct task_struct *target,
  * general register slots are copied to buffer slots.  Only general
  * registers are copied.
  */
-static void fpr_get_msa(struct task_struct *target, struct membuf *to)
+static int fpr_get_msa(struct task_struct *target,
+		       unsigned int *pos, unsigned int *count,
+		       void **kbuf, void __user **ubuf)
 {
 	unsigned int i;
+	u64 fpr_val;
+	int err;
 
-	BUILD_BUG_ON(sizeof(u64) != sizeof(elf_fpreg_t));
-	for (i = 0; i < NUM_FPU_REGS; i++)
-		membuf_store(to, get_fpr64(&target->thread.fpu.fpr[i], 0));
+	BUILD_BUG_ON(sizeof(fpr_val) != sizeof(elf_fpreg_t));
+	for (i = 0; i < NUM_FPU_REGS; i++) {
+		fpr_val = get_fpr64(&target->thread.fpu.fpr[i], 0);
+		err = user_regset_copyout(pos, count, kbuf, ubuf,
+					  &fpr_val, i * sizeof(elf_fpreg_t),
+					  (i + 1) * sizeof(elf_fpreg_t));
+		if (err)
+			return err;
+	}
+
+	return 0;
 }
 
 /*
@@ -433,16 +452,31 @@ static void fpr_get_msa(struct task_struct *target, struct membuf *to)
  */
 static int fpr_get(struct task_struct *target,
 		   const struct user_regset *regset,
-		   struct membuf to)
+		   unsigned int pos, unsigned int count,
+		   void *kbuf, void __user *ubuf)
 {
-	if (sizeof(target->thread.fpu.fpr[0]) == sizeof(elf_fpreg_t))
-		fpr_get_fpa(target, &to);
-	else
-		fpr_get_msa(target, &to);
+	const int fcr31_pos = NUM_FPU_REGS * sizeof(elf_fpreg_t);
+	const int fir_pos = fcr31_pos + sizeof(u32);
+	int err;
 
-	membuf_write(&to, &target->thread.fpu.fcr31, sizeof(u32));
-	membuf_write(&to, &boot_cpu_data.fpu_id, sizeof(u32));
-	return 0;
+	if (sizeof(target->thread.fpu.fpr[0]) == sizeof(elf_fpreg_t))
+		err = fpr_get_fpa(target, &pos, &count, &kbuf, &ubuf);
+	else
+		err = fpr_get_msa(target, &pos, &count, &kbuf, &ubuf);
+	if (err)
+		return err;
+
+	err = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				  &target->thread.fpu.fcr31,
+				  fcr31_pos, fcr31_pos + sizeof(u32));
+	if (err)
+		return err;
+
+	err = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				  &boot_cpu_data.fpu_id,
+				  fir_pos, fir_pos + sizeof(u32));
+
+	return err;
 }
 
 /*
@@ -543,9 +577,14 @@ static int fpr_set(struct task_struct *target,
 /* Copy the FP mode setting to the supplied NT_MIPS_FP_MODE buffer.  */
 static int fp_mode_get(struct task_struct *target,
 		       const struct user_regset *regset,
-		       struct membuf to)
+		       unsigned int pos, unsigned int count,
+		       void *kbuf, void __user *ubuf)
 {
-	return membuf_store(&to, (int)mips_get_process_fp_mode(target));
+	int fp_mode;
+
+	fp_mode = mips_get_process_fp_mode(target);
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, &fp_mode, 0,
+				   sizeof(fp_mode));
 }
 
 /*
@@ -592,12 +631,13 @@ struct msa_control_regs {
 	unsigned int msacsr;
 };
 
-static void copy_pad_fprs(struct task_struct *target,
+static int copy_pad_fprs(struct task_struct *target,
 			 const struct user_regset *regset,
-			 struct membuf *to,
+			 unsigned int *ppos, unsigned int *pcount,
+			 void **pkbuf, void __user **pubuf,
 			 unsigned int live_sz)
 {
-	int i, j;
+	int i, j, start, start_pad, err;
 	unsigned long long fill = ~0ull;
 	unsigned int cp_sz, pad_sz;
 
@@ -605,16 +645,28 @@ static void copy_pad_fprs(struct task_struct *target,
 	pad_sz = regset->size - cp_sz;
 	WARN_ON(pad_sz % sizeof(fill));
 
-	for (i = 0; i < NUM_FPU_REGS; i++) {
-		membuf_write(to, &target->thread.fpu.fpr[i], cp_sz);
-		for (j = 0; j < (pad_sz / sizeof(fill)); j++)
-			membuf_store(to, fill);
+	i = start = err = 0;
+	for (; i < NUM_FPU_REGS; i++, start += regset->size) {
+		err |= user_regset_copyout(ppos, pcount, pkbuf, pubuf,
+					   &target->thread.fpu.fpr[i],
+					   start, start + cp_sz);
+
+		start_pad = start + cp_sz;
+		for (j = 0; j < (pad_sz / sizeof(fill)); j++) {
+			err |= user_regset_copyout(ppos, pcount, pkbuf, pubuf,
+						   &fill, start_pad,
+						   start_pad + sizeof(fill));
+			start_pad += sizeof(fill);
+		}
 	}
+
+	return err;
 }
 
 static int msa_get(struct task_struct *target,
 		   const struct user_regset *regset,
-		   struct membuf to)
+		   unsigned int pos, unsigned int count,
+		   void *kbuf, void __user *ubuf)
 {
 	const unsigned int wr_size = NUM_FPU_REGS * regset->size;
 	const struct msa_control_regs ctrl_regs = {
@@ -623,23 +675,32 @@ static int msa_get(struct task_struct *target,
 		.msair = boot_cpu_data.msa_id,
 		.msacsr = target->thread.fpu.msacsr,
 	};
+	int err;
 
 	if (!tsk_used_math(target)) {
 		/* The task hasn't used FP or MSA, fill with 0xff */
-		copy_pad_fprs(target, regset, &to, 0);
+		err = copy_pad_fprs(target, regset, &pos, &count,
+				    &kbuf, &ubuf, 0);
 	} else if (!test_tsk_thread_flag(target, TIF_MSA_CTX_LIVE)) {
 		/* Copy scalar FP context, fill the rest with 0xff */
-		copy_pad_fprs(target, regset, &to, 8);
+		err = copy_pad_fprs(target, regset, &pos, &count,
+				    &kbuf, &ubuf, 8);
 	} else if (sizeof(target->thread.fpu.fpr[0]) == regset->size) {
 		/* Trivially copy the vector registers */
-		membuf_write(&to, &target->thread.fpu.fpr, wr_size);
+		err = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+					  &target->thread.fpu.fpr,
+					  0, wr_size);
 	} else {
 		/* Copy as much context as possible, fill the rest with 0xff */
-		copy_pad_fprs(target, regset, &to,
-				sizeof(target->thread.fpu.fpr[0]));
+		err = copy_pad_fprs(target, regset, &pos, &count,
+				    &kbuf, &ubuf,
+				    sizeof(target->thread.fpu.fpr[0]));
 	}
 
-	return membuf_write(&to, &ctrl_regs, sizeof(ctrl_regs));
+	err |= user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				   &ctrl_regs, wr_size,
+				   wr_size + sizeof(ctrl_regs));
+	return err;
 }
 
 static int msa_set(struct task_struct *target,
@@ -692,20 +753,34 @@ static int msa_set(struct task_struct *target,
  */
 static int dsp32_get(struct task_struct *target,
 		     const struct user_regset *regset,
-		     struct membuf to)
+		     unsigned int pos, unsigned int count,
+		     void *kbuf, void __user *ubuf)
 {
+	unsigned int start, num_regs, i;
 	u32 dspregs[NUM_DSP_REGS + 1];
-	unsigned int i;
 
-	BUG_ON(to.left % sizeof(u32));
+	BUG_ON(count % sizeof(u32));
 
 	if (!cpu_has_dsp)
 		return -EIO;
 
-	for (i = 0; i < NUM_DSP_REGS; i++)
-		dspregs[i] = target->thread.dsp.dspr[i];
-	dspregs[NUM_DSP_REGS] = target->thread.dsp.dspcontrol;
-	return membuf_write(&to, dspregs, sizeof(dspregs));
+	start = pos / sizeof(u32);
+	num_regs = count / sizeof(u32);
+
+	if (start + num_regs > NUM_DSP_REGS + 1)
+		return -EIO;
+
+	for (i = start; i < num_regs; i++)
+		switch (i) {
+		case 0 ... NUM_DSP_REGS - 1:
+			dspregs[i] = target->thread.dsp.dspr[i];
+			break;
+		case NUM_DSP_REGS:
+			dspregs[i] = target->thread.dsp.dspcontrol;
+			break;
+		}
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, dspregs, 0,
+				   sizeof(dspregs));
 }
 
 /*
@@ -758,20 +833,34 @@ static int dsp32_set(struct task_struct *target,
  */
 static int dsp64_get(struct task_struct *target,
 		     const struct user_regset *regset,
-		     struct membuf to)
+		     unsigned int pos, unsigned int count,
+		     void *kbuf, void __user *ubuf)
 {
+	unsigned int start, num_regs, i;
 	u64 dspregs[NUM_DSP_REGS + 1];
-	unsigned int i;
 
-	BUG_ON(to.left % sizeof(u64));
+	BUG_ON(count % sizeof(u64));
 
 	if (!cpu_has_dsp)
 		return -EIO;
 
-	for (i = 0; i < NUM_DSP_REGS; i++)
-		dspregs[i] = target->thread.dsp.dspr[i];
-	dspregs[NUM_DSP_REGS] = target->thread.dsp.dspcontrol;
-	return membuf_write(&to, dspregs, sizeof(dspregs));
+	start = pos / sizeof(u64);
+	num_regs = count / sizeof(u64);
+
+	if (start + num_regs > NUM_DSP_REGS + 1)
+		return -EIO;
+
+	for (i = start; i < num_regs; i++)
+		switch (i) {
+		case 0 ... NUM_DSP_REGS - 1:
+			dspregs[i] = target->thread.dsp.dspr[i];
+			break;
+		case NUM_DSP_REGS:
+			dspregs[i] = target->thread.dsp.dspcontrol;
+			break;
+		}
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, dspregs, 0,
+				   sizeof(dspregs));
 }
 
 /*
@@ -930,7 +1019,7 @@ static const struct user_regset mips_regsets[] = {
 		.n		= ELF_NGREG,
 		.size		= sizeof(unsigned int),
 		.align		= sizeof(unsigned int),
-		.regset_get		= gpr32_get,
+		.get		= gpr32_get,
 		.set		= gpr32_set,
 	},
 	[REGSET_DSP] = {
@@ -938,7 +1027,7 @@ static const struct user_regset mips_regsets[] = {
 		.n		= NUM_DSP_REGS + 1,
 		.size		= sizeof(u32),
 		.align		= sizeof(u32),
-		.regset_get		= dsp32_get,
+		.get		= dsp32_get,
 		.set		= dsp32_set,
 		.active		= dsp_active,
 	},
@@ -948,7 +1037,7 @@ static const struct user_regset mips_regsets[] = {
 		.n		= ELF_NFPREG,
 		.size		= sizeof(elf_fpreg_t),
 		.align		= sizeof(elf_fpreg_t),
-		.regset_get		= fpr_get,
+		.get		= fpr_get,
 		.set		= fpr_set,
 	},
 	[REGSET_FP_MODE] = {
@@ -956,7 +1045,7 @@ static const struct user_regset mips_regsets[] = {
 		.n		= 1,
 		.size		= sizeof(int),
 		.align		= sizeof(int),
-		.regset_get		= fp_mode_get,
+		.get		= fp_mode_get,
 		.set		= fp_mode_set,
 	},
 #endif
@@ -966,7 +1055,7 @@ static const struct user_regset mips_regsets[] = {
 		.n		= NUM_FPU_REGS + 1,
 		.size		= 16,
 		.align		= 16,
-		.regset_get		= msa_get,
+		.get		= msa_get,
 		.set		= msa_set,
 	},
 #endif
@@ -990,7 +1079,7 @@ static const struct user_regset mips64_regsets[] = {
 		.n		= ELF_NGREG,
 		.size		= sizeof(unsigned long),
 		.align		= sizeof(unsigned long),
-		.regset_get		= gpr64_get,
+		.get		= gpr64_get,
 		.set		= gpr64_set,
 	},
 	[REGSET_DSP] = {
@@ -998,7 +1087,7 @@ static const struct user_regset mips64_regsets[] = {
 		.n		= NUM_DSP_REGS + 1,
 		.size		= sizeof(u64),
 		.align		= sizeof(u64),
-		.regset_get		= dsp64_get,
+		.get		= dsp64_get,
 		.set		= dsp64_set,
 		.active		= dsp_active,
 	},
@@ -1008,7 +1097,7 @@ static const struct user_regset mips64_regsets[] = {
 		.n		= 1,
 		.size		= sizeof(int),
 		.align		= sizeof(int),
-		.regset_get		= fp_mode_get,
+		.get		= fp_mode_get,
 		.set		= fp_mode_set,
 	},
 	[REGSET_FPR] = {
@@ -1016,7 +1105,7 @@ static const struct user_regset mips64_regsets[] = {
 		.n		= ELF_NFPREG,
 		.size		= sizeof(elf_fpreg_t),
 		.align		= sizeof(elf_fpreg_t),
-		.regset_get		= fpr_get,
+		.get		= fpr_get,
 		.set		= fpr_set,
 	},
 #endif
@@ -1026,7 +1115,7 @@ static const struct user_regset mips64_regsets[] = {
 		.n		= NUM_FPU_REGS + 1,
 		.size		= 16,
 		.align		= 16,
-		.regset_get		= msa_get,
+		.get		= msa_get,
 		.set		= msa_set,
 	},
 #endif

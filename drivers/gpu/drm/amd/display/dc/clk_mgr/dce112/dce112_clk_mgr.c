@@ -79,7 +79,8 @@ int dce112_set_clock(struct clk_mgr *clk_mgr_base, int requested_clk_khz)
 	memset(&dce_clk_params, 0, sizeof(dce_clk_params));
 
 	/* Make sure requested clock isn't lower than minimum threshold*/
-	requested_clk_khz = max(requested_clk_khz,
+	if (requested_clk_khz > 0)
+		requested_clk_khz = max(requested_clk_khz,
 				clk_mgr_dce->base.dentist_vco_freq_khz / 62);
 
 	dce_clk_params.target_clock_frequency = requested_clk_khz;
@@ -100,9 +101,7 @@ int dce112_set_clock(struct clk_mgr *clk_mgr_base, int requested_clk_khz)
 	/*VBIOS will determine DPREFCLK frequency, so we don't set it*/
 	dce_clk_params.target_clock_frequency = 0;
 	dce_clk_params.clock_type = DCECLOCK_TYPE_DPREFCLK;
-
-	if (!((clk_mgr_base->ctx->asic_id.chip_family == FAMILY_AI) &&
-	       ASICREV_IS_VEGA20_P(clk_mgr_base->ctx->asic_id.hw_internal_rev)))
+	if (!ASICREV_IS_VEGA20_P(clk_mgr_base->ctx->asic_id.hw_internal_rev))
 		dce_clk_params.flags.USE_GENLOCK_AS_SOURCE_FOR_DPREFCLK =
 			(dce_clk_params.pll_id ==
 					CLOCK_SOURCE_COMBO_DISPLAY_PLL0);
@@ -178,8 +177,7 @@ int dce112_set_dprefclk(struct clk_mgr_internal *clk_mgr)
 	dce_clk_params.target_clock_frequency = 0;
 	dce_clk_params.pll_id = CLOCK_SOURCE_ID_DFS;
 	dce_clk_params.clock_type = DCECLOCK_TYPE_DPREFCLK;
-	if (!((clk_mgr->base.ctx->asic_id.chip_family == FAMILY_AI) &&
-	       ASICREV_IS_VEGA20_P(clk_mgr->base.ctx->asic_id.hw_internal_rev)))
+	if (!ASICREV_IS_VEGA20_P(clk_mgr->base.ctx->asic_id.hw_internal_rev))
 		dce_clk_params.flags.USE_GENLOCK_AS_SOURCE_FOR_DPREFCLK =
 			(dce_clk_params.pll_id ==
 					CLOCK_SOURCE_COMBO_DISPLAY_PLL0);

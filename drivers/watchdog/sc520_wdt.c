@@ -321,7 +321,7 @@ static long fop_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		wdt_keepalive();
 	}
-		fallthrough;
+		/* Fall through */
 	case WDIOC_GETTIMEOUT:
 		return put_user(timeout, p);
 	default:

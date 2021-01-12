@@ -18,17 +18,18 @@
 
 #define GENERATED_MAX_DIV	255
 
+#define GCK_INDEX_DT_AUDIO_PLL	5
+
 struct clk_generated {
 	struct clk_hw hw;
 	struct regmap *regmap;
 	struct clk_range range;
 	spinlock_t *lock;
-	u32 *mux_table;
 	u32 id;
 	u32 gckdiv;
 	const struct clk_pcr_layout *layout;
 	u8 parent_id;
-	int chg_pid;
+	bool audio_pll_allowed;
 };
 
 #define to_clk_generated(hw) \
@@ -82,7 +83,7 @@ static int clk_generated_is_enabled(struct clk_hw *hw)
 	regmap_read(gck->regmap, gck->layout->offset, &status);
 	spin_unlock_irqrestore(gck->lock, flags);
 
-	return !!(status & AT91_PMC_PCR_GCKEN);
+	return status & AT91_PMC_PCR_GCKEN ? 1 : 0;
 }
 
 static unsigned long
@@ -108,7 +109,7 @@ static void clk_generated_best_diff(struct clk_rate_request *req,
 		tmp_rate = parent_rate / div;
 	tmp_diff = abs(req->rate - tmp_rate);
 
-	if (*best_diff < 0 || *best_diff >= tmp_diff) {
+	if (*best_diff < 0 || *best_diff > tmp_diff) {
 		*best_rate = tmp_rate;
 		*best_diff = tmp_diff;
 		req->best_parent_rate = parent_rate;
@@ -128,10 +129,7 @@ static int clk_generated_determine_rate(struct clk_hw *hw,
 	int i;
 	u32 div;
 
-	for (i = 0; i < clk_hw_get_num_parents(hw); i++) {
-		if (gck->chg_pid == i)
-			continue;
-
+	for (i = 0; i < clk_hw_get_num_parents(hw) - 1; i++) {
 		parent = clk_hw_get_parent_by_index(hw, i);
 		if (!parent)
 			continue;
@@ -163,17 +161,16 @@ static int clk_generated_determine_rate(struct clk_hw *hw,
 	 * that the only clks able to modify gck rate are those of audio IPs.
 	 */
 
-	if (gck->chg_pid < 0)
+	if (!gck->audio_pll_allowed)
 		goto end;
 
-	parent = clk_hw_get_parent_by_index(hw, gck->chg_pid);
+	parent = clk_hw_get_parent_by_index(hw, GCK_INDEX_DT_AUDIO_PLL);
 	if (!parent)
 		goto end;
 
 	for (div = 1; div < GENERATED_MAX_DIV + 2; div++) {
 		req_parent.rate = req->rate * div;
-		if (__clk_determine_rate(parent, &req_parent))
-			continue;
+		__clk_determine_rate(parent, &req_parent);
 		clk_generated_best_diff(req, parent, req_parent.rate, div,
 					&best_diff, &best_rate);
 
@@ -187,8 +184,8 @@ end:
 		 __clk_get_name((req->best_parent_hw)->clk),
 		 req->best_parent_rate);
 
-	if (best_rate < 0 || (gck->range.max && best_rate > gck->range.max))
-		return -EINVAL;
+	if (best_rate < 0)
+		return best_rate;
 
 	req->rate = best_rate;
 	return 0;
@@ -202,11 +199,7 @@ static int clk_generated_set_parent(struct clk_hw *hw, u8 index)
 	if (index >= clk_hw_get_num_parents(hw))
 		return -EINVAL;
 
-	if (gck->mux_table)
-		gck->parent_id = clk_mux_index_to_val(gck->mux_table, 0, index);
-	else
-		gck->parent_id = index;
-
+	gck->parent_id = index;
 	return 0;
 }
 
@@ -278,9 +271,8 @@ struct clk_hw * __init
 at91_clk_register_generated(struct regmap *regmap, spinlock_t *lock,
 			    const struct clk_pcr_layout *layout,
 			    const char *name, const char **parent_names,
-			    u32 *mux_table, u8 num_parents, u8 id,
-			    const struct clk_range *range,
-			    int chg_pid)
+			    u8 num_parents, u8 id, bool pll_audio,
+			    const struct clk_range *range)
 {
 	struct clk_generated *gck;
 	struct clk_init_data init;
@@ -295,18 +287,16 @@ at91_clk_register_generated(struct regmap *regmap, spinlock_t *lock,
 	init.ops = &generated_ops;
 	init.parent_names = parent_names;
 	init.num_parents = num_parents;
-	init.flags = CLK_SET_RATE_GATE | CLK_SET_PARENT_GATE;
-	if (chg_pid >= 0)
-		init.flags |= CLK_SET_RATE_PARENT;
+	init.flags = CLK_SET_RATE_GATE | CLK_SET_PARENT_GATE |
+		CLK_SET_RATE_PARENT;
 
 	gck->id = id;
 	gck->hw.init = &init;
 	gck->regmap = regmap;
 	gck->lock = lock;
 	gck->range = *range;
-	gck->chg_pid = chg_pid;
+	gck->audio_pll_allowed = pll_audio;
 	gck->layout = layout;
-	gck->mux_table = mux_table;
 
 	clk_generated_startup(gck);
 	hw = &gck->hw;

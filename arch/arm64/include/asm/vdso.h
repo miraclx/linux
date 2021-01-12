@@ -12,8 +12,6 @@
  */
 #define VDSO_LBASE	0x0
 
-#define __VVAR_PAGES    2
-
 #ifndef __ASSEMBLY__
 
 #include <generated/vdso-offsets.h>

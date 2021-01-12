@@ -469,7 +469,6 @@ struct ccp_sg_workarea {
 	unsigned int sg_used;
 
 	struct scatterlist *dma_sg;
-	struct scatterlist *dma_sg_head;
 	struct device *dma_dev;
 	unsigned int dma_count;
 	enum dma_data_direction dma_dir;
@@ -597,8 +596,8 @@ struct dword3 {
 };
 
 union dword4 {
-	u32 dst_lo;		/* NON-SHA	*/
-	u32 sha_len_lo;		/* SHA		*/
+	__le32 dst_lo;		/* NON-SHA	*/
+	__le32 sha_len_lo;	/* SHA		*/
 };
 
 union dword5 {
@@ -608,7 +607,7 @@ union dword5 {
 		unsigned int  rsvd1:13;
 		unsigned int  fixed:1;
 	} fields;
-	u32 sha_len_hi;
+	__le32 sha_len_hi;
 };
 
 struct dword7 {
@@ -619,12 +618,12 @@ struct dword7 {
 
 struct ccp5_desc {
 	struct dword0 dw0;
-	u32 length;
-	u32 src_lo;
+	__le32 length;
+	__le32 src_lo;
 	struct dword3 dw3;
 	union dword4 dw4;
 	union dword5 dw5;
-	u32 key_lo;
+	__le32 key_lo;
 	struct dword7 dw7;
 };
 

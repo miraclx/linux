@@ -34,7 +34,6 @@
  *
  *	STABS_DEBUG
  *	DWARF_DEBUG
- *	ELF_DETAILS
  *
  *	DISCARDS		// must be the last
  * }
@@ -110,30 +109,11 @@
 #endif
 
 /*
- * GCC 4.5 and later have a 32 bytes section alignment for structures.
- * Except GCC 4.9, that feels the need to align on 64 bytes.
+ * Align to a 32 byte boundary equal to the
+ * alignment gcc 4.5 uses for a struct
  */
-#if __GNUC__ == 4 && __GNUC_MINOR__ == 9
-#define STRUCT_ALIGNMENT 64
-#else
 #define STRUCT_ALIGNMENT 32
-#endif
 #define STRUCT_ALIGN() . = ALIGN(STRUCT_ALIGNMENT)
-
-/*
- * The order of the sched class addresses are important, as they are
- * used to determine the order of the priority of each sched class in
- * relation to each other.
- */
-#define SCHED_DATA				\
-	STRUCT_ALIGN();				\
-	__begin_sched_classes = .;		\
-	*(__idle_sched_class)			\
-	*(__fair_sched_class)			\
-	*(__rt_sched_class)			\
-	*(__dl_sched_class)			\
-	*(__stop_sched_class)			\
-	__end_sched_classes = .;
 
 /* The actual configuration determine if the init/exit sections
  * are handled as text/data or they can be discarded (which
@@ -340,9 +320,9 @@
 	*(__tracepoints)						\
 	/* implement dynamic printk debug */				\
 	. = ALIGN(8);							\
-	__start___dyndbg = .;						\
-	KEEP(*(__dyndbg))						\
-	__stop___dyndbg = .;						\
+	__start___verbose = .;						\
+	KEEP(*(__verbose))                                              \
+	__stop___verbose = .;						\
 	LIKELY_PROFILE()		       				\
 	BRANCH_PROFILE()						\
 	TRACE_PRINTKS()							\
@@ -361,8 +341,7 @@
 
 #define PAGE_ALIGNED_DATA(page_align)					\
 	. = ALIGN(page_align);						\
-	*(.data..page_aligned)						\
-	. = ALIGN(page_align);
+	*(.data..page_aligned)
 
 #define READ_MOSTLY_DATA(align)						\
 	. = ALIGN(align);						\
@@ -389,23 +368,15 @@
 	KEEP(*(__jump_table))						\
 	__stop___jump_table = .;
 
-#define STATIC_CALL_DATA						\
-	. = ALIGN(8);							\
-	__start_static_call_sites = .;					\
-	KEEP(*(.static_call_sites))					\
-	__stop_static_call_sites = .;
-
 /*
  * Allow architectures to handle ro_after_init data on their
  * own by defining an empty RO_AFTER_INIT_DATA.
  */
 #ifndef RO_AFTER_INIT_DATA
 #define RO_AFTER_INIT_DATA						\
-	. = ALIGN(8);							\
 	__start_ro_after_init = .;					\
 	*(.data..ro_after_init)						\
 	JUMP_TABLE_DATA							\
-	STATIC_CALL_DATA						\
 	__end_ro_after_init = .;
 #endif
 
@@ -417,7 +388,6 @@
 	.rodata           : AT(ADDR(.rodata) - LOAD_OFFSET) {		\
 		__start_rodata = .;					\
 		*(.rodata) *(.rodata.*)					\
-		SCHED_DATA						\
 		RO_AFTER_INIT_DATA	/* Read only after init */	\
 		. = ALIGN(8);						\
 		__start___tracepoints_ptrs = .;				\
@@ -571,15 +541,6 @@
 	__end_rodata = .;
 
 /*
- * Non-instrumentable text section
- */
-#define NOINSTR_TEXT							\
-		ALIGN_FUNCTION();					\
-		__noinstr_text_start = .;				\
-		*(.noinstr.text)					\
-		__noinstr_text_end = .;
-
-/*
  * .text section. Map to function alignment to avoid address changes
  * during second ld run in second ld pass when generating System.map
  *
@@ -589,11 +550,7 @@
  */
 #define TEXT_TEXT							\
 		ALIGN_FUNCTION();					\
-		*(.text.hot .text.hot.*)				\
-		*(TEXT_MAIN .text.fixup)				\
-		*(.text.unlikely .text.unlikely.*)			\
-		*(.text.unknown .text.unknown.*)			\
-		NOINSTR_TEXT						\
+		*(.text.hot TEXT_MAIN .text.fixup .text.unlikely)	\
 		*(.text..refcount)					\
 		*(.ref.text)						\
 	MEM_KEEP(init.text*)						\
@@ -646,12 +603,6 @@
 		*(.softirqentry.text)					\
 		__softirqentry_text_end = .;
 
-#define STATIC_CALL_TEXT						\
-		ALIGN_FUNCTION();					\
-		__static_call_text_start = .;				\
-		*(.static_call.text)					\
-		__static_call_text_end = .;
-
 /* Section used for early init (in .S files) */
 #define HEAD_TEXT  KEEP(*(.head.text))
 
@@ -678,12 +629,8 @@
 #define BTF								\
 	.BTF : AT(ADDR(.BTF) - LOAD_OFFSET) {				\
 		__start_BTF = .;					\
-		KEEP(*(.BTF))						\
+		*(.BTF)							\
 		__stop_BTF = .;						\
-	}								\
-	. = ALIGN(4);							\
-	.BTF_ids : AT(ADDR(.BTF_ids) - LOAD_OFFSET) {			\
-		*(.BTF_ids)						\
 	}
 #else
 #define BTF
@@ -701,7 +648,6 @@
 #ifdef CONFIG_CONSTRUCTORS
 #define KERNEL_CTORS()	. = ALIGN(8);			   \
 			__ctors_start = .;		   \
-			KEEP(*(SORT(.ctors.*)))		   \
 			KEEP(*(.ctors))			   \
 			KEEP(*(SORT(.init_array.*)))	   \
 			KEEP(*(.init_array))		   \
@@ -735,8 +681,7 @@
 	THERMAL_TABLE(governor)						\
 	EARLYCON_TABLE()						\
 	LSM_TABLE()							\
-	EARLY_LSM_TABLE()						\
-	KUNIT_TABLE()
+	EARLY_LSM_TABLE()
 
 #define INIT_TEXT							\
 	*(.init.text .init.text.*)					\
@@ -782,9 +727,7 @@
 	. = ALIGN(bss_align);						\
 	.bss : AT(ADDR(.bss) - LOAD_OFFSET) {				\
 		BSS_FIRST_SECTIONS					\
-		. = ALIGN(PAGE_SIZE);					\
 		*(.bss..page_aligned)					\
-		. = ALIGN(PAGE_SIZE);					\
 		*(.dynbss)						\
 		*(BSS_MAIN)						\
 		*(COMMON)						\
@@ -831,21 +774,15 @@
 		.debug_macro	0 : { *(.debug_macro) }			\
 		.debug_addr	0 : { *(.debug_addr) }
 
-/* Stabs debugging sections. */
+		/* Stabs debugging sections.  */
 #define STABS_DEBUG							\
 		.stab 0 : { *(.stab) }					\
 		.stabstr 0 : { *(.stabstr) }				\
 		.stab.excl 0 : { *(.stab.excl) }			\
 		.stab.exclstr 0 : { *(.stab.exclstr) }			\
 		.stab.index 0 : { *(.stab.index) }			\
-		.stab.indexstr 0 : { *(.stab.indexstr) }
-
-/* Required sections not related to debugging. */
-#define ELF_DETAILS							\
-		.comment 0 : { *(.comment) }				\
-		.symtab 0 : { *(.symtab) }				\
-		.strtab 0 : { *(.strtab) }				\
-		.shstrtab 0 : { *(.shstrtab) }
+		.stab.indexstr 0 : { *(.stab.indexstr) }		\
+		.comment 0 : { *(.comment) }
 
 #ifdef CONFIG_GENERIC_BUG
 #define BUG_TABLE							\
@@ -934,13 +871,6 @@
 		KEEP(*(.con_initcall.init))				\
 		__con_initcall_end = .;
 
-/* Alignment must be consistent with (kunit_suite *) in include/kunit/test.h */
-#define KUNIT_TABLE()							\
-		. = ALIGN(8);						\
-		__kunit_suites_start = .;				\
-		KEEP(*(.kunit_test_suites))				\
-		__kunit_suites_end = .;
-
 #ifdef CONFIG_BLK_DEV_INITRD
 #define INIT_RAM_FS							\
 	. = ALIGN(4);							\
@@ -987,38 +917,13 @@
 	EXIT_DATA
 #endif
 
-/*
- * Clang's -fsanitize=kernel-address and -fsanitize=thread produce
- * unwanted sections (.eh_frame and .init_array.*), but
- * CONFIG_CONSTRUCTORS wants to keep any .init_array.* sections.
- * https://bugs.llvm.org/show_bug.cgi?id=46478
- */
-#if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KCSAN)
-# ifdef CONFIG_CONSTRUCTORS
-#  define SANITIZER_DISCARDS						\
-	*(.eh_frame)
-# else
-#  define SANITIZER_DISCARDS						\
-	*(.init_array) *(.init_array.*)					\
-	*(.eh_frame)
-# endif
-#else
-# define SANITIZER_DISCARDS
-#endif
-
-#define COMMON_DISCARDS							\
-	SANITIZER_DISCARDS						\
-	*(.discard)							\
-	*(.discard.*)							\
-	*(.modinfo)							\
-	/* ld.bfd warns about .gnu.version* even when not emitted */	\
-	*(.gnu.version*)						\
-
 #define DISCARDS							\
 	/DISCARD/ : {							\
 	EXIT_DISCARDS							\
 	EXIT_CALL							\
-	COMMON_DISCARDS							\
+	*(.discard)							\
+	*(.discard.*)							\
+	*(.modinfo)							\
 	}
 
 /**

@@ -29,28 +29,6 @@
  */
 
 /*
- * Supports KUAP feature
- * key 0 controlling userspace addresses on radix
- * Key 3 on hash
- */
-#define MMU_FTR_BOOK3S_KUAP		ASM_CONST(0x00000200)
-
-/*
- * Supports KUEP feature
- * key 0 controlling userspace addresses on radix
- * Key 3 on hash
- */
-#define MMU_FTR_BOOK3S_KUEP		ASM_CONST(0x00000400)
-
-/*
- * Support for memory protection keys.
- */
-#define MMU_FTR_PKEY			ASM_CONST(0x00000800)
-
-/* Guest Translation Shootdown Enable */
-#define MMU_FTR_GTSE			ASM_CONST(0x00001000)
-
-/*
  * Support for 68 bit VA space. We added that from ISA 2.05
  */
 #define MMU_FTR_68_BIT_VA		ASM_CONST(0x00002000)
@@ -129,8 +107,14 @@
  */
 #define MMU_FTR_1T_SEGMENT		ASM_CONST(0x40000000)
 
+/*
+ * Supports KUAP (key 0 controlling userspace addresses) on radix
+ */
+#define MMU_FTR_RADIX_KUAP		ASM_CONST(0x80000000)
+
 /* MMU feature bit sets for various CPUs */
-#define MMU_FTRS_DEFAULT_HPTE_ARCH_V2	(MMU_FTR_HPTE_TABLE | MMU_FTR_TLBIEL | MMU_FTR_16M_PAGE)
+#define MMU_FTRS_DEFAULT_HPTE_ARCH_V2	\
+	MMU_FTR_HPTE_TABLE | MMU_FTR_PPCAS_ARCH_V2
 #define MMU_FTRS_POWER		MMU_FTRS_DEFAULT_HPTE_ARCH_V2
 #define MMU_FTRS_PPC970		MMU_FTRS_POWER | MMU_FTR_TLBIE_CROP_VA
 #define MMU_FTRS_POWER5		MMU_FTRS_POWER | MMU_FTR_LOCKLESS_TLBIE
@@ -138,7 +122,6 @@
 #define MMU_FTRS_POWER7		MMU_FTRS_POWER6
 #define MMU_FTRS_POWER8		MMU_FTRS_POWER6
 #define MMU_FTRS_POWER9		MMU_FTRS_POWER6
-#define MMU_FTRS_POWER10	MMU_FTRS_POWER6
 #define MMU_FTRS_CELL		MMU_FTRS_DEFAULT_HPTE_ARCH_V2 | \
 				MMU_FTR_CI_LARGE_PAGE
 #define MMU_FTRS_PA6T		MMU_FTRS_DEFAULT_HPTE_ARCH_V2 | \
@@ -157,7 +140,7 @@ DECLARE_PER_CPU(int, next_tlbcam_idx);
 
 enum {
 	MMU_FTRS_POSSIBLE =
-#if defined(CONFIG_PPC_BOOK3S_64) || defined(CONFIG_PPC_BOOK3S_604)
+#ifdef CONFIG_PPC_BOOK3S
 		MMU_FTR_HPTE_TABLE |
 #endif
 #ifdef CONFIG_PPC_8xx
@@ -166,19 +149,17 @@ enum {
 #ifdef CONFIG_40x
 		MMU_FTR_TYPE_40x |
 #endif
-#ifdef CONFIG_PPC_47x
-		MMU_FTR_TYPE_47x | MMU_FTR_USE_TLBIVAX_BCAST | MMU_FTR_LOCK_BCAST_INVAL |
-#elif defined(CONFIG_44x)
+#ifdef CONFIG_44x
 		MMU_FTR_TYPE_44x |
 #endif
-#ifdef CONFIG_E500
+#if defined(CONFIG_E200) || defined(CONFIG_E500)
 		MMU_FTR_TYPE_FSL_E | MMU_FTR_BIG_PHYS | MMU_FTR_USE_TLBILX |
 #endif
-#ifdef CONFIG_PPC_BOOK3S_32
-		MMU_FTR_USE_HIGH_BATS |
+#ifdef CONFIG_PPC_47x
+		MMU_FTR_TYPE_47x | MMU_FTR_USE_TLBIVAX_BCAST | MMU_FTR_LOCK_BCAST_INVAL |
 #endif
-#ifdef CONFIG_PPC_83xx
-		MMU_FTR_NEED_DTLB_SW_LRU |
+#ifdef CONFIG_PPC_BOOK3S_32
+		MMU_FTR_USE_HIGH_BATS | MMU_FTR_NEED_DTLB_SW_LRU |
 #endif
 #ifdef CONFIG_PPC_BOOK3E_64
 		MMU_FTR_USE_TLBRSRV | MMU_FTR_USE_PAIRED_MAS |
@@ -191,48 +172,15 @@ enum {
 #endif
 #ifdef CONFIG_PPC_RADIX_MMU
 		MMU_FTR_TYPE_RADIX |
-		MMU_FTR_GTSE |
-#endif /* CONFIG_PPC_RADIX_MMU */
 #ifdef CONFIG_PPC_KUAP
-	MMU_FTR_BOOK3S_KUAP |
+		MMU_FTR_RADIX_KUAP |
 #endif /* CONFIG_PPC_KUAP */
-#ifdef CONFIG_PPC_MEM_KEYS
-	MMU_FTR_PKEY |
-#endif
-#ifdef CONFIG_PPC_KUEP
-	MMU_FTR_BOOK3S_KUEP |
-#endif /* CONFIG_PPC_KUAP */
-
+#endif /* CONFIG_PPC_RADIX_MMU */
 		0,
 };
 
-#if defined(CONFIG_PPC_BOOK3S_604) && !defined(CONFIG_PPC_BOOK3S_603)
-#define MMU_FTRS_ALWAYS		MMU_FTR_HPTE_TABLE
-#endif
-#ifdef CONFIG_PPC_8xx
-#define MMU_FTRS_ALWAYS		MMU_FTR_TYPE_8xx
-#endif
-#ifdef CONFIG_40x
-#define MMU_FTRS_ALWAYS		MMU_FTR_TYPE_40x
-#endif
-#ifdef CONFIG_PPC_47x
-#define MMU_FTRS_ALWAYS		MMU_FTR_TYPE_47x
-#elif defined(CONFIG_44x)
-#define MMU_FTRS_ALWAYS		MMU_FTR_TYPE_44x
-#endif
-#if defined(CONFIG_E200) || defined(CONFIG_E500)
-#define MMU_FTRS_ALWAYS		MMU_FTR_TYPE_FSL_E
-#endif
-
-#ifndef MMU_FTRS_ALWAYS
-#define MMU_FTRS_ALWAYS		0
-#endif
-
 static inline bool early_mmu_has_feature(unsigned long feature)
 {
-	if (MMU_FTRS_ALWAYS & feature)
-		return true;
-
 	return !!(MMU_FTRS_POSSIBLE & cur_cpu_spec->mmu_features & feature);
 }
 
@@ -260,9 +208,6 @@ static __always_inline bool mmu_has_feature(unsigned long feature)
 		return early_mmu_has_feature(feature);
 	}
 #endif
-
-	if (MMU_FTRS_ALWAYS & feature)
-		return true;
 
 	if (!(MMU_FTRS_POSSIBLE & feature))
 		return false;
@@ -346,6 +291,15 @@ static inline bool early_radix_enabled(void)
 }
 #endif
 
+#ifdef CONFIG_PPC_MEM_KEYS
+extern u16 get_mm_addr_key(struct mm_struct *mm, unsigned long address);
+#else
+static inline u16 get_mm_addr_key(struct mm_struct *mm, unsigned long address)
+{
+	return 0;
+}
+#endif /* CONFIG_PPC_MEM_KEYS */
+
 #ifdef CONFIG_STRICT_KERNEL_RWX
 static inline bool strict_kernel_rwx_enabled(void)
 {
@@ -409,8 +363,6 @@ extern void early_init_mmu_secondary(void);
 extern void setup_initial_memory_limit(phys_addr_t first_memblock_base,
 				       phys_addr_t first_memblock_size);
 static inline void mmu_early_init_devtree(void) { }
-
-static inline void pkey_early_init_devtree(void) {}
 
 extern void *abatron_pteptrs[2];
 #endif /* __ASSEMBLY__ */

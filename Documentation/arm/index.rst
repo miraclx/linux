@@ -23,8 +23,6 @@ ARM Architecture
    vlocks
    porting
 
-   features
-
 SoC-specific documents
 ======================
 

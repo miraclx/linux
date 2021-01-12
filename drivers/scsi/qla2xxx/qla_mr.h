@@ -1,7 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * QLogic Fibre Channel HBA Driver
  * Copyright (c)  2003-2014 QLogic Corporation
+ *
+ * See LICENSE.qla2xxx for copyright and licensing details.
  */
 #ifndef __QLA_MR_H
 #define __QLA_MR_H
@@ -95,7 +96,7 @@ struct tsk_mgmt_entry_fx00 {
 	uint8_t sys_define;
 	uint8_t entry_status;		/* Entry Status. */
 
-	uint32_t handle;		/* System handle. */
+	__le32 handle;		/* System handle. */
 
 	uint32_t reserved_0;
 
@@ -120,13 +121,13 @@ struct abort_iocb_entry_fx00 {
 	uint8_t sys_define;		/* System defined. */
 	uint8_t entry_status;		/* Entry Status. */
 
-	uint32_t handle;		/* System handle. */
+	__le32 handle;		/* System handle. */
 	__le32 reserved_0;
 
 	__le16 tgt_id_sts;		/* Completion status. */
 	__le16 options;
 
-	uint32_t abort_handle;		/* System handle. */
+	__le32 abort_handle;		/* System handle. */
 	__le32 reserved_2;
 
 	__le16 req_que_no;
@@ -165,7 +166,7 @@ struct fxdisc_entry_fx00 {
 	uint8_t sys_define;		/* System Defined. */
 	uint8_t entry_status;		/* Entry Status. */
 
-	uint32_t handle;		/* System handle. */
+	__le32 handle;		/* System handle. */
 	__le32 reserved_0;		/* System handle. */
 
 	__le16 func_num;
@@ -358,47 +359,47 @@ struct config_info_data {
 #define CONTINUE_A64_TYPE_FX00	0x03	/* Continuation entry. */
 
 #define QLAFX00_SET_HST_INTR(ha, value) \
-	wrt_reg_dword((ha)->cregbase + QLAFX00_HST_TO_HBA_REG, \
+	WRT_REG_DWORD((ha)->cregbase + QLAFX00_HST_TO_HBA_REG, \
 	value)
 
 #define QLAFX00_CLR_HST_INTR(ha, value) \
-	wrt_reg_dword((ha)->cregbase + QLAFX00_HBA_TO_HOST_REG, \
+	WRT_REG_DWORD((ha)->cregbase + QLAFX00_HBA_TO_HOST_REG, \
 	~value)
 
 #define QLAFX00_RD_INTR_REG(ha) \
-	rd_reg_dword((ha)->cregbase + QLAFX00_HBA_TO_HOST_REG)
+	RD_REG_DWORD((ha)->cregbase + QLAFX00_HBA_TO_HOST_REG)
 
 #define QLAFX00_CLR_INTR_REG(ha, value) \
-	wrt_reg_dword((ha)->cregbase + QLAFX00_HBA_TO_HOST_REG, \
+	WRT_REG_DWORD((ha)->cregbase + QLAFX00_HBA_TO_HOST_REG, \
 	~value)
 
 #define QLAFX00_SET_HBA_SOC_REG(ha, off, val)\
-	wrt_reg_dword((ha)->cregbase + off, val)
+	WRT_REG_DWORD((ha)->cregbase + off, val)
 
 #define QLAFX00_GET_HBA_SOC_REG(ha, off)\
-	rd_reg_dword((ha)->cregbase + off)
+	RD_REG_DWORD((ha)->cregbase + off)
 
 #define QLAFX00_HBA_RST_REG(ha, val)\
-	wrt_reg_dword((ha)->cregbase + QLAFX00_HST_RST_REG, val)
+	WRT_REG_DWORD((ha)->cregbase + QLAFX00_HST_RST_REG, val)
 
 #define QLAFX00_RD_ICNTRL_REG(ha) \
-	rd_reg_dword((ha)->cregbase + QLAFX00_HBA_ICNTRL_REG)
+	RD_REG_DWORD((ha)->cregbase + QLAFX00_HBA_ICNTRL_REG)
 
 #define QLAFX00_ENABLE_ICNTRL_REG(ha) \
-	wrt_reg_dword((ha)->cregbase + QLAFX00_HBA_ICNTRL_REG, \
+	WRT_REG_DWORD((ha)->cregbase + QLAFX00_HBA_ICNTRL_REG, \
 	(QLAFX00_GET_HBA_SOC_REG(ha, QLAFX00_HBA_ICNTRL_REG) | \
 	 QLAFX00_ICR_ENB_MASK))
 
 #define QLAFX00_DISABLE_ICNTRL_REG(ha) \
-	wrt_reg_dword((ha)->cregbase + QLAFX00_HBA_ICNTRL_REG, \
+	WRT_REG_DWORD((ha)->cregbase + QLAFX00_HBA_ICNTRL_REG, \
 	(QLAFX00_GET_HBA_SOC_REG(ha, QLAFX00_HBA_ICNTRL_REG) & \
 	 QLAFX00_ICR_DIS_MASK))
 
 #define QLAFX00_RD_REG(ha, off) \
-	rd_reg_dword((ha)->cregbase + off)
+	RD_REG_DWORD((ha)->cregbase + off)
 
 #define QLAFX00_WR_REG(ha, off, val) \
-	wrt_reg_dword((ha)->cregbase + off, val)
+	WRT_REG_DWORD((ha)->cregbase + off, val)
 
 struct qla_mt_iocb_rqst_fx00 {
 	__le32 reserved_0;

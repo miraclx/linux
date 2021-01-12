@@ -41,10 +41,7 @@ properties:
     maxItems: 2
 
   interrupts:
-    description:
-      ADC interrupt followed by optional touchscreen interrupt.
-    minItems: 1
-    maxItems: 2
+    maxItems: 1
 
   "#io-channel-cells":
     const: 1
@@ -71,9 +68,6 @@ required:
   - "#io-channel-cells"
   - vdd-supply
 
-additionalProperties:
-  type: object
-
 allOf:
   - if:
       properties:
@@ -84,6 +78,7 @@ allOf:
               - samsung,exynos-adc-v2
               - samsung,exynos3250-adc
               - samsung,exynos4212-adc
+              - samsung,s5pv210-adc
     then:
       required:
         - samsung,syscon-phandle
@@ -112,15 +107,6 @@ allOf:
           items:
             - const: adc
 
-  - if:
-      required:
-        - has-touchscreen
-    then:
-      properties:
-        interrupts:
-          minItems: 2
-          maxItems: 2
-
 examples:
   - |
     adc: adc@12d10000 {
@@ -128,6 +114,7 @@ examples:
         reg = <0x12d10000 0x100>;
         interrupts = <0 106 0>;
         #io-channel-cells = <1>;
+        io-channel-ranges;
 
         clocks = <&clock 303>;
         clock-names = "adc";
@@ -153,6 +140,7 @@ examples:
         reg = <0x126C0000 0x100>;
         interrupts = <0 137 0>;
         #io-channel-cells = <1>;
+        io-channel-ranges;
 
         clocks = <&cmu CLK_TSADC>,
                  <&cmu CLK_SCLK_TSADC>;

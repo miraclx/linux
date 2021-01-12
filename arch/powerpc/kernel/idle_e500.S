@@ -90,4 +90,3 @@ _GLOBAL(power_save_ppc32_restore)
 #endif
 
 	b	transfer_to_handler_cont
-_ASM_NOKPROBE_SYMBOL(power_save_ppc32_restore)

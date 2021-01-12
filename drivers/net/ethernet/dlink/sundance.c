@@ -18,7 +18,7 @@
 	http://www.scyld.com/network/sundance.html
 	[link no longer provides useful info -jgarzik]
 	Archives of the mailing list are still available at
-	https://www.beowulf.org/pipermail/netdrivers/
+	http://www.beowulf.org/pipermail/netdrivers/
 
 */
 
@@ -367,7 +367,6 @@ struct netdev_private {
         dma_addr_t tx_ring_dma;
         dma_addr_t rx_ring_dma;
 	struct timer_list timer;		/* Media monitoring timer. */
-	struct net_device *ndev;		/* backpointer */
 	/* ethtool extra stats */
 	struct {
 		u64 tx_multiple_collisions;
@@ -430,8 +429,8 @@ static void init_ring(struct net_device *dev);
 static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev);
 static int reset_tx (struct net_device *dev);
 static irqreturn_t intr_handler(int irq, void *dev_instance);
-static void rx_poll(struct tasklet_struct *t);
-static void tx_poll(struct tasklet_struct *t);
+static void rx_poll(unsigned long data);
+static void tx_poll(unsigned long data);
 static void refill_rx (struct net_device *dev);
 static void netdev_error(struct net_device *dev, int intr_status);
 static void netdev_error(struct net_device *dev, int intr_status);
@@ -532,15 +531,14 @@ static int sundance_probe1(struct pci_dev *pdev,
 			cpu_to_le16(eeprom_read(ioaddr, i + EEPROM_SA_OFFSET));
 
 	np = netdev_priv(dev);
-	np->ndev = dev;
 	np->base = ioaddr;
 	np->pci_dev = pdev;
 	np->chip_id = chip_idx;
 	np->msg_enable = (1 << debug) - 1;
 	spin_lock_init(&np->lock);
 	spin_lock_init(&np->statlock);
-	tasklet_setup(&np->rx_tasklet, rx_poll);
-	tasklet_setup(&np->tx_tasklet, tx_poll);
+	tasklet_init(&np->rx_tasklet, rx_poll, (unsigned long)dev);
+	tasklet_init(&np->tx_tasklet, tx_poll, (unsigned long)dev);
 
 	ring_space = dma_alloc_coherent(&pdev->dev, TX_TOTAL_SIZE,
 			&ring_dma, GFP_KERNEL);
@@ -1056,9 +1054,10 @@ static void init_ring(struct net_device *dev)
 	}
 }
 
-static void tx_poll(struct tasklet_struct *t)
+static void tx_poll (unsigned long data)
 {
-	struct netdev_private *np = from_tasklet(np, t, tx_tasklet);
+	struct net_device *dev = (struct net_device *)data;
+	struct netdev_private *np = netdev_priv(dev);
 	unsigned head = np->cur_task % TX_RING_SIZE;
 	struct netdev_desc *txdesc =
 		&np->tx_ring[(np->cur_tx - 1) % TX_RING_SIZE];
@@ -1313,10 +1312,10 @@ static irqreturn_t intr_handler(int irq, void *dev_instance)
 	return IRQ_RETVAL(handled);
 }
 
-static void rx_poll(struct tasklet_struct *t)
+static void rx_poll(unsigned long data)
 {
-	struct netdev_private *np = from_tasklet(np, t, rx_tasklet);
-	struct net_device *dev = np->ndev;
+	struct net_device *dev = (struct net_device *)data;
+	struct netdev_private *np = netdev_priv(dev);
 	int entry = np->cur_rx % RX_RING_SIZE;
 	int boguscnt = np->budget;
 	void __iomem *ioaddr = np->base;
@@ -1929,9 +1928,11 @@ static void sundance_remove1(struct pci_dev *pdev)
 	}
 }
 
-static int __maybe_unused sundance_suspend(struct device *dev_d)
+#ifdef CONFIG_PM
+
+static int sundance_suspend(struct pci_dev *pci_dev, pm_message_t state)
 {
-	struct net_device *dev = dev_get_drvdata(dev_d);
+	struct net_device *dev = pci_get_drvdata(pci_dev);
 	struct netdev_private *np = netdev_priv(dev);
 	void __iomem *ioaddr = np->base;
 
@@ -1941,23 +1942,29 @@ static int __maybe_unused sundance_suspend(struct device *dev_d)
 	netdev_close(dev);
 	netif_device_detach(dev);
 
+	pci_save_state(pci_dev);
 	if (np->wol_enabled) {
 		iowrite8(AcceptBroadcast | AcceptMyPhys, ioaddr + RxMode);
 		iowrite16(RxEnable, ioaddr + MACCtrl1);
 	}
-
-	device_set_wakeup_enable(dev_d, np->wol_enabled);
+	pci_enable_wake(pci_dev, pci_choose_state(pci_dev, state),
+			np->wol_enabled);
+	pci_set_power_state(pci_dev, pci_choose_state(pci_dev, state));
 
 	return 0;
 }
 
-static int __maybe_unused sundance_resume(struct device *dev_d)
+static int sundance_resume(struct pci_dev *pci_dev)
 {
-	struct net_device *dev = dev_get_drvdata(dev_d);
+	struct net_device *dev = pci_get_drvdata(pci_dev);
 	int err = 0;
 
 	if (!netif_running(dev))
 		return 0;
+
+	pci_set_power_state(pci_dev, PCI_D0);
+	pci_restore_state(pci_dev);
+	pci_enable_wake(pci_dev, PCI_D0, 0);
 
 	err = netdev_open(dev);
 	if (err) {
@@ -1972,14 +1979,17 @@ out:
 	return err;
 }
 
-static SIMPLE_DEV_PM_OPS(sundance_pm_ops, sundance_suspend, sundance_resume);
+#endif /* CONFIG_PM */
 
 static struct pci_driver sundance_driver = {
 	.name		= DRV_NAME,
 	.id_table	= sundance_pci_tbl,
 	.probe		= sundance_probe1,
 	.remove		= sundance_remove1,
-	.driver.pm	= &sundance_pm_ops,
+#ifdef CONFIG_PM
+	.suspend	= sundance_suspend,
+	.resume		= sundance_resume,
+#endif /* CONFIG_PM */
 };
 
 static int __init sundance_init(void)

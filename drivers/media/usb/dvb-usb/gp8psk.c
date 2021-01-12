@@ -9,7 +9,7 @@
  *
  * This module is based off the vp7045 and vp702x modules
  *
- * see Documentation/driver-api/media/drivers/dvb-usb.rst for more information
+ * see Documentation/media/dvb-drivers/dvb-usb.rst for more information
  */
 #include "gp8psk.h"
 #include "gp8psk-fe.h"
@@ -182,7 +182,7 @@ out_rel_fw:
 
 static int gp8psk_power_ctrl(struct dvb_usb_device *d, int onoff)
 {
-	u8 status = 0, buf;
+	u8 status, buf;
 	int gp_product_id = le16_to_cpu(d->udev->descriptor.idProduct);
 
 	if (onoff) {

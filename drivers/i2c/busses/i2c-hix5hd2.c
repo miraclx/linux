@@ -388,6 +388,7 @@ static int hix5hd2_i2c_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct hix5hd2_i2c_priv *priv;
+	struct resource *mem;
 	unsigned int freq;
 	int irq, ret;
 
@@ -408,7 +409,8 @@ static int hix5hd2_i2c_probe(struct platform_device *pdev)
 		}
 	}
 
-	priv->regs = devm_platform_ioremap_resource(pdev, 0);
+	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	priv->regs = devm_ioremap_resource(&pdev->dev, mem);
 	if (IS_ERR(priv->regs))
 		return PTR_ERR(priv->regs);
 

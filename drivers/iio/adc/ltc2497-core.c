@@ -169,6 +169,7 @@ int ltc2497core_probe(struct device *dev, struct iio_dev *indio_dev)
 	struct ltc2497core_driverdata *ddata = iio_priv(indio_dev);
 	int ret;
 
+	indio_dev->dev.parent = dev;
 	indio_dev->name = dev_name(dev);
 	indio_dev->info = &ltc2497core_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
@@ -180,9 +181,13 @@ int ltc2497core_probe(struct device *dev, struct iio_dev *indio_dev)
 		return ret;
 
 	ddata->ref = devm_regulator_get(dev, "vref");
-	if (IS_ERR(ddata->ref))
-		return dev_err_probe(dev, PTR_ERR(ddata->ref),
-				     "Failed to get vref regulator\n");
+	if (IS_ERR(ddata->ref)) {
+		if (PTR_ERR(ddata->ref) != -EPROBE_DEFER)
+			dev_err(dev, "Failed to get vref regulator: %pe\n",
+				ddata->ref);
+
+		return PTR_ERR(ddata->ref);
+	}
 
 	ret = regulator_enable(ddata->ref);
 	if (ret < 0) {

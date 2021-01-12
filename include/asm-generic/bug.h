@@ -3,7 +3,6 @@
 #define _ASM_GENERIC_BUG_H
 
 #include <linux/compiler.h>
-#include <linux/instrumentation.h>
 
 #define CUT_HERE		"------------[ cut here ]------------\n"
 
@@ -84,19 +83,14 @@ extern __printf(4, 5)
 void warn_slowpath_fmt(const char *file, const int line, unsigned taint,
 		       const char *fmt, ...);
 #define __WARN()		__WARN_printf(TAINT_WARN, NULL)
-#define __WARN_printf(taint, arg...) do {				\
-		instrumentation_begin();				\
-		warn_slowpath_fmt(__FILE__, __LINE__, taint, arg);	\
-		instrumentation_end();					\
-	} while (0)
+#define __WARN_printf(taint, arg...)					\
+	warn_slowpath_fmt(__FILE__, __LINE__, taint, arg)
 #else
 extern __printf(1, 2) void __warn_printk(const char *fmt, ...);
 #define __WARN()		__WARN_FLAGS(BUGFLAG_TAINT(TAINT_WARN))
 #define __WARN_printf(taint, arg...) do {				\
-		instrumentation_begin();				\
 		__warn_printk(arg);					\
 		__WARN_FLAGS(BUGFLAG_NO_CUT_HERE | BUGFLAG_TAINT(taint));\
-		instrumentation_end();					\
 	} while (0)
 #define WARN_ON_ONCE(condition) ({				\
 	int __ret_warn_on = !!(condition);			\
@@ -141,7 +135,7 @@ void __warn(const char *file, int line, void *caller, unsigned taint,
 
 #ifndef WARN_ON_ONCE
 #define WARN_ON_ONCE(condition)	({				\
-	static bool __section(".data.once") __warned;		\
+	static bool __section(.data.once) __warned;		\
 	int __ret_warn_once = !!(condition);			\
 								\
 	if (unlikely(__ret_warn_once && !__warned)) {		\
@@ -153,7 +147,7 @@ void __warn(const char *file, int line, void *caller, unsigned taint,
 #endif
 
 #define WARN_ONCE(condition, format...)	({			\
-	static bool __section(".data.once") __warned;		\
+	static bool __section(.data.once) __warned;		\
 	int __ret_warn_once = !!(condition);			\
 								\
 	if (unlikely(__ret_warn_once && !__warned)) {		\
@@ -164,7 +158,7 @@ void __warn(const char *file, int line, void *caller, unsigned taint,
 })
 
 #define WARN_TAINT_ONCE(condition, taint, format...)	({	\
-	static bool __section(".data.once") __warned;		\
+	static bool __section(.data.once) __warned;		\
 	int __ret_warn_once = !!(condition);			\
 								\
 	if (unlikely(__ret_warn_once && !__warned)) {		\

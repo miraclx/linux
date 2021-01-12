@@ -2,6 +2,8 @@
 #ifndef __ASM_SH_FUTEX_H
 #define __ASM_SH_FUTEX_H
 
+#ifdef __KERNEL__
+
 #include <linux/futex.h>
 #include <linux/uaccess.h>
 #include <asm/errno.h>
@@ -69,4 +71,5 @@ static inline int arch_futex_atomic_op_inuser(int op, u32 oparg, int *oval,
 	return ret;
 }
 
+#endif /* __KERNEL__ */
 #endif /* __ASM_SH_FUTEX_H */

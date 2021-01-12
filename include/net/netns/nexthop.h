@@ -14,6 +14,5 @@ struct netns_nexthop {
 
 	unsigned int		seq;		/* protected by rtnl_mutex */
 	u32			last_id_allocated;
-	struct blocking_notifier_head notifier_chain;
 };
 #endif

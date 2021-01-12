@@ -17,7 +17,6 @@
 #include <linux/cred.h>
 #include <linux/uio.h>
 #include <linux/xattr.h>
-#include <linux/blkdev.h>
 
 #include "hfs_fs.h"
 #include "btree.h"

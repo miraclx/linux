@@ -151,7 +151,7 @@ struct hfi1_port_attr {
 
 static ssize_t cc_prescan_show(struct hfi1_pportdata *ppd, char *buf)
 {
-	return sysfs_emit(buf, "%s\n", ppd->cc_prescan ? "on" : "off");
+	return sprintf(buf, "%s\n", ppd->cc_prescan ? "on" : "off");
 }
 
 static ssize_t cc_prescan_store(struct hfi1_pportdata *ppd, const char *buf,
@@ -296,7 +296,7 @@ static ssize_t sc2vl_attr_show(struct kobject *kobj, struct attribute *attr,
 		container_of(kobj, struct hfi1_pportdata, sc2vl_kobj);
 	struct hfi1_devdata *dd = ppd->dd;
 
-	return sysfs_emit(buf, "%u\n", *((u8 *)dd->sc2vl + sattr->sc));
+	return sprintf(buf, "%u\n", *((u8 *)dd->sc2vl + sattr->sc));
 }
 
 static const struct sysfs_ops hfi1_sc2vl_ops = {
@@ -401,7 +401,7 @@ static ssize_t sl2sc_attr_show(struct kobject *kobj, struct attribute *attr,
 		container_of(kobj, struct hfi1_pportdata, sl2sc_kobj);
 	struct hfi1_ibport *ibp = &ppd->ibport_data;
 
-	return sysfs_emit(buf, "%u\n", ibp->sl_to_sc[sattr->sl]);
+	return sprintf(buf, "%u\n", ibp->sl_to_sc[sattr->sl]);
 }
 
 static const struct sysfs_ops hfi1_sl2sc_ops = {
@@ -475,7 +475,7 @@ static ssize_t vl2mtu_attr_show(struct kobject *kobj, struct attribute *attr,
 		container_of(kobj, struct hfi1_pportdata, vl2mtu_kobj);
 	struct hfi1_devdata *dd = ppd->dd;
 
-	return sysfs_emit(buf, "%u\n", dd->vld[vlattr->vl].mtu);
+	return sprintf(buf, "%u\n", dd->vld[vlattr->vl].mtu);
 }
 
 static const struct sysfs_ops hfi1_vl2mtu_ops = {
@@ -500,7 +500,7 @@ static ssize_t hw_rev_show(struct device *device, struct device_attribute *attr,
 	struct hfi1_ibdev *dev =
 		rdma_device_to_drv_device(device, struct hfi1_ibdev, rdi.ibdev);
 
-	return sysfs_emit(buf, "%x\n", dd_from_dev(dev)->minrev);
+	return sprintf(buf, "%x\n", dd_from_dev(dev)->minrev);
 }
 static DEVICE_ATTR_RO(hw_rev);
 
@@ -510,11 +510,13 @@ static ssize_t board_id_show(struct device *device,
 	struct hfi1_ibdev *dev =
 		rdma_device_to_drv_device(device, struct hfi1_ibdev, rdi.ibdev);
 	struct hfi1_devdata *dd = dd_from_dev(dev);
+	int ret;
 
 	if (!dd->boardname)
-		return -EINVAL;
-
-	return sysfs_emit(buf, "%s\n", dd->boardname);
+		ret = -EINVAL;
+	else
+		ret = scnprintf(buf, PAGE_SIZE, "%s\n", dd->boardname);
+	return ret;
 }
 static DEVICE_ATTR_RO(board_id);
 
@@ -526,7 +528,7 @@ static ssize_t boardversion_show(struct device *device,
 	struct hfi1_devdata *dd = dd_from_dev(dev);
 
 	/* The string printed here is already newline-terminated. */
-	return sysfs_emit(buf, "%s", dd->boardversion);
+	return scnprintf(buf, PAGE_SIZE, "%s", dd->boardversion);
 }
 static DEVICE_ATTR_RO(boardversion);
 
@@ -543,9 +545,9 @@ static ssize_t nctxts_show(struct device *device,
 	 * and a receive context, so returning the smaller of the two counts
 	 * give a more accurate picture of total contexts available.
 	 */
-	return sysfs_emit(buf, "%u\n",
-			  min(dd->num_user_contexts,
-			      (u32)dd->sc_sizes[SC_USER].count));
+	return scnprintf(buf, PAGE_SIZE, "%u\n",
+			 min(dd->num_user_contexts,
+			     (u32)dd->sc_sizes[SC_USER].count));
 }
 static DEVICE_ATTR_RO(nctxts);
 
@@ -557,7 +559,7 @@ static ssize_t nfreectxts_show(struct device *device,
 	struct hfi1_devdata *dd = dd_from_dev(dev);
 
 	/* Return the number of free user ports (contexts) available. */
-	return sysfs_emit(buf, "%u\n", dd->freectxts);
+	return scnprintf(buf, PAGE_SIZE, "%u\n", dd->freectxts);
 }
 static DEVICE_ATTR_RO(nfreectxts);
 
@@ -568,8 +570,7 @@ static ssize_t serial_show(struct device *device,
 		rdma_device_to_drv_device(device, struct hfi1_ibdev, rdi.ibdev);
 	struct hfi1_devdata *dd = dd_from_dev(dev);
 
-	/* dd->serial is already newline terminated in chip.c */
-	return sysfs_emit(buf, "%s", dd->serial);
+	return scnprintf(buf, PAGE_SIZE, "%s", dd->serial);
 }
 static DEVICE_ATTR_RO(serial);
 
@@ -597,8 +598,9 @@ static DEVICE_ATTR_WO(chip_reset);
  * Convert the reported temperature from an integer (reported in
  * units of 0.25C) to a floating point number.
  */
-#define temp_d(t) ((t) >> 2)
-#define temp_f(t) (((t)&0x3) * 25u)
+#define temp2str(temp, buf, size, idx)					\
+	scnprintf((buf) + (idx), (size) - (idx), "%u.%02u ",		\
+			      ((temp) >> 2), ((temp) & 0x3) * 25)
 
 /*
  * Dump tempsense values, in decimal, to ease shell-scripts.
@@ -613,17 +615,19 @@ static ssize_t tempsense_show(struct device *device,
 	int ret;
 
 	ret = hfi1_tempsense_rd(dd, &temp);
-	if (ret)
-		return ret;
+	if (!ret) {
+		int idx = 0;
 
-	return sysfs_emit(buf, "%u.%02u %u.%02u %u.%02u %u.%02u %u %u %u\n",
-			  temp_d(temp.curr), temp_f(temp.curr),
-			  temp_d(temp.lo_lim), temp_f(temp.lo_lim),
-			  temp_d(temp.hi_lim), temp_f(temp.hi_lim),
-			  temp_d(temp.crit_lim), temp_f(temp.crit_lim),
-			  temp.triggers & 0x1,
-			  temp.triggers & 0x2,
-			  temp.triggers & 0x4);
+		idx += temp2str(temp.curr, buf, PAGE_SIZE, idx);
+		idx += temp2str(temp.lo_lim, buf, PAGE_SIZE, idx);
+		idx += temp2str(temp.hi_lim, buf, PAGE_SIZE, idx);
+		idx += temp2str(temp.crit_lim, buf, PAGE_SIZE, idx);
+		idx += scnprintf(buf + idx, PAGE_SIZE - idx,
+				"%u %u %u\n", temp.triggers & 0x1,
+				temp.triggers & 0x2, temp.triggers & 0x4);
+		ret = idx;
+	}
+	return ret;
 }
 static DEVICE_ATTR_RO(tempsense);
 
@@ -813,7 +817,7 @@ static ssize_t sde_show_vl(struct sdma_engine *sde, char *buf)
 	if (vl < 0)
 		return vl;
 
-	return sysfs_emit(buf, "%d\n", vl);
+	return snprintf(buf, PAGE_SIZE, "%d\n", vl);
 }
 
 static SDE_ATTR(cpu_list, S_IWUSR | S_IRUGO,

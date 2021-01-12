@@ -112,26 +112,6 @@ static u32 get_hw_cons_idx(struct hinic_api_cmd_chain *chain)
 	return HINIC_API_CMD_STATUS_GET(val, CONS_IDX);
 }
 
-static void dump_api_chain_reg(struct hinic_api_cmd_chain *chain)
-{
-	u32 addr, val;
-
-	addr = HINIC_CSR_API_CMD_STATUS_ADDR(chain->chain_type);
-	val  = hinic_hwif_read_reg(chain->hwif, addr);
-
-	dev_err(&chain->hwif->pdev->dev, "Chain type: 0x%x, cpld error: 0x%x, check error: 0x%x, current fsm: 0x%x\n",
-		chain->chain_type, HINIC_API_CMD_STATUS_GET(val, CPLD_ERR),
-		HINIC_API_CMD_STATUS_GET(val, CHKSUM_ERR),
-		HINIC_API_CMD_STATUS_GET(val, FSM));
-
-	dev_err(&chain->hwif->pdev->dev, "Chain hw current ci: 0x%x\n",
-		HINIC_API_CMD_STATUS_GET(val, CONS_IDX));
-
-	addr = HINIC_CSR_API_CMD_CHAIN_PI_ADDR(chain->chain_type);
-	val  = hinic_hwif_read_reg(chain->hwif, addr);
-	dev_err(&chain->hwif->pdev->dev, "Chain hw current pi: 0x%x\n", val);
-}
-
 /**
  * chain_busy - check if the chain is still processing last requests
  * @chain: chain to check
@@ -151,10 +131,8 @@ static int chain_busy(struct hinic_api_cmd_chain *chain)
 
 		/* check for a space for a new command */
 		if (chain->cons_idx == MASKED_IDX(chain, prod_idx + 1)) {
-			dev_err(&pdev->dev, "API CMD chain %d is busy, cons_idx: %d, prod_idx: %d\n",
-				chain->chain_type, chain->cons_idx,
-				chain->prod_idx);
-			dump_api_chain_reg(chain);
+			dev_err(&pdev->dev, "API CMD chain %d is busy\n",
+				chain->chain_type);
 			return -EBUSY;
 		}
 		break;
@@ -354,7 +332,6 @@ static int wait_for_api_cmd_completion(struct hinic_api_cmd_chain *chain)
 		err = wait_for_status_poll(chain);
 		if (err) {
 			dev_err(&pdev->dev, "API CMD Poll status timeout\n");
-			dump_api_chain_reg(chain);
 			break;
 		}
 		break;
@@ -373,7 +350,7 @@ static int wait_for_api_cmd_completion(struct hinic_api_cmd_chain *chain)
  * @chain: chain for the command
  * @dest: destination node on the card that will receive the command
  * @cmd: command data
- * @cmd_size: the command size
+ * @size: the command size
  *
  * Return 0 - Success, negative - Failure
  **/

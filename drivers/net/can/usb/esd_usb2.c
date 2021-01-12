@@ -183,7 +183,7 @@ struct esd_usb2_net_priv;
 struct esd_tx_urb_context {
 	struct esd_usb2_net_priv *priv;
 	u32 echo_index;
-	int len;	/* CAN payload length */
+	int dlc;
 };
 
 struct esd_usb2 {
@@ -292,7 +292,7 @@ static void esd_usb2_rx_event(struct esd_usb2_net_priv *priv,
 		priv->bec.rxerr = rxerr;
 
 		stats->rx_packets++;
-		stats->rx_bytes += cf->len;
+		stats->rx_bytes += cf->can_dlc;
 		netif_rx(skb);
 	}
 }
@@ -321,8 +321,7 @@ static void esd_usb2_rx_can_msg(struct esd_usb2_net_priv *priv,
 		}
 
 		cf->can_id = id & ESD_IDMASK;
-		can_frame_set_cc_len(cf, msg->msg.rx.dlc & ~ESD_RTR,
-				     priv->can.ctrlmode);
+		cf->can_dlc = get_can_dlc(msg->msg.rx.dlc & ~ESD_RTR);
 
 		if (id & ESD_EXTID)
 			cf->can_id |= CAN_EFF_FLAG;
@@ -330,12 +329,12 @@ static void esd_usb2_rx_can_msg(struct esd_usb2_net_priv *priv,
 		if (msg->msg.rx.dlc & ESD_RTR) {
 			cf->can_id |= CAN_RTR_FLAG;
 		} else {
-			for (i = 0; i < cf->len; i++)
+			for (i = 0; i < cf->can_dlc; i++)
 				cf->data[i] = msg->msg.rx.data[i];
 		}
 
 		stats->rx_packets++;
-		stats->rx_bytes += cf->len;
+		stats->rx_bytes += cf->can_dlc;
 		netif_rx(skb);
 	}
 
@@ -356,7 +355,7 @@ static void esd_usb2_tx_done_msg(struct esd_usb2_net_priv *priv,
 
 	if (!msg->msg.txdone.status) {
 		stats->tx_packets++;
-		stats->tx_bytes += context->len;
+		stats->tx_bytes += context->dlc;
 		can_get_echo_skb(netdev, context->echo_index);
 	} else {
 		stats->tx_errors++;
@@ -738,7 +737,7 @@ static netdev_tx_t esd_usb2_start_xmit(struct sk_buff *skb,
 	msg->msg.hdr.len = 3; /* minimal length */
 	msg->msg.hdr.cmd = CMD_CAN_TX;
 	msg->msg.tx.net = priv->index;
-	msg->msg.tx.dlc = can_get_cc_dlc(cf, priv->can.ctrlmode);
+	msg->msg.tx.dlc = cf->can_dlc;
 	msg->msg.tx.id = cpu_to_le32(cf->can_id & CAN_ERR_MASK);
 
 	if (cf->can_id & CAN_RTR_FLAG)
@@ -747,10 +746,10 @@ static netdev_tx_t esd_usb2_start_xmit(struct sk_buff *skb,
 	if (cf->can_id & CAN_EFF_FLAG)
 		msg->msg.tx.id |= cpu_to_le32(ESD_EXTID);
 
-	for (i = 0; i < cf->len; i++)
+	for (i = 0; i < cf->can_dlc; i++)
 		msg->msg.tx.data[i] = cf->data[i];
 
-	msg->msg.hdr.len += (cf->len + 3) >> 2;
+	msg->msg.hdr.len += (cf->can_dlc + 3) >> 2;
 
 	for (i = 0; i < MAX_TX_URBS; i++) {
 		if (priv->tx_contexts[i].echo_index == MAX_TX_URBS) {
@@ -770,7 +769,7 @@ static netdev_tx_t esd_usb2_start_xmit(struct sk_buff *skb,
 
 	context->priv = priv;
 	context->echo_index = i;
-	context->len = cf->len;
+	context->dlc = cf->can_dlc;
 
 	/* hnd must not be 0 - MSB is stripped in txdone handling */
 	msg->msg.tx.hnd = 0x80000000 | i; /* returned in TX done message */
@@ -989,8 +988,7 @@ static int esd_usb2_probe_one_net(struct usb_interface *intf, int index)
 	priv->index = index;
 
 	priv->can.state = CAN_STATE_STOPPED;
-	priv->can.ctrlmode_supported = CAN_CTRLMODE_LISTENONLY |
-		CAN_CTRLMODE_CC_LEN8_DLC;
+	priv->can.ctrlmode_supported = CAN_CTRLMODE_LISTENONLY;
 
 	if (le16_to_cpu(dev->udev->descriptor.idProduct) ==
 	    USB_CANUSBM_PRODUCT_ID)

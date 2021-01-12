@@ -17,6 +17,7 @@
 
 #include <asm/cacheops.h>
 #include <asm/page.h>
+#include <asm/pgtable.h>
 #include <asm/mmu_context.h>
 #include <asm/isadep.h>
 #include <asm/io.h>
@@ -168,6 +169,9 @@ static void tx39_flush_cache_page(struct vm_area_struct *vma, unsigned long page
 {
 	int exec = vma->vm_flags & VM_EXEC;
 	struct mm_struct *mm = vma->vm_mm;
+	pgd_t *pgdp;
+	p4d_t *p4dp;
+	pud_t *pudp;
 	pmd_t *pmdp;
 	pte_t *ptep;
 
@@ -179,8 +183,11 @@ static void tx39_flush_cache_page(struct vm_area_struct *vma, unsigned long page
 		return;
 
 	page &= PAGE_MASK;
-	pmdp = pmd_off(mm, page);
-	ptep = pte_offset_kernel(pmdp, page);
+	pgdp = pgd_offset(mm, page);
+	p4dp = p4d_offset(pgdp, page);
+	pudp = pud_offset(p4dp, page);
+	pmdp = pmd_offset(pudp, page);
+	ptep = pte_offset(pmdp, page);
 
 	/*
 	 * If the page isn't marked valid, the page cannot possibly be

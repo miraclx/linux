@@ -879,18 +879,18 @@ static int omap_rtc_probe(struct platform_device *pdev)
 	/* Support ext_wakeup pinconf */
 	rtc_pinctrl_desc.name = dev_name(&pdev->dev);
 
-	rtc->pctldev = devm_pinctrl_register(&pdev->dev, &rtc_pinctrl_desc, rtc);
+	rtc->pctldev = pinctrl_register(&rtc_pinctrl_desc, &pdev->dev, rtc);
 	if (IS_ERR(rtc->pctldev)) {
 		dev_err(&pdev->dev, "Couldn't register pinctrl driver\n");
 		ret = PTR_ERR(rtc->pctldev);
 		goto err;
 	}
 
-	ret = devm_rtc_register_device(rtc->rtc);
+	ret = rtc_register_device(rtc->rtc);
 	if (ret)
-		goto err;
+		goto err_deregister_pinctrl;
 
-	devm_rtc_nvmem_register(rtc->rtc, &omap_rtc_nvmem_config);
+	rtc_nvmem_register(rtc->rtc, &omap_rtc_nvmem_config);
 
 	if (rtc->is_pmic_controller) {
 		if (!pm_power_off) {
@@ -901,6 +901,8 @@ static int omap_rtc_probe(struct platform_device *pdev)
 
 	return 0;
 
+err_deregister_pinctrl:
+	pinctrl_unregister(rtc->pctldev);
 err:
 	clk_disable_unprepare(rtc->clk);
 	device_init_wakeup(&pdev->dev, false);
@@ -942,6 +944,9 @@ static int omap_rtc_remove(struct platform_device *pdev)
 	/* Disable the clock/module */
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
+
+	/* Remove ext_wakeup pinconf */
+	pinctrl_unregister(rtc->pctldev);
 
 	return 0;
 }

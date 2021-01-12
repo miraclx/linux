@@ -8,7 +8,6 @@
 #include <poll.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 
 void fdarray__init(struct fdarray *fda, int nr_autogrow)
 {
@@ -20,7 +19,7 @@ void fdarray__init(struct fdarray *fda, int nr_autogrow)
 
 int fdarray__grow(struct fdarray *fda, int nr)
 {
-	struct priv *priv;
+	void *priv;
 	int nr_alloc = fda->nr_alloc + nr;
 	size_t psize = sizeof(fda->priv[0]) * nr_alloc;
 	size_t size  = sizeof(struct pollfd) * nr_alloc;
@@ -34,9 +33,6 @@ int fdarray__grow(struct fdarray *fda, int nr)
 		free(entries);
 		return -ENOMEM;
 	}
-
-	memset(&entries[fda->nr_alloc], 0, sizeof(struct pollfd) * nr);
-	memset(&priv[fda->nr_alloc], 0, sizeof(fda->priv[0]) * nr);
 
 	fda->nr_alloc = nr_alloc;
 	fda->entries  = entries;
@@ -73,7 +69,7 @@ void fdarray__delete(struct fdarray *fda)
 	free(fda);
 }
 
-int fdarray__add(struct fdarray *fda, int fd, short revents, enum fdarray_flags flags)
+int fdarray__add(struct fdarray *fda, int fd, short revents)
 {
 	int pos = fda->nr;
 
@@ -83,7 +79,6 @@ int fdarray__add(struct fdarray *fda, int fd, short revents, enum fdarray_flags 
 
 	fda->entries[fda->nr].fd     = fd;
 	fda->entries[fda->nr].events = revents;
-	fda->priv[fda->nr].flags = flags;
 	fda->nr++;
 	return pos;
 }
@@ -98,22 +93,22 @@ int fdarray__filter(struct fdarray *fda, short revents,
 		return 0;
 
 	for (fd = 0; fd < fda->nr; ++fd) {
-		if (!fda->entries[fd].events)
-			continue;
-
 		if (fda->entries[fd].revents & revents) {
 			if (entry_destructor)
 				entry_destructor(fda, fd, arg);
 
-			fda->entries[fd].revents = fda->entries[fd].events = 0;
 			continue;
 		}
 
-		if (!(fda->priv[fd].flags & fdarray_flag__nonfilterable))
-			++nr;
+		if (fd != nr) {
+			fda->entries[nr] = fda->entries[fd];
+			fda->priv[nr]	 = fda->priv[fd];
+		}
+
+		++nr;
 	}
 
-	return nr;
+	return fda->nr = nr;
 }
 
 int fdarray__poll(struct fdarray *fda, int timeout)

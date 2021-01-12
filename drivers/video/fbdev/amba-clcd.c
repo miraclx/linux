@@ -602,17 +602,20 @@ static int clcdfb_snprintf_mode(char *buf, int size, struct fb_videomode *mode)
 			mode->refresh);
 }
 
-static int clcdfb_of_get_backlight(struct device *dev,
+static int clcdfb_of_get_backlight(struct device_node *panel,
 				   struct clcd_panel *clcd_panel)
 {
-	struct backlight_device *backlight;
+	struct device_node *backlight;
 
-	/* Look up the optional backlight device */
-	backlight = devm_of_find_backlight(dev);
-	if (IS_ERR(backlight))
-		return PTR_ERR(backlight);
+	/* Look up the optional backlight phandle */
+	backlight = of_parse_phandle(panel, "backlight", 0);
+	if (backlight) {
+		clcd_panel->backlight = of_find_backlight_by_node(backlight);
+		of_node_put(backlight);
 
-	clcd_panel->backlight = backlight;
+		if (!clcd_panel->backlight)
+			return -EPROBE_DEFER;
+	}
 	return 0;
 }
 
@@ -714,7 +717,7 @@ static int clcdfb_of_init_display(struct clcd_fb *fb)
 	if (!panel)
 		return -ENODEV;
 
-	err = clcdfb_of_get_backlight(&fb->dev->dev, fb->panel);
+	err = clcdfb_of_get_backlight(panel, fb->panel);
 	if (err)
 		return err;
 

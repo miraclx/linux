@@ -42,6 +42,7 @@
 #include <asm/irq.h>
 #include <asm/mips-cps.h>
 #include <asm/msa.h>
+#include <asm/pgtable.h>
 #include <asm/mipsregs.h>
 #include <asm/processor.h>
 #include <asm/reg.h>
@@ -52,7 +53,6 @@
 #include <asm/inst.h>
 #include <asm/stacktrace.h>
 #include <asm/irq_regs.h>
-#include <asm/exec.h>
 
 #ifdef CONFIG_HOTPLUG_CPU
 void arch_cpu_idle_dead(void)
@@ -69,7 +69,7 @@ void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long sp)
 	unsigned long status;
 
 	/* New thread loses kernel privileges. */
-	status = regs->cp0_status & ~(ST0_CU0|ST0_CU1|ST0_CU2|ST0_FR|KU_MASK);
+	status = regs->cp0_status & ~(ST0_CU0|ST0_CU1|ST0_FR|KU_MASK);
 	status |= KU_USER;
 	regs->cp0_status = status;
 	lose_fpu(0);
@@ -120,9 +120,8 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 /*
  * Copy architecture-specific thread state
  */
-int copy_thread(unsigned long clone_flags, unsigned long usp,
-		unsigned long kthread_arg, struct task_struct *p,
-		unsigned long tls)
+int copy_thread_tls(unsigned long clone_flags, unsigned long usp,
+	unsigned long kthread_arg, struct task_struct *p, unsigned long tls)
 {
 	struct thread_info *ti = task_thread_info(p);
 	struct pt_regs *childregs, *regs = current_pt_regs();
@@ -134,7 +133,7 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 	childregs = (struct pt_regs *) childksp - 1;
 	/*  Put the stack after the struct pt_regs.  */
 	childksp = (unsigned long) childregs;
-	p->thread.cp0_status = (read_c0_status() & ~(ST0_CU2|ST0_CU1)) | ST0_KERNEL_CUMASK;
+	p->thread.cp0_status = read_c0_status() & ~(ST0_CU2|ST0_CU1);
 	if (unlikely(p->flags & PF_KTHREAD)) {
 		/* kernel thread */
 		unsigned long status = p->thread.cp0_status;
@@ -280,21 +279,7 @@ static inline int is_ra_save_ins(union mips_instruction *ip, int *poff)
 		*poff = ip->i_format.simmediate / sizeof(ulong);
 		return 1;
 	}
-#ifdef CONFIG_CPU_LOONGSON64
-	if ((ip->loongson3_lswc2_format.opcode == swc2_op) &&
-		      (ip->loongson3_lswc2_format.ls == 1) &&
-		      (ip->loongson3_lswc2_format.fr == 0) &&
-		      (ip->loongson3_lswc2_format.base == 29)) {
-		if (ip->loongson3_lswc2_format.rt == 31) {
-			*poff = ip->loongson3_lswc2_format.offset << 1;
-			return 1;
-		}
-		if (ip->loongson3_lswc2_format.rq == 31) {
-			*poff = (ip->loongson3_lswc2_format.offset << 1) + 1;
-			return 1;
-		}
-	}
-#endif
+
 	return 0;
 #endif
 }
@@ -702,6 +687,7 @@ unsigned long arch_align_stack(unsigned long sp)
 	return sp & ALMASK;
 }
 
+static DEFINE_PER_CPU(call_single_data_t, backtrace_csd);
 static struct cpumask backtrace_csd_busy;
 
 static void handle_backtrace(void *info)
@@ -709,9 +695,6 @@ static void handle_backtrace(void *info)
 	nmi_cpu_backtrace(get_irq_regs());
 	cpumask_clear_cpu(smp_processor_id(), &backtrace_csd_busy);
 }
-
-static DEFINE_PER_CPU(call_single_data_t, backtrace_csd) =
-	CSD_INIT(handle_backtrace, NULL);
 
 static void raise_backtrace(cpumask_t *mask)
 {
@@ -732,6 +715,7 @@ static void raise_backtrace(cpumask_t *mask)
 		}
 
 		csd = &per_cpu(backtrace_csd, cpu);
+		csd->func = handle_backtrace;
 		smp_call_function_single_async(cpu, csd);
 	}
 }

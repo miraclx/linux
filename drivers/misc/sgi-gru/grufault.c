@@ -20,8 +20,8 @@
 #include <linux/io.h>
 #include <linux/uaccess.h>
 #include <linux/security.h>
-#include <linux/sync_core.h>
 #include <linux/prefetch.h>
+#include <asm/pgtable.h>
 #include "gru.h"
 #include "grutables.h"
 #include "grulib.h"
@@ -43,7 +43,7 @@ static inline int is_gru_paddr(unsigned long paddr)
 }
 
 /*
- * Find the vma of a GRU segment. Caller must hold mmap_lock.
+ * Find the vma of a GRU segment. Caller must hold mmap_sem.
  */
 struct vm_area_struct *gru_find_vma(unsigned long vaddr)
 {
@@ -59,7 +59,7 @@ struct vm_area_struct *gru_find_vma(unsigned long vaddr)
  * Find and lock the gts that contains the specified user vaddr.
  *
  * Returns:
- * 	- *gts with the mmap_lock locked for read and the GTS locked.
+ * 	- *gts with the mmap_sem locked for read and the GTS locked.
  *	- NULL if vaddr invalid OR is not a valid GSEG vaddr.
  */
 
@@ -69,14 +69,14 @@ static struct gru_thread_state *gru_find_lock_gts(unsigned long vaddr)
 	struct vm_area_struct *vma;
 	struct gru_thread_state *gts = NULL;
 
-	mmap_read_lock(mm);
+	down_read(&mm->mmap_sem);
 	vma = gru_find_vma(vaddr);
 	if (vma)
 		gts = gru_find_thread_state(vma, TSID(vaddr, vma));
 	if (gts)
 		mutex_lock(&gts->ts_ctxlock);
 	else
-		mmap_read_unlock(mm);
+		up_read(&mm->mmap_sem);
 	return gts;
 }
 
@@ -86,7 +86,7 @@ static struct gru_thread_state *gru_alloc_locked_gts(unsigned long vaddr)
 	struct vm_area_struct *vma;
 	struct gru_thread_state *gts = ERR_PTR(-EINVAL);
 
-	mmap_write_lock(mm);
+	down_write(&mm->mmap_sem);
 	vma = gru_find_vma(vaddr);
 	if (!vma)
 		goto err;
@@ -95,11 +95,11 @@ static struct gru_thread_state *gru_alloc_locked_gts(unsigned long vaddr)
 	if (IS_ERR(gts))
 		goto err;
 	mutex_lock(&gts->ts_ctxlock);
-	mmap_write_downgrade(mm);
+	downgrade_write(&mm->mmap_sem);
 	return gts;
 
 err:
-	mmap_write_unlock(mm);
+	up_write(&mm->mmap_sem);
 	return gts;
 }
 
@@ -109,7 +109,7 @@ err:
 static void gru_unlock_gts(struct gru_thread_state *gts)
 {
 	mutex_unlock(&gts->ts_ctxlock);
-	mmap_read_unlock(current->mm);
+	up_read(&current->mm->mmap_sem);
 }
 
 /*
@@ -199,7 +199,7 @@ static int non_atomic_pte_lookup(struct vm_area_struct *vma,
  * Only supports Intel large pages (2MB only) on x86_64.
  *	ZZZ - hugepage support is incomplete
  *
- * NOTE: mmap_lock is already held on entry to this function. This
+ * NOTE: mmap_sem is already held on entry to this function. This
  * guarantees existence of the page tables.
  */
 static int atomic_pte_lookup(struct vm_area_struct *vma, unsigned long vaddr,
@@ -570,14 +570,14 @@ static irqreturn_t gru_intr(int chiplet, int blade)
 		}
 
 		/*
-		 * This is running in interrupt context. Trylock the mmap_lock.
+		 * This is running in interrupt context. Trylock the mmap_sem.
 		 * If it fails, retry the fault in user context.
 		 */
 		gts->ustats.fmm_tlbmiss++;
 		if (!gts->ts_force_cch_reload &&
-					mmap_read_trylock(gts->ts_mm)) {
+					down_read_trylock(&gts->ts_mm->mmap_sem)) {
 			gru_try_dropin(gru, gts, tfh, NULL);
-			mmap_read_unlock(gts->ts_mm);
+			up_read(&gts->ts_mm->mmap_sem);
 		} else {
 			tfh_user_polling_mode(tfh);
 			STAT(intr_mm_lock_failed);

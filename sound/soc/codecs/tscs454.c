@@ -177,7 +177,7 @@ static bool tscs454_volatile(struct device *dev, unsigned int reg)
 		return true;
 	default:
 		return false;
-	}
+	};
 }
 
 static bool tscs454_writable(struct device *dev, unsigned int reg)
@@ -197,7 +197,7 @@ static bool tscs454_writable(struct device *dev, unsigned int reg)
 		return false;
 	default:
 		return true;
-	}
+	};
 }
 
 static bool tscs454_readable(struct device *dev, unsigned int reg)
@@ -217,7 +217,7 @@ static bool tscs454_readable(struct device *dev, unsigned int reg)
 		return false;
 	default:
 		return true;
-	}
+	};
 }
 
 static bool tscs454_precious(struct device *dev, unsigned int reg)
@@ -246,7 +246,7 @@ static bool tscs454_precious(struct device *dev, unsigned int reg)
 		return true;
 	default:
 		return false;
-	}
+	};
 }
 
 static const struct regmap_range_cfg tscs454_regmap_range_cfg = {
@@ -353,7 +353,12 @@ static int write_coeff_ram(struct snd_soc_component *component, u8 *coeff_ram,
 	for (cnt = 0; cnt < coeff_cnt; cnt++, coeff_addr++) {
 
 		for (trys = 0; trys < DACCRSTAT_MAX_TRYS; trys++) {
-			val = snd_soc_component_read(component, r_stat);
+			ret = snd_soc_component_read(component, r_stat, &val);
+			if (ret < 0) {
+				dev_err(component->dev,
+					"Failed to read stat (%d)\n", ret);
+				return ret;
+			}
 			if (!val)
 				break;
 		}
@@ -439,7 +444,12 @@ static int coeff_ram_put(struct snd_kcontrol *kcontrol,
 	mutex_lock(&tscs454->pll1.lock);
 	mutex_lock(&tscs454->pll2.lock);
 
-	val = snd_soc_component_read(component, R_PLLSTAT);
+	ret = snd_soc_component_read(component, R_PLLSTAT, &val);
+	if (ret < 0) {
+		dev_err(component->dev, "Failed to read PLL status (%d)\n",
+				ret);
+		goto exit;
+	}
 	if (val) { /* PLLs locked */
 		ret = write_coeff_ram(component, coeff_ram,
 			r_stat, r_addr, r_wr,
@@ -2632,10 +2642,13 @@ static int tscs454_set_sysclk(struct snd_soc_dai *dai,
 	struct tscs454 *tscs454 = snd_soc_component_get_drvdata(component);
 	unsigned int val;
 	int bclk_dai;
+	int ret;
 
 	dev_dbg(component->dev, "%s(): freq = %u\n", __func__, freq);
 
-	val = snd_soc_component_read(component, R_PLLCTL);
+	ret = snd_soc_component_read(component, R_PLLCTL, &val);
+	if (ret < 0)
+		return ret;
 
 	bclk_dai = (val & FM_PLLCTL_BCLKSEL) >> FB_PLLCTL_BCLKSEL;
 	if (bclk_dai != dai->id)
@@ -3191,7 +3204,10 @@ static int tscs454_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	if (!aifs_active(&tscs454->aifs_status)) { /* First active aif */
-		val = snd_soc_component_read(component, R_ISRC);
+		ret = snd_soc_component_read(component, R_ISRC, &val);
+		if (ret < 0)
+			goto exit;
+
 		if ((val & FM_ISRC_IBR) == FV_IBR_48)
 			tscs454->internal_rate.pll = &tscs454->pll1;
 		else

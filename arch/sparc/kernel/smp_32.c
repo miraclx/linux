@@ -29,6 +29,8 @@
 
 #include <asm/irq.h>
 #include <asm/page.h>
+#include <asm/pgalloc.h>
+#include <asm/pgtable.h>
 #include <asm/oplib.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>

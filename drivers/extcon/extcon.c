@@ -900,7 +900,7 @@ int extcon_register_notifier(struct extcon_dev *edev, unsigned int id,
 			     struct notifier_block *nb)
 {
 	unsigned long flags;
-	int ret, idx;
+	int ret, idx = -EINVAL;
 
 	if (!edev || !nb)
 		return -EINVAL;

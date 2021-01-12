@@ -181,7 +181,7 @@ static int db8500_regulator_switch_disable(struct regulator_dev *rdev)
 		goto out;
 	}
 
-	info->is_enabled = false;
+	info->is_enabled = 0;
 out:
 	return ret;
 }

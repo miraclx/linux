@@ -7,7 +7,6 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/smp.h>
-#include <linux/hardirq.h>
 
 #include <asm/processor.h>
 #include <asm/traps.h>
@@ -21,11 +20,12 @@
 int mce_p5_enabled __read_mostly;
 
 /* Machine check handler for Pentium class Intel CPUs: */
-static noinstr void pentium_machine_check(struct pt_regs *regs)
+static void pentium_machine_check(struct pt_regs *regs, long error_code)
 {
 	u32 loaddr, hi, lotype;
 
-	instrumentation_begin();
+	ist_enter(regs);
+
 	rdmsr(MSR_IA32_P5_MC_ADDR, loaddr, hi);
 	rdmsr(MSR_IA32_P5_MC_TYPE, lotype, hi);
 
@@ -38,7 +38,8 @@ static noinstr void pentium_machine_check(struct pt_regs *regs)
 	}
 
 	add_taint(TAINT_MACHINE_CHECK, LOCKDEP_NOW_UNRELIABLE);
-	instrumentation_end();
+
+	ist_exit(regs);
 }
 
 /* Set up machine check reporting for processors with Intel style MCE: */

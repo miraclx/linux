@@ -692,7 +692,7 @@ static int __init einj_init(void)
 	rc = einj_check_table(einj_tab);
 	if (rc) {
 		pr_warn(FW_BUG "Invalid EINJ table.\n");
-		goto err_put_table;
+		return -EINVAL;
 	}
 
 	rc = -ENOMEM;
@@ -760,8 +760,6 @@ err_release:
 err_fini:
 	apei_resources_fini(&einj_resources);
 	debugfs_remove_recursive(einj_debug_dir);
-err_put_table:
-	acpi_put_table((struct acpi_table_header *)einj_tab);
 
 	return rc;
 }
@@ -782,7 +780,6 @@ static void __exit einj_exit(void)
 	apei_resources_release(&einj_resources);
 	apei_resources_fini(&einj_resources);
 	debugfs_remove_recursive(einj_debug_dir);
-	acpi_put_table((struct acpi_table_header *)einj_tab);
 }
 
 module_init(einj_init);

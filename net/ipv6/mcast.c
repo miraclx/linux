@@ -457,8 +457,7 @@ done:
 	return err;
 }
 
-int ip6_mc_msfilter(struct sock *sk, struct group_filter *gsf,
-		    struct sockaddr_storage *list)
+int ip6_mc_msfilter(struct sock *sk, struct group_filter *gsf)
 {
 	const struct in6_addr *group;
 	struct ipv6_mc_socklist *pmc;
@@ -510,10 +509,10 @@ int ip6_mc_msfilter(struct sock *sk, struct group_filter *gsf,
 			goto done;
 		}
 		newpsl->sl_max = newpsl->sl_count = gsf->gf_numsrc;
-		for (i = 0; i < newpsl->sl_count; ++i, ++list) {
+		for (i = 0; i < newpsl->sl_count; ++i) {
 			struct sockaddr_in6 *psin6;
 
-			psin6 = (struct sockaddr_in6 *)list;
+			psin6 = (struct sockaddr_in6 *)&gsf->gf_slist[i];
 			newpsl->sl_addr[i] = psin6->sin6_addr;
 		}
 		err = ip6_mc_add_src(idev, group, gsf->gf_fmode,
@@ -548,7 +547,7 @@ done:
 }
 
 int ip6_mc_msfget(struct sock *sk, struct group_filter *gsf,
-		  struct sockaddr_storage __user *p)
+	struct group_filter __user *optval, int __user *optlen)
 {
 	int err, i, count, copycount;
 	const struct in6_addr *group;
@@ -593,10 +592,14 @@ int ip6_mc_msfget(struct sock *sk, struct group_filter *gsf,
 
 	copycount = count < gsf->gf_numsrc ? count : gsf->gf_numsrc;
 	gsf->gf_numsrc = count;
+	if (put_user(GROUP_FILTER_SIZE(copycount), optlen) ||
+	    copy_to_user(optval, gsf, GROUP_FILTER_SIZE(0))) {
+		return -EFAULT;
+	}
 	/* changes to psl require the socket lock, and a write lock
 	 * on pmc->sflock. We have the socket lock so reading here is safe.
 	 */
-	for (i = 0; i < copycount; i++, p++) {
+	for (i = 0; i < copycount; i++) {
 		struct sockaddr_in6 *psin6;
 		struct sockaddr_storage ss;
 
@@ -604,7 +607,7 @@ int ip6_mc_msfget(struct sock *sk, struct group_filter *gsf,
 		memset(&ss, 0, sizeof(ss));
 		psin6->sin6_family = AF_INET6;
 		psin6->sin6_addr = psl->sl_addr[i];
-		if (copy_to_user(p, &ss, sizeof(ss)))
+		if (copy_to_user(&optval->gf_slist[i], &ss, sizeof(ss)))
 			return -EFAULT;
 	}
 	return 0;
@@ -2615,7 +2618,6 @@ void ipv6_mc_destroy_dev(struct inet6_dev *idev)
 		idev->mc_list = i->next;
 
 		write_unlock_bh(&idev->lock);
-		ip6_mc_clear_src(i);
 		ma_put(i);
 		write_lock_bh(&idev->lock);
 	}

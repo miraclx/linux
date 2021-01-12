@@ -42,6 +42,7 @@
 #include <linux/workqueue.h>
 #include <linux/scatterlist.h>
 #include <linux/io.h>
+#include <linux/async.h>
 #include <linux/log2.h>
 #include <linux/slab.h>
 #include <linux/glob.h>
@@ -190,7 +191,7 @@ struct ata_link *ata_link_next(struct ata_link *link, struct ata_port *ap,
 		case ATA_LITER_PMP_FIRST:
 			if (sata_pmp_attached(ap))
 				return ap->pmp_link;
-			fallthrough;
+			/* fall through */
 		case ATA_LITER_HOST_FIRST:
 			return &ap->link;
 		}
@@ -201,11 +202,11 @@ struct ata_link *ata_link_next(struct ata_link *link, struct ata_port *ap,
 		case ATA_LITER_HOST_FIRST:
 			if (sata_pmp_attached(ap))
 				return ap->pmp_link;
-			fallthrough;
+			/* fall through */
 		case ATA_LITER_PMP_FIRST:
 			if (unlikely(ap->slave_link))
 				return ap->slave_link;
-			fallthrough;
+			/* fall through */
 		case ATA_LITER_EDGE:
 			return NULL;
 		}
@@ -523,7 +524,7 @@ int atapi_cmd_type(u8 opcode)
 	case ATA_12:
 		if (atapi_passthru16)
 			return ATAPI_PASS_THRU;
-		fallthrough;
+		/* fall thru */
 	default:
 		return ATAPI_MISC;
 	}
@@ -1800,7 +1801,7 @@ retry:
 	switch (class) {
 	case ATA_DEV_SEMB:
 		class = ATA_DEV_ATA;	/* some hard drives report SEMB sig */
-		fallthrough;
+		/* fall through */
 	case ATA_DEV_ATA:
 	case ATA_DEV_ZAC:
 		tf.command = ATA_CMD_ID_ATA;
@@ -2907,7 +2908,7 @@ int ata_bus_probe(struct ata_port *ap)
 	case -ENODEV:
 		/* give it just one more chance */
 		tries[dev->devno] = min(tries[dev->devno], 1);
-		fallthrough;
+		/* fall through */
 	case -EIO:
 		if (tries[dev->devno] == 1) {
 			/* This is the last chance, better to slow
@@ -3158,7 +3159,7 @@ int ata_down_xfermask_limit(struct ata_device *dev, unsigned int sel)
 
 	case ATA_DNXFER_FORCE_PIO0:
 		pio_mask &= 1;
-		fallthrough;
+		/* fall through */
 	case ATA_DNXFER_FORCE_PIO:
 		mwdma_mask = 0;
 		udma_mask = 0;
@@ -3868,8 +3869,9 @@ static const struct ata_blacklist_entry ata_device_blacklist [] = {
 	/* https://bugzilla.kernel.org/show_bug.cgi?id=15573 */
 	{ "C300-CTFDDAC128MAG",	"0001",		ATA_HORKAGE_NONCQ, },
 
-	/* Sandisk SD7/8/9s lock up hard on large trims */
-	{ "SanDisk SD[789]*",	NULL,		ATA_HORKAGE_MAX_TRIM_128M, },
+	/* Some Sandisk SSDs lock up hard with NCQ enabled.  Reported on
+	   SD7SN6S256G and SD8SN8U256G */
+	{ "SanDisk SD[78]SN*G",	NULL,		ATA_HORKAGE_NONCQ, },
 
 	/* devices which puke on READ_NATIVE_MAX */
 	{ "HDS724040KLSA80",	"KFAOA20N",	ATA_HORKAGE_BROKEN_HPA, },
@@ -4693,7 +4695,7 @@ void ata_qc_complete(struct ata_queued_cmd *qc)
 			    qc->tf.feature != SETFEATURES_RA_ON &&
 			    qc->tf.feature != SETFEATURES_RA_OFF)
 				break;
-			fallthrough;
+			/* fall through */
 		case ATA_CMD_INIT_DEV_PARAMS: /* CHS translation changed */
 		case ATA_CMD_SET_MULTI: /* multi_count changed */
 			/* revalidate device */
@@ -5207,7 +5209,7 @@ void ata_link_init(struct ata_port *ap, struct ata_link *link, int pmp)
  *	sata_link_init_spd - Initialize link->sata_spd_limit
  *	@link: Link to configure sata_spd_limit for
  *
- *	Initialize ``link->[hw_]sata_spd_limit`` to the currently
+ *	Initialize @link->[hw_]sata_spd_limit to the currently
  *	configured value.
  *
  *	LOCKING:
@@ -5616,7 +5618,7 @@ int ata_host_start(struct ata_host *host)
 EXPORT_SYMBOL_GPL(ata_host_start);
 
 /**
- *	ata_host_init - Initialize a host struct for sas (ipr, libsas)
+ *	ata_sas_host_init - Initialize a host struct for sas (ipr, libsas)
  *	@host:	host to initialize
  *	@dev:	device host is attached to
  *	@ops:	port_ops
@@ -5776,7 +5778,7 @@ int ata_host_register(struct ata_host *host, struct scsi_host_template *sht)
 	/* perform each probe asynchronously */
 	for (i = 0; i < host->n_ports; i++) {
 		struct ata_port *ap = host->ports[i];
-		ap->cookie = async_schedule(async_port_probe, ap);
+		async_schedule(async_port_probe, ap);
 	}
 
 	return 0;
@@ -5918,11 +5920,11 @@ void ata_host_detach(struct ata_host *host)
 {
 	int i;
 
-	for (i = 0; i < host->n_ports; i++) {
-		/* Ensure ata_port probe has completed */
-		async_synchronize_cookie(host->ports[i]->cookie + 1);
+	/* Ensure ata_port probe has completed */
+	async_synchronize_full();
+
+	for (i = 0; i < host->n_ports; i++)
 		ata_port_detach(host->ports[i]);
-	}
 
 	/* the host is dead now, dissociate ACPI */
 	ata_acpi_dissociate(host);

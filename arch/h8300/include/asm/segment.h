@@ -33,7 +33,7 @@ static inline mm_segment_t get_fs(void)
 	return USER_DS;
 }
 
-#define uaccess_kernel()	(get_fs().seg == KERNEL_DS.seg)
+#define segment_eq(a, b)	((a).seg == (b).seg)
 
 #endif /* __ASSEMBLY__ */
 

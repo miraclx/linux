@@ -665,9 +665,10 @@ static int wm831x_power_probe(struct platform_device *pdev)
 		break;
 	default:
 		dev_err(&pdev->dev, "Failed to find USB phy: %d\n", ret);
-		fallthrough;
+		/* fall-through */
 	case -EPROBE_DEFER:
 		goto err_bat_irq;
+		break;
 	}
 
 	return ret;

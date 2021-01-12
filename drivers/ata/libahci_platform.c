@@ -59,7 +59,7 @@ int ahci_platform_enable_phys(struct ahci_host_priv *hpriv)
 		}
 
 		rc = phy_power_on(hpriv->phys[i]);
-		if (rc && !(rc == -EOPNOTSUPP && (hpriv->flags & AHCI_HFLAG_IGN_NOTSUPP_POWER_ON))) {
+		if (rc) {
 			phy_exit(hpriv->phys[i]);
 			goto disable_phys;
 		}
@@ -326,7 +326,7 @@ static int ahci_platform_get_phy(struct ahci_host_priv *hpriv, u32 port,
 				node);
 			break;
 		}
-		fallthrough;
+		/* fall through */
 	case -ENODEV:
 		/* continue normally */
 		hpriv->phys[port] = NULL;

@@ -202,7 +202,7 @@ static int __init dc_rtc_probe(struct platform_device *pdev)
 	rtc->rtc_dev->ops = &dc_rtc_ops;
 	rtc->rtc_dev->range_max = U32_MAX;
 
-	return devm_rtc_register_device(rtc->rtc_dev);
+	return rtc_register_device(rtc->rtc_dev);
 }
 
 static const struct of_device_id dc_dt_ids[] = {

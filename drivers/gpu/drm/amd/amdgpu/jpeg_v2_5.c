@@ -55,18 +55,22 @@ static int amdgpu_ih_clientid_jpeg[] = {
 static int jpeg_v2_5_early_init(void *handle)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-	u32 harvest;
-	int i;
+	if (adev->asic_type == CHIP_ARCTURUS) {
+		u32 harvest;
+		int i;
 
-	adev->jpeg.num_jpeg_inst = JPEG25_MAX_HW_INSTANCES_ARCTURUS;
-	for (i = 0; i < adev->jpeg.num_jpeg_inst; i++) {
-		harvest = RREG32_SOC15(JPEG, i, mmCC_UVD_HARVESTING);
-		if (harvest & CC_UVD_HARVESTING__UVD_DISABLE_MASK)
-			adev->jpeg.harvest_config |= 1 << i;
-	}
-	if (adev->jpeg.harvest_config == (AMDGPU_JPEG_HARVEST_JPEG0 |
-					 AMDGPU_JPEG_HARVEST_JPEG1))
-		return -ENOENT;
+		adev->jpeg.num_jpeg_inst = JPEG25_MAX_HW_INSTANCES_ARCTURUS;
+		for (i = 0; i < adev->jpeg.num_jpeg_inst; i++) {
+			harvest = RREG32_SOC15(JPEG, i, mmCC_UVD_HARVESTING);
+			if (harvest & CC_UVD_HARVESTING__UVD_DISABLE_MASK)
+				adev->jpeg.harvest_config |= 1 << i;
+		}
+
+		if (adev->jpeg.harvest_config == (AMDGPU_JPEG_HARVEST_JPEG0 |
+						 AMDGPU_JPEG_HARVEST_JPEG1))
+			return -ENOENT;
+	} else
+		adev->jpeg.num_jpeg_inst = 1;
 
 	jpeg_v2_5_set_dec_ring_funcs(adev);
 	jpeg_v2_5_set_irq_funcs(adev);
@@ -114,8 +118,7 @@ static int jpeg_v2_5_sw_init(void *handle)
 		ring->use_doorbell = true;
 		ring->doorbell_index = (adev->doorbell_index.vcn.vcn_ring0_1 << 1) + 1 + 8 * i;
 		sprintf(ring->name, "jpeg_dec_%d", i);
-		r = amdgpu_ring_init(adev, ring, 512, &adev->jpeg.inst[i].irq,
-				     0, AMDGPU_RING_PRIO_DEFAULT);
+		r = amdgpu_ring_init(adev, ring, 512, &adev->jpeg.inst[i].irq, 0);
 		if (r)
 			return r;
 
@@ -247,7 +250,7 @@ static int jpeg_v2_5_resume(void *handle)
 	return r;
 }
 
-static void jpeg_v2_5_disable_clock_gating(struct amdgpu_device *adev, int inst)
+static void jpeg_v2_5_disable_clock_gating(struct amdgpu_device* adev, int inst)
 {
 	uint32_t data;
 
@@ -264,6 +267,7 @@ static void jpeg_v2_5_disable_clock_gating(struct amdgpu_device *adev, int inst)
 	data = RREG32_SOC15(JPEG, inst, mmJPEG_CGC_GATE);
 	data &= ~(JPEG_CGC_GATE__JPEG_DEC_MASK
 		| JPEG_CGC_GATE__JPEG2_DEC_MASK
+		| JPEG_CGC_GATE__JPEG_ENC_MASK
 		| JPEG_CGC_GATE__JMCIF_MASK
 		| JPEG_CGC_GATE__JRBBM_MASK);
 	WREG32_SOC15(JPEG, inst, mmJPEG_CGC_GATE, data);
@@ -276,7 +280,7 @@ static void jpeg_v2_5_disable_clock_gating(struct amdgpu_device *adev, int inst)
 	WREG32_SOC15(JPEG, inst, mmJPEG_CGC_CTRL, data);
 }
 
-static void jpeg_v2_5_enable_clock_gating(struct amdgpu_device *adev, int inst)
+static void jpeg_v2_5_enable_clock_gating(struct amdgpu_device* adev, int inst)
 {
 	uint32_t data;
 
@@ -445,20 +449,20 @@ static bool jpeg_v2_5_is_idle(void *handle)
 static int jpeg_v2_5_wait_for_idle(void *handle)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-	int i, ret;
+	int i, ret = 0;
 
 	for (i = 0; i < adev->jpeg.num_jpeg_inst; ++i) {
 		if (adev->jpeg.harvest_config & (1 << i))
 			continue;
 
-		ret = SOC15_WAIT_ON_RREG(JPEG, i, mmUVD_JRBC_STATUS,
+		SOC15_WAIT_ON_RREG(JPEG, i, mmUVD_JRBC_STATUS,
 			UVD_JRBC_STATUS__RB_JOB_DONE_MASK,
-			UVD_JRBC_STATUS__RB_JOB_DONE_MASK);
+			UVD_JRBC_STATUS__RB_JOB_DONE_MASK, ret);
 		if (ret)
 			return ret;
 	}
 
-	return 0;
+	return ret;
 }
 
 static int jpeg_v2_5_set_clockgating_state(void *handle,

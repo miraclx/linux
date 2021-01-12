@@ -7,8 +7,5 @@ execveat.moved
 execveat.path.ephemeral
 execveat.ephemeral
 execveat.denatured
-/load_address_*
 /recursion-depth
 xxxxxxxx*
-pipe
-S_I*.test

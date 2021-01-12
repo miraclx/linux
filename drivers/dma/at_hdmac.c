@@ -598,9 +598,9 @@ static void atc_handle_cyclic(struct at_dma_chan *atchan)
 
 /*--  IRQ & Tasklet  ---------------------------------------------------*/
 
-static void atc_tasklet(struct tasklet_struct *t)
+static void atc_tasklet(unsigned long data)
 {
-	struct at_dma_chan *atchan = from_tasklet(atchan, t, tasklet);
+	struct at_dma_chan *atchan = (struct at_dma_chan *)data;
 
 	if (test_and_clear_bit(ATC_IS_ERROR, &atchan->status))
 		return atc_handle_error(atchan);
@@ -656,7 +656,7 @@ static irqreturn_t at_dma_interrupt(int irq, void *dev_id)
 
 /**
  * atc_tx_submit - set the prepared descriptor(s) to be executed by the engine
- * @tx: descriptor at the head of the transaction chain
+ * @desc: descriptor at the head of the transaction chain
  *
  * Queue chain if DMA engine is working already
  *
@@ -1196,7 +1196,7 @@ err:
 	return NULL;
 }
 
-/*
+/**
  * atc_dma_cyclic_check_values
  * Check for too big/unaligned periods and unaligned DMA buffer
  */
@@ -1217,7 +1217,7 @@ err_out:
 	return -EINVAL;
 }
 
-/*
+/**
  * atc_dma_cyclic_fill_desc - Fill one period descriptor
  */
 static int
@@ -1650,17 +1650,13 @@ static struct dma_chan *at_dma_xlate(struct of_phandle_args *dma_spec,
 		return NULL;
 
 	dmac_pdev = of_find_device_by_node(dma_spec->np);
-	if (!dmac_pdev)
-		return NULL;
 
 	dma_cap_zero(mask);
 	dma_cap_set(DMA_SLAVE, mask);
 
 	atslave = kmalloc(sizeof(*atslave), GFP_KERNEL);
-	if (!atslave) {
-		put_device(&dmac_pdev->dev);
+	if (!atslave)
 		return NULL;
-	}
 
 	atslave->cfg = ATC_DST_H2SEL_HW | ATC_SRC_H2SEL_HW;
 	/*
@@ -1689,11 +1685,8 @@ static struct dma_chan *at_dma_xlate(struct of_phandle_args *dma_spec,
 	atslave->dma_dev = &dmac_pdev->dev;
 
 	chan = dma_request_channel(mask, at_dma_filter, atslave);
-	if (!chan) {
-		put_device(&dmac_pdev->dev);
-		kfree(atslave);
+	if (!chan)
 		return NULL;
-	}
 
 	atchan = to_at_dma_chan(chan);
 	atchan->per_if = dma_spec->args[0] & 0xff;
@@ -1892,7 +1885,8 @@ static int __init at_dma_probe(struct platform_device *pdev)
 		INIT_LIST_HEAD(&atchan->queue);
 		INIT_LIST_HEAD(&atchan->free_list);
 
-		tasklet_setup(&atchan->tasklet, atc_tasklet);
+		tasklet_init(&atchan->tasklet, atc_tasklet,
+				(unsigned long)atchan);
 		atc_enable_chan_irq(atdma, i);
 	}
 

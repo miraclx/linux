@@ -240,7 +240,7 @@ static int _omap_device_notifier_call(struct notifier_block *nb,
 		if (pdev->dev.of_node)
 			omap_device_build_from_dt(pdev);
 		omap_auxdata_legacy_init(dev);
-		fallthrough;
+		/* fall through */
 	default:
 		od = to_omap_device(pdev);
 		if (od)
@@ -334,9 +334,10 @@ struct omap_device *omap_device_alloc(struct platform_device *pdev,
 	struct omap_hwmod **hwmods;
 
 	od = kzalloc(sizeof(struct omap_device), GFP_KERNEL);
-	if (!od)
+	if (!od) {
+		ret = -ENOMEM;
 		goto oda_exit1;
-
+	}
 	od->hwmods_cnt = oh_cnt;
 
 	hwmods = kmemdup(ohs, sizeof(struct omap_hwmod *) * oh_cnt, GFP_KERNEL);

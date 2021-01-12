@@ -57,7 +57,7 @@
 #include <linux/kdev_t.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
-#include <linux/interrupt.h>
+#include <linux/interrupt.h>		/* needed for in_interrupt() proto */
 #include <linux/dma-mapping.h>
 #include <linux/kthread.h>
 #include <scsi/scsi_host.h>
@@ -473,6 +473,7 @@ mpt_turbo_reply(MPT_ADAPTER *ioc, u32 pa)
 			mpt_free_msg_frame(ioc, mf);
 			mb();
 			return;
+			break;
 		}
 		mr = (MPT_FRAME_HDR *) CAST_U32_TO_PTR(pa);
 		break;
@@ -641,7 +642,7 @@ mptbase_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *req, MPT_FRAME_HDR *reply)
 			freereq = 0;
 		if (event != MPI_EVENT_EVENT_CHANGE)
 			break;
-		fallthrough;
+		/* fall through */
 	case MPI_FUNCTION_CONFIG:
 	case MPI_FUNCTION_SAS_IO_UNIT_CONTROL:
 		ioc->mptbase_cmds.status |= MPT_MGMT_STATUS_COMMAND_GOOD;
@@ -1323,13 +1324,13 @@ mpt_host_page_alloc(MPT_ADAPTER *ioc, pIOCInit_t ioc_init)
 			return 0; /* fw doesn't need any host buffers */
 
 		/* spin till we get enough memory */
-		while (host_page_buffer_sz > 0) {
-			ioc->HostPageBuffer =
-				dma_alloc_coherent(&ioc->pcidev->dev,
-						host_page_buffer_sz,
-						&ioc->HostPageBuffer_dma,
-						GFP_KERNEL);
-			if (ioc->HostPageBuffer) {
+		while(host_page_buffer_sz > 0) {
+
+			if((ioc->HostPageBuffer = pci_alloc_consistent(
+			    ioc->pcidev,
+			    host_page_buffer_sz,
+			    &ioc->HostPageBuffer_dma)) != NULL) {
+
 				dinitprintk(ioc, printk(MYIOC_s_DEBUG_FMT
 				    "host_page_buffer @ %p, dma @ %x, sz=%d bytes\n",
 				    ioc->name, ioc->HostPageBuffer,
@@ -1886,7 +1887,7 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 	case MPI_MANUFACTPAGE_DEVICEID_FC939X:
 	case MPI_MANUFACTPAGE_DEVICEID_FC949X:
 		ioc->errata_flag_1064 = 1;
-		fallthrough;
+		/* fall through */
 	case MPI_MANUFACTPAGE_DEVICEID_FC909:
 	case MPI_MANUFACTPAGE_DEVICEID_FC929:
 	case MPI_MANUFACTPAGE_DEVICEID_FC919:
@@ -1931,7 +1932,7 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 			pcixcmd &= 0x8F;
 			pci_write_config_byte(pdev, 0x6a, pcixcmd);
 		}
-		fallthrough;
+		/* fall through */
 
 	case MPI_MANUFACTPAGE_DEVID_1030_53C1035:
 		ioc->bus_type = SPI;
@@ -2740,8 +2741,8 @@ mpt_adapter_disable(MPT_ADAPTER *ioc)
 		sz = ioc->alloc_sz;
 		dexitprintk(ioc, printk(MYIOC_s_INFO_FMT "free  @ %p, sz=%d bytes\n",
 		    ioc->name, ioc->alloc, ioc->alloc_sz));
-		dma_free_coherent(&ioc->pcidev->dev, sz, ioc->alloc,
-				ioc->alloc_dma);
+		pci_free_consistent(ioc->pcidev, sz,
+				ioc->alloc, ioc->alloc_dma);
 		ioc->reply_frames = NULL;
 		ioc->req_frames = NULL;
 		ioc->alloc = NULL;
@@ -2750,8 +2751,8 @@ mpt_adapter_disable(MPT_ADAPTER *ioc)
 
 	if (ioc->sense_buf_pool != NULL) {
 		sz = (ioc->req_depth * MPT_SENSE_BUFFER_ALLOC);
-		dma_free_coherent(&ioc->pcidev->dev, sz, ioc->sense_buf_pool,
-				ioc->sense_buf_pool_dma);
+		pci_free_consistent(ioc->pcidev, sz,
+				ioc->sense_buf_pool, ioc->sense_buf_pool_dma);
 		ioc->sense_buf_pool = NULL;
 		ioc->alloc_total -= sz;
 	}
@@ -2801,7 +2802,7 @@ mpt_adapter_disable(MPT_ADAPTER *ioc)
 			"HostPageBuffer free  @ %p, sz=%d bytes\n",
 			ioc->name, ioc->HostPageBuffer,
 			ioc->HostPageBuffer_sz));
-		dma_free_coherent(&ioc->pcidev->dev, ioc->HostPageBuffer_sz,
+		pci_free_consistent(ioc->pcidev, ioc->HostPageBuffer_sz,
 		    ioc->HostPageBuffer, ioc->HostPageBuffer_dma);
 		ioc->HostPageBuffer = NULL;
 		ioc->HostPageBuffer_sz = 0;
@@ -4496,8 +4497,7 @@ PrimeIocFifos(MPT_ADAPTER *ioc)
 			 	ioc->name, sz, sz, num_chain));
 
 		total_size += sz;
-		mem = dma_alloc_coherent(&ioc->pcidev->dev, total_size,
-				&alloc_dma, GFP_KERNEL);
+		mem = pci_alloc_consistent(ioc->pcidev, total_size, &alloc_dma);
 		if (mem == NULL) {
 			printk(MYIOC_s_ERR_FMT "Unable to allocate Reply, Request, Chain Buffers!\n",
 				ioc->name);
@@ -4574,8 +4574,8 @@ PrimeIocFifos(MPT_ADAPTER *ioc)
 		spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 
 		sz = (ioc->req_depth * MPT_SENSE_BUFFER_ALLOC);
-		ioc->sense_buf_pool = dma_alloc_coherent(&ioc->pcidev->dev, sz,
-				&ioc->sense_buf_pool_dma, GFP_KERNEL);
+		ioc->sense_buf_pool =
+			pci_alloc_consistent(ioc->pcidev, sz, &ioc->sense_buf_pool_dma);
 		if (ioc->sense_buf_pool == NULL) {
 			printk(MYIOC_s_ERR_FMT "Unable to allocate Sense Buffers!\n",
 				ioc->name);
@@ -4613,16 +4613,18 @@ out_fail:
 
 	if (ioc->alloc != NULL) {
 		sz = ioc->alloc_sz;
-		dma_free_coherent(&ioc->pcidev->dev, sz, ioc->alloc,
-				ioc->alloc_dma);
+		pci_free_consistent(ioc->pcidev,
+				sz,
+				ioc->alloc, ioc->alloc_dma);
 		ioc->reply_frames = NULL;
 		ioc->req_frames = NULL;
 		ioc->alloc_total -= sz;
 	}
 	if (ioc->sense_buf_pool != NULL) {
 		sz = (ioc->req_depth * MPT_SENSE_BUFFER_ALLOC);
-		dma_free_coherent(&ioc->pcidev->dev, sz, ioc->sense_buf_pool,
-				ioc->sense_buf_pool_dma);
+		pci_free_consistent(ioc->pcidev,
+				sz,
+				ioc->sense_buf_pool, ioc->sense_buf_pool_dma);
 		ioc->sense_buf_pool = NULL;
 	}
 
@@ -5050,11 +5052,9 @@ GetLanConfigPages(MPT_ADAPTER *ioc)
  *	@ioc: Pointer to MPT_ADAPTER structure
  *	@persist_opcode: see below
  *
- *	===============================  ======================================
- *	MPI_SAS_OP_CLEAR_NOT_PRESENT     Free all persist TargetID mappings for
- *					 devices not currently present.
- *	MPI_SAS_OP_CLEAR_ALL_PERSISTENT  Clear al persist TargetID mappings
- *	===============================  ======================================
+ *	MPI_SAS_OP_CLEAR_NOT_PRESENT - Free all persist TargetID mappings for
+ *		devices not currently present.
+ *	MPI_SAS_OP_CLEAR_ALL_PERSISTENT - Clear al persist TargetID mappings
  *
  *	NOTE: Don't use not this function during interrupt time.
  *
@@ -6335,6 +6335,7 @@ SendEventAck(MPT_ADAPTER *ioc, EventNotificationReply_t *evnp)
  *		Page header is updated.
  *
  *	Returns 0 for success
+ *	-EPERM if not allowed due to ISR context
  *	-EAGAIN if no msg frames currently available
  *	-EFAULT for non-successful reply or no reply (timeout)
  */
@@ -6352,10 +6353,19 @@ mpt_config(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 	u8		 page_type = 0, extend_page;
 	unsigned long 	 timeleft;
 	unsigned long	 flags;
+	int		 in_isr;
 	u8		 issue_hard_reset = 0;
 	u8		 retry_count = 0;
 
-	might_sleep();
+	/*	Prevent calling wait_event() (below), if caller happens
+	 *	to be in ISR context, because that is fatal!
+	 */
+	in_isr = in_interrupt();
+	if (in_isr) {
+		dcprintk(ioc, printk(MYIOC_s_WARN_FMT "Config request not allowed in ISR context!\n",
+				ioc->name));
+		return -EPERM;
+    }
 
 	/* don't send a config page during diag reset */
 	spin_lock_irqsave(&ioc->taskmgmt_lock, flags);

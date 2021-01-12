@@ -2,7 +2,7 @@
 /*
  * Software PHY emulation
  *
- * Code taken from fixed_phy.c by Russell King.
+ * Code taken from fixed_phy.c by Russell King <rmk+kernel@arm.linux.org.uk>
  *
  * Author: Vitaly Bordug <vbordug@ru.mvista.com>
  *         Anton Vorontsov <avorontsov@ru.mvista.com>

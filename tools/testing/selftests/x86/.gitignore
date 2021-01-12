@@ -12,4 +12,5 @@ ldt_gdt
 iopl
 mpx-mini-test
 ioperm
+protection_keys
 test_vdso

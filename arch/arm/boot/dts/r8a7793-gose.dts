@@ -334,8 +334,9 @@
 		composite-in@20 {
 			compatible = "adi,adv7180cp";
 			reg = <0x20>;
+			remote = <&vin1>;
 
-			ports {
+			port {
 				#address-cells = <1>;
 				#size-cells = <0>;
 
@@ -393,7 +394,7 @@
 			interrupts = <2 IRQ_TYPE_LEVEL_LOW>;
 			default-input = <0>;
 
-			ports {
+			port {
 				#address-cells = <1>;
 				#size-cells = <0>;
 

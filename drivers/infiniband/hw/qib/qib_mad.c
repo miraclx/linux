@@ -433,7 +433,7 @@ static int check_mkey(struct qib_ibport *ibp, struct ib_smp *smp, int mad_flags)
 			/* Bad mkey not a violation below level 2 */
 			if (ibp->rvp.mkeyprot < 2)
 				break;
-			fallthrough;
+			/* fall through */
 		case IB_MGMT_METHOD_SET:
 		case IB_MGMT_METHOD_TRAP_REPRESS:
 			if (ibp->rvp.mkey_violations != 0xFFFF)
@@ -828,7 +828,7 @@ static int subn_set_portinfo(struct ib_smp *smp, struct ib_device *ibdev,
 	case IB_PORT_NOP:
 		if (lstate == 0)
 			break;
-		fallthrough;
+		/* FALLTHROUGH */
 	case IB_PORT_DOWN:
 		if (lstate == 0)
 			lstate = QIB_IB_LINKDOWN_ONLY;
@@ -1928,7 +1928,7 @@ static int process_subn(struct ib_device *ibdev, int mad_flags,
 				ret = IB_MAD_RESULT_SUCCESS;
 				goto bail;
 			}
-			fallthrough;
+			/* FALLTHROUGH */
 		default:
 			smp->status |= IB_SMP_UNSUP_METH_ATTR;
 			ret = reply(smp);
@@ -1962,7 +1962,7 @@ static int process_subn(struct ib_device *ibdev, int mad_flags,
 				ret = IB_MAD_RESULT_SUCCESS;
 				goto bail;
 			}
-			fallthrough;
+			/* FALLTHROUGH */
 		default:
 			smp->status |= IB_SMP_UNSUP_METH_ATTR;
 			ret = reply(smp);
@@ -2293,50 +2293,76 @@ static int process_cc(struct ib_device *ibdev, int mad_flags,
 			struct ib_mad *out_mad)
 {
 	struct ib_cc_mad *ccp = (struct ib_cc_mad *)out_mad;
+	int ret;
+
 	*out_mad = *in_mad;
 
 	if (ccp->class_version != 2) {
 		ccp->status |= IB_SMP_UNSUP_VERSION;
-		return reply((struct ib_smp *)ccp);
+		ret = reply((struct ib_smp *)ccp);
+		goto bail;
 	}
 
 	switch (ccp->method) {
 	case IB_MGMT_METHOD_GET:
 		switch (ccp->attr_id) {
 		case IB_CC_ATTR_CLASSPORTINFO:
-			return cc_get_classportinfo(ccp, ibdev);
+			ret = cc_get_classportinfo(ccp, ibdev);
+			goto bail;
+
 		case IB_CC_ATTR_CONGESTION_INFO:
-			return cc_get_congestion_info(ccp, ibdev, port);
+			ret = cc_get_congestion_info(ccp, ibdev, port);
+			goto bail;
+
 		case IB_CC_ATTR_CA_CONGESTION_SETTING:
-			return cc_get_congestion_setting(ccp, ibdev, port);
+			ret = cc_get_congestion_setting(ccp, ibdev, port);
+			goto bail;
+
 		case IB_CC_ATTR_CONGESTION_CONTROL_TABLE:
-			return cc_get_congestion_control_table(ccp, ibdev, port);
+			ret = cc_get_congestion_control_table(ccp, ibdev, port);
+			goto bail;
+
+			/* FALLTHROUGH */
 		default:
 			ccp->status |= IB_SMP_UNSUP_METH_ATTR;
-			return reply((struct ib_smp *) ccp);
+			ret = reply((struct ib_smp *) ccp);
+			goto bail;
 		}
+
 	case IB_MGMT_METHOD_SET:
 		switch (ccp->attr_id) {
 		case IB_CC_ATTR_CA_CONGESTION_SETTING:
-			return cc_set_congestion_setting(ccp, ibdev, port);
+			ret = cc_set_congestion_setting(ccp, ibdev, port);
+			goto bail;
+
 		case IB_CC_ATTR_CONGESTION_CONTROL_TABLE:
-			return cc_set_congestion_control_table(ccp, ibdev, port);
+			ret = cc_set_congestion_control_table(ccp, ibdev, port);
+			goto bail;
+
+			/* FALLTHROUGH */
 		default:
 			ccp->status |= IB_SMP_UNSUP_METH_ATTR;
-			return reply((struct ib_smp *) ccp);
+			ret = reply((struct ib_smp *) ccp);
+			goto bail;
 		}
+
 	case IB_MGMT_METHOD_GET_RESP:
 		/*
 		 * The ib_mad module will call us to process responses
 		 * before checking for other consumers.
 		 * Just tell the caller to process it normally.
 		 */
-		return IB_MAD_RESULT_SUCCESS;
+		ret = IB_MAD_RESULT_SUCCESS;
+		goto bail;
+
+	case IB_MGMT_METHOD_TRAP:
+	default:
+		ccp->status |= IB_SMP_UNSUP_METHOD;
+		ret = reply((struct ib_smp *) ccp);
 	}
 
-	/* method is unsupported */
-	ccp->status |= IB_SMP_UNSUP_METHOD;
-	return reply((struct ib_smp *) ccp);
+bail:
+	return ret;
 }
 
 /**

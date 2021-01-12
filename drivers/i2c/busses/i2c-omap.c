@@ -1365,8 +1365,10 @@ omap_i2c_probe(struct platform_device *pdev)
 	u16 minor, major;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&pdev->dev, "no irq resource?\n");
 		return irq;
+	}
 
 	omap = devm_kzalloc(&pdev->dev, sizeof(struct omap_i2c_dev), GFP_KERNEL);
 	if (!omap)
@@ -1425,6 +1427,7 @@ omap_i2c_probe(struct platform_device *pdev)
 		major = OMAP_I2C_REV_SCHEME_0_MAJOR(omap->rev);
 		break;
 	case OMAP_I2C_SCHEME_1:
+		/* FALLTHROUGH */
 	default:
 		omap->regs = (u8 *)reg_map_ip_v2;
 		rev = (rev << 16) |

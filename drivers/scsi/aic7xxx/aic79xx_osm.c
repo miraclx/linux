@@ -700,6 +700,9 @@ ahd_linux_slave_alloc(struct scsi_device *sdev)
 static int
 ahd_linux_slave_configure(struct scsi_device *sdev)
 {
+	struct	ahd_softc *ahd;
+
+	ahd = *((struct ahd_softc **)sdev->host->hostdata);
 	if (bootverbose)
 		sdev_printk(KERN_INFO, sdev, "Slave Configure\n");
 
@@ -775,13 +778,16 @@ ahd_linux_dev_reset(struct scsi_cmnd *cmd)
 	struct scb *reset_scb;
 	u_int  cdb_byte;
 	int    retval = SUCCESS;
+	int    paused;
+	int    wait;
 	struct	ahd_initiator_tinfo *tinfo;
 	struct	ahd_tmode_tstate *tstate;
 	unsigned long flags;
 	DECLARE_COMPLETION_ONSTACK(done);
 
 	reset_scb = NULL;
-
+	paused = FALSE;
+	wait = FALSE;
 	ahd = *(struct ahd_softc **)cmd->device->host->hostdata;
 
 	scmd_printk(KERN_INFO, cmd,
@@ -952,8 +958,8 @@ int
 ahd_dmamem_alloc(struct ahd_softc *ahd, bus_dma_tag_t dmat, void** vaddr,
 		 int flags, bus_dmamap_t *mapp)
 {
-	*vaddr = dma_alloc_coherent(&ahd->dev_softc->dev, dmat->maxsize, mapp,
-				    GFP_ATOMIC);
+	*vaddr = pci_alloc_consistent(ahd->dev_softc,
+				      dmat->maxsize, mapp);
 	if (*vaddr == NULL)
 		return (ENOMEM);
 	return(0);
@@ -963,7 +969,8 @@ void
 ahd_dmamem_free(struct ahd_softc *ahd, bus_dma_tag_t dmat,
 		void* vaddr, bus_dmamap_t map)
 {
-	dma_free_coherent(&ahd->dev_softc->dev, dmat->maxsize, vaddr, map);
+	pci_free_consistent(ahd->dev_softc, dmat->maxsize,
+			    vaddr, map);
 }
 
 int
@@ -1786,12 +1793,10 @@ ahd_done(struct ahd_softc *ahd, struct scb *scb)
 	 */
 	cmd->sense_buffer[0] = 0;
 	if (ahd_get_transaction_status(scb) == CAM_REQ_INPROG) {
-#ifdef AHD_REPORT_UNDERFLOWS
 		uint32_t amount_xferred;
 
 		amount_xferred =
 		    ahd_get_transfer_length(scb) - ahd_get_residual(scb);
-#endif
 		if ((scb->flags & SCB_TRANSMISSION_ERROR) != 0) {
 #ifdef AHD_DEBUG
 			if ((ahd_debug & AHD_SHOW_MISC) != 0) {
@@ -2034,7 +2039,7 @@ ahd_linux_queue_cmd_complete(struct ahd_softc *ahd, struct scsi_cmnd *cmd)
 		break;
 	case CAM_AUTOSENSE_FAIL:
 		new_status = DID_ERROR;
-		fallthrough;
+		/* Fallthrough */
 	case CAM_SCSI_STATUS_ERROR:
 		scsi_status = ahd_cmd_get_scsi_status(cmd);
 
@@ -2140,8 +2145,9 @@ ahd_linux_queue_abort_cmd(struct scsi_cmnd *cmd)
 	u_int  saved_scbptr;
 	u_int  active_scbptr;
 	u_int  last_phase;
+	u_int  saved_scsiid;
 	u_int  cdb_byte;
-	int    retval = SUCCESS;
+	int    retval;
 	int    was_paused;
 	int    paused;
 	int    wait;
@@ -2179,7 +2185,8 @@ ahd_linux_queue_abort_cmd(struct scsi_cmnd *cmd)
 		 * so we must not still own the command.
 		 */
 		scmd_printk(KERN_INFO, cmd, "Is not an active device\n");
-		goto done;
+		retval = SUCCESS;
+		goto no_cmd;
 	}
 
 	/*
@@ -2192,7 +2199,7 @@ ahd_linux_queue_abort_cmd(struct scsi_cmnd *cmd)
 
 	if (pending_scb == NULL) {
 		scmd_printk(KERN_INFO, cmd, "Command not found\n");
-		goto done;
+		goto no_cmd;
 	}
 
 	if ((pending_scb->flags & SCB_RECOVERY_SCB) != 0) {
@@ -2200,7 +2207,7 @@ ahd_linux_queue_abort_cmd(struct scsi_cmnd *cmd)
 		 * We can't queue two recovery actions using the same SCB
 		 */
 		retval = FAILED;
-		goto done;
+		goto  done;
 	}
 
 	/*
@@ -2215,7 +2222,7 @@ ahd_linux_queue_abort_cmd(struct scsi_cmnd *cmd)
 
 	if ((pending_scb->flags & SCB_ACTIVE) == 0) {
 		scmd_printk(KERN_INFO, cmd, "Command already completed\n");
-		goto done;
+		goto no_cmd;
 	}
 
 	printk("%s: At time of recovery, card was %spaused\n",
@@ -2232,6 +2239,7 @@ ahd_linux_queue_abort_cmd(struct scsi_cmnd *cmd)
 		printk("%s:%d:%d:%d: Cmd aborted from QINFIFO\n",
 		       ahd_name(ahd), cmd->device->channel, 
 		       cmd->device->id, (u8)cmd->device->lun);
+		retval = SUCCESS;
 		goto done;
 	}
 
@@ -2253,7 +2261,7 @@ ahd_linux_queue_abort_cmd(struct scsi_cmnd *cmd)
 	 * passed in command.  That command is currently active on the
 	 * bus or is in the disconnected state.
 	 */
-	ahd_inb(ahd, SAVED_SCSIID);
+	saved_scsiid = ahd_inb(ahd, SAVED_SCSIID);
 	if (last_phase != P_BUSFREE
 	    && SCB_GET_TAG(pending_scb) == active_scbptr) {
 
@@ -2328,10 +2336,17 @@ ahd_linux_queue_abort_cmd(struct scsi_cmnd *cmd)
 	} else {
 		scmd_printk(KERN_INFO, cmd, "Unable to deliver message\n");
 		retval = FAILED;
+		goto done;
 	}
 
-
-	ahd_restore_modes(ahd, saved_modes);
+no_cmd:
+	/*
+	 * Our assumption is that if we don't have the command, no
+	 * recovery action was required, so we return success.  Again,
+	 * the semantics of the mid-layer recovery engine are not
+	 * well defined, so this may change in time.
+	 */
+	retval = SUCCESS;
 done:
 	if (paused)
 		ahd_unpause(ahd);

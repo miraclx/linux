@@ -61,7 +61,7 @@ struct perf_guest_info_callbacks {
 
 struct perf_callchain_entry {
 	__u64				nr;
-	__u64				ip[]; /* /proc/sys/kernel/perf_event_max_stack */
+	__u64				ip[0]; /* /proc/sys/kernel/perf_event_max_stack */
 };
 
 struct perf_callchain_entry_ctx {
@@ -113,7 +113,7 @@ struct perf_raw_record {
 struct perf_branch_stack {
 	__u64				nr;
 	__u64				hw_idx;
-	struct perf_branch_entry	entries[];
+	struct perf_branch_entry	entries[0];
 };
 
 struct task_struct;
@@ -212,26 +212,17 @@ struct hw_perf_event {
 	 */
 	u64				sample_period;
 
-	union {
-		struct { /* Sampling */
-			/*
-			 * The period we started this sample with.
-			 */
-			u64				last_period;
+	/*
+	 * The period we started this sample with.
+	 */
+	u64				last_period;
 
-			/*
-			 * However much is left of the current period;
-			 * note that this is a full 64bit value and
-			 * allows for generation of periods longer
-			 * than hardware might allow.
-			 */
-			local64_t			period_left;
-		};
-		struct { /* Topdown events counting for context switch */
-			u64				saved_metric;
-			u64				saved_slots;
-		};
-	};
+	/*
+	 * However much is left of the current period; note that this is
+	 * a full 64bit value and allows for generation of periods longer
+	 * than hardware might allow.
+	 */
+	local64_t			period_left;
 
 	/*
 	 * State for throttling the event, see __perf_event_overflow() and
@@ -375,7 +366,7 @@ struct pmu {
 	 * ->stop() with PERF_EF_UPDATE will read the counter and update
 	 *  period/count values like ->read() would.
 	 *
-	 * ->start() with PERF_EF_RELOAD will reprogram the counter
+	 * ->start() with PERF_EF_RELOAD will reprogram the the counter
 	 *  value, must be preceded by a ->stop() with PERF_EF_UPDATE.
 	 */
 	void (*start)			(struct perf_event *event, int flags);
@@ -428,11 +419,10 @@ struct pmu {
 	 */
 	void (*sched_task)		(struct perf_event_context *ctx,
 					bool sched_in);
-
 	/*
-	 * Kmem cache of PMU specific data
+	 * PMU specific data size
 	 */
-	struct kmem_cache		*task_ctx_cache;
+	size_t				task_ctx_size;
 
 	/*
 	 * PMU specific parts of task perf event context (i.e. ctx->task_ctx_data)
@@ -585,13 +575,9 @@ typedef void (*perf_overflow_handler_t)(struct perf_event *,
  * PERF_EV_CAP_SOFTWARE: Is a software event.
  * PERF_EV_CAP_READ_ACTIVE_PKG: A CPU event (or cgroup event) that can be read
  * from any CPU in the package where it is active.
- * PERF_EV_CAP_SIBLING: An event with this flag must be a group sibling and
- * cannot be a group leader. If an event with this flag is detached from the
- * group it is scheduled out and moved into an unrecoverable ERROR state.
  */
 #define PERF_EV_CAP_SOFTWARE		BIT(0)
 #define PERF_EV_CAP_READ_ACTIVE_PKG	BIT(1)
-#define PERF_EV_CAP_SIBLING		BIT(2)
 
 #define SWEVENT_HLIST_BITS		8
 #define SWEVENT_HLIST_SIZE		(1 << SWEVENT_HLIST_BITS)
@@ -872,6 +858,7 @@ struct perf_cpu_context {
 	struct list_head		cgrp_cpuctx_entry;
 #endif
 
+	struct list_head		sched_cb_entry;
 	int				sched_cb_usage;
 
 	int				online;
@@ -1022,14 +1009,18 @@ struct perf_sample_data {
 	struct perf_callchain_entry	*callchain;
 	u64				aux_size;
 
+	/*
+	 * regs_user may point to task_pt_regs or to regs_user_copy, depending
+	 * on arch details.
+	 */
 	struct perf_regs		regs_user;
+	struct pt_regs			regs_user_copy;
+
 	struct perf_regs		regs_intr;
 	u64				stack_user_size;
 
 	u64				phys_addr;
 	u64				cgroup;
-	u64				data_page_size;
-	u64				code_page_size;
 } ____cacheline_aligned;
 
 /* default value for data source */
@@ -1241,9 +1232,6 @@ extern void perf_event_exec(void);
 extern void perf_event_comm(struct task_struct *tsk, bool exec);
 extern void perf_event_namespaces(struct task_struct *tsk);
 extern void perf_event_fork(struct task_struct *tsk);
-extern void perf_event_text_poke(const void *addr,
-				 const void *old_bytes, size_t old_len,
-				 const void *new_bytes, size_t new_len);
 
 /* Callchains */
 DECLARE_PER_CPU(struct perf_callchain_entry, perf_callchain_entry);
@@ -1256,8 +1244,6 @@ get_perf_callchain(struct pt_regs *regs, u32 init_nr, bool kernel, bool user,
 extern struct perf_callchain_entry *perf_callchain(struct perf_event *event, struct pt_regs *regs);
 extern int get_callchain_buffers(int max_stack);
 extern void put_callchain_buffers(void);
-extern struct perf_callchain_entry *get_callchain_entry(int *rctx);
-extern void put_callchain_entry(int rctx);
 
 extern int sysctl_perf_event_max_stack;
 extern int sysctl_perf_event_max_contexts_per_stack;
@@ -1294,12 +1280,15 @@ extern int sysctl_perf_cpu_time_max_percent;
 
 extern void perf_sample_event_took(u64 sample_len_ns);
 
-int perf_proc_update_handler(struct ctl_table *table, int write,
-		void *buffer, size_t *lenp, loff_t *ppos);
-int perf_cpu_time_max_percent_handler(struct ctl_table *table, int write,
-		void *buffer, size_t *lenp, loff_t *ppos);
+extern int perf_proc_update_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp,
+		loff_t *ppos);
+extern int perf_cpu_time_max_percent_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp,
+		loff_t *ppos);
+
 int perf_event_max_stack_handler(struct ctl_table *table, int write,
-		void *buffer, size_t *lenp, loff_t *ppos);
+				 void __user *buffer, size_t *lenp, loff_t *ppos);
 
 /* Access to perf_event_open(2) syscall. */
 #define PERF_SECURITY_OPEN		0
@@ -1316,7 +1305,7 @@ static inline int perf_is_paranoid(void)
 
 static inline int perf_allow_kernel(struct perf_event_attr *attr)
 {
-	if (sysctl_perf_event_paranoid > 1 && !perfmon_capable())
+	if (sysctl_perf_event_paranoid > 1 && !capable(CAP_SYS_ADMIN))
 		return -EACCES;
 
 	return security_perf_event_open(attr, PERF_SECURITY_KERNEL);
@@ -1324,7 +1313,7 @@ static inline int perf_allow_kernel(struct perf_event_attr *attr)
 
 static inline int perf_allow_cpu(struct perf_event_attr *attr)
 {
-	if (sysctl_perf_event_paranoid > 0 && !perfmon_capable())
+	if (sysctl_perf_event_paranoid > 0 && !capable(CAP_SYS_ADMIN))
 		return -EACCES;
 
 	return security_perf_event_open(attr, PERF_SECURITY_CPU);
@@ -1332,7 +1321,7 @@ static inline int perf_allow_cpu(struct perf_event_attr *attr)
 
 static inline int perf_allow_tracepoint(struct perf_event_attr *attr)
 {
-	if (sysctl_perf_event_paranoid > -1 && !perfmon_capable())
+	if (sysctl_perf_event_paranoid > -1 && !capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
 	return security_perf_event_open(attr, PERF_SECURITY_TRACEPOINT);
@@ -1396,14 +1385,11 @@ perf_event_addr_filters(struct perf_event *event)
 extern void perf_event_addr_filters_sync(struct perf_event *event);
 
 extern int perf_output_begin(struct perf_output_handle *handle,
-			     struct perf_sample_data *data,
 			     struct perf_event *event, unsigned int size);
 extern int perf_output_begin_forward(struct perf_output_handle *handle,
-				     struct perf_sample_data *data,
-				     struct perf_event *event,
-				     unsigned int size);
+				    struct perf_event *event,
+				    unsigned int size);
 extern int perf_output_begin_backward(struct perf_output_handle *handle,
-				      struct perf_sample_data *data,
 				      struct perf_event *event,
 				      unsigned int size);
 
@@ -1496,11 +1482,6 @@ static inline void perf_event_exec(void)				{ }
 static inline void perf_event_comm(struct task_struct *tsk, bool exec)	{ }
 static inline void perf_event_namespaces(struct task_struct *tsk)	{ }
 static inline void perf_event_fork(struct task_struct *tsk)		{ }
-static inline void perf_event_text_poke(const void *addr,
-					const void *old_bytes,
-					size_t old_len,
-					const void *new_bytes,
-					size_t new_len)			{ }
 static inline void perf_event_init(void)				{ }
 static inline int  perf_swevent_get_recursion_context(void)		{ return -1; }
 static inline void perf_swevent_put_recursion_context(int rctx)		{ }
@@ -1586,9 +1567,5 @@ int perf_event_exit_cpu(unsigned int cpu);
 extern void __weak arch_perf_update_userpage(struct perf_event *event,
 					     struct perf_event_mmap_page *userpg,
 					     u64 now);
-
-#ifdef CONFIG_MMU
-extern __weak u64 arch_perf_get_page_size(struct mm_struct *mm, unsigned long addr);
-#endif
 
 #endif /* _LINUX_PERF_EVENT_H */

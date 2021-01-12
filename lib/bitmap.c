@@ -23,7 +23,7 @@
 /**
  * DOC: bitmap introduction
  *
- * bitmaps provide an array of bits, implemented using an
+ * bitmaps provide an array of bits, implemented using an an
  * array of unsigned longs.  The number of valid bits in a
  * given bitmap does _not_ need to be an exact multiple of
  * BITS_PER_LONG.
@@ -182,22 +182,21 @@ EXPORT_SYMBOL(__bitmap_shift_left);
  *
  * In pictures, example for a big-endian 32-bit architecture:
  *
- * The @src bitmap is::
+ * @src:
+ * 31                                   63
+ * |                                    |
+ * 10000000 11000001 11110010 00010101  10000000 11000001 01110010 00010101
+ *                 |  |              |                                    |
+ *                16  14             0                                   32
  *
- *   31                                   63
- *   |                                    |
- *   10000000 11000001 11110010 00010101  10000000 11000001 01110010 00010101
- *                   |  |              |                                    |
- *                  16  14             0                                   32
+ * if @cut is 3, and @first is 14, bits 14-16 in @src are cut and @dst is:
  *
- * if @cut is 3, and @first is 14, bits 14-16 in @src are cut and @dst is::
- *
- *   31                                   63
- *   |                                    |
- *   10110000 00011000 00110010 00010101  00010000 00011000 00101110 01000010
- *                      |              |                                    |
- *                      14 (bit 17     0                                   32
- *                          from @src)
+ * 31                                   63
+ * |                                    |
+ * 10110000 00011000 00110010 00010101  00010000 00011000 00101110 01000010
+ *                    |              |                                    |
+ *                    14 (bit 17     0                                   32
+ *                        from @src)
  *
  * Note that @dst and @src might overlap partially or entirely.
  *
@@ -212,12 +211,12 @@ void bitmap_cut(unsigned long *dst, const unsigned long *src,
 	unsigned long keep = 0, carry;
 	int i;
 
+	memmove(dst, src, len * sizeof(*dst));
+
 	if (first % BITS_PER_LONG) {
 		keep = src[first / BITS_PER_LONG] &
 		       (~0UL >> (BITS_PER_LONG - first % BITS_PER_LONG));
 	}
-
-	memmove(dst, src, len * sizeof(*dst));
 
 	while (cut--) {
 		for (i = first / BITS_PER_LONG; i < len; i++) {
@@ -552,7 +551,7 @@ static inline bool end_of_region(char c)
 }
 
 /*
- * The format allows commas and whitespaces at the beginning
+ * The format allows commas and whitespases at the beginning
  * of the region.
  */
 static const char *bitmap_find_region(const char *str)
@@ -741,9 +740,8 @@ int bitmap_parse(const char *start, unsigned int buflen,
 	int chunks = BITS_TO_U32(nmaskbits);
 	u32 *bitmap = (u32 *)maskp;
 	int unset_bit;
-	int chunk;
 
-	for (chunk = 0; ; chunk++) {
+	while (1) {
 		end = bitmap_find_region_reverse(start, end);
 		if (start > end)
 			break;
@@ -751,11 +749,7 @@ int bitmap_parse(const char *start, unsigned int buflen,
 		if (!chunks--)
 			return -EOVERFLOW;
 
-#if defined(CONFIG_64BIT) && defined(__BIG_ENDIAN)
-		end = bitmap_get_x32_reverse(start, end, &bitmap[chunk ^ 1]);
-#else
-		end = bitmap_get_x32_reverse(start, end, &bitmap[chunk]);
-#endif
+		end = bitmap_get_x32_reverse(start, end, bitmap++);
 		if (IS_ERR(end))
 			return PTR_ERR(end);
 	}

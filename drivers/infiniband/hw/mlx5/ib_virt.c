@@ -134,7 +134,7 @@ int mlx5_ib_get_vf_stats(struct ib_device *device, int vf,
 	if (!out)
 		return -ENOMEM;
 
-	err = mlx5_core_query_vport_counter(mdev, true, vf, port, out);
+	err = mlx5_core_query_vport_counter(mdev, true, vf, port, out, out_sz);
 	if (err)
 		goto ex;
 

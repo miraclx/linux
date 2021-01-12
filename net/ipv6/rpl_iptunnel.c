@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
+/**
  * Authors:
  * (C) 2020 Alexander Aring <alex.aring@gmail.com>
  */
@@ -136,7 +136,8 @@ static int rpl_do_srh_inline(struct sk_buff *skb, const struct rpl_lwt *rlwt,
 
 	oldhdr = ipv6_hdr(skb);
 
-	buf = kcalloc(struct_size(srh, segments.addr, srh->segments_left), 2, GFP_ATOMIC);
+	buf = kzalloc(ipv6_rpl_srh_alloc_size(srh->segments_left - 1) * 2,
+		      GFP_ATOMIC);
 	if (!buf)
 		return -ENOMEM;
 
@@ -190,13 +191,18 @@ static int rpl_do_srh(struct sk_buff *skb, const struct rpl_lwt *rlwt)
 {
 	struct dst_entry *dst = skb_dst(skb);
 	struct rpl_iptunnel_encap *tinfo;
+	int err = 0;
 
 	if (skb->protocol != htons(ETH_P_IPV6))
 		return -EINVAL;
 
 	tinfo = rpl_encap_lwtunnel(dst->lwtstate);
 
-	return rpl_do_srh_inline(skb, rlwt, tinfo->srh);
+	err = rpl_do_srh_inline(skb, rlwt, tinfo->srh);
+	if (err)
+		return err;
+
+	return 0;
 }
 
 static int rpl_output(struct net *net, struct sock *sk, struct sk_buff *skb)

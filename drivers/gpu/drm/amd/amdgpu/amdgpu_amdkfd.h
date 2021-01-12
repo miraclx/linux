@@ -27,7 +27,6 @@
 
 #include <linux/types.h>
 #include <linux/mm.h>
-#include <linux/kthread.h>
 #include <linux/workqueue.h>
 #include <kgd_kfd_interface.h>
 #include <drm/ttm/ttm_execbuf_util.h>
@@ -66,7 +65,6 @@ struct kgd_mem {
 	struct amdgpu_sync sync;
 
 	bool aql_queue;
-	bool is_imported;
 };
 
 /* KFD Memory Eviction */
@@ -150,9 +148,6 @@ int amdgpu_amdkfd_post_reset(struct amdgpu_device *adev);
 
 void amdgpu_amdkfd_gpu_reset(struct kgd_dev *kgd);
 
-int amdgpu_queue_mask_bit_to_set_resource_bit(struct amdgpu_device *adev,
-					int queue_bit);
-
 /* Shared API */
 int amdgpu_amdkfd_alloc_gtt_mem(struct kgd_dev *kgd, size_t size,
 				void **mem_obj, uint64_t *gpu_addr,
@@ -180,15 +175,13 @@ uint64_t amdgpu_amdkfd_get_hive_id(struct kgd_dev *kgd);
 uint64_t amdgpu_amdkfd_get_unique_id(struct kgd_dev *kgd);
 uint64_t amdgpu_amdkfd_get_mmio_remap_phys_addr(struct kgd_dev *kgd);
 uint32_t amdgpu_amdkfd_get_num_gws(struct kgd_dev *kgd);
-uint32_t amdgpu_amdkfd_get_asic_rev_id(struct kgd_dev *kgd);
-int amdgpu_amdkfd_get_noretry(struct kgd_dev *kgd);
 uint8_t amdgpu_amdkfd_get_xgmi_hops_count(struct kgd_dev *dst, struct kgd_dev *src);
 
 /* Read user wptr from a specified user address space with page fault
  * disabled. The memory must be pinned and mapped to the hardware when
  * this is called in hqd_load functions, so it should never fault in
  * the first place. This resolves a circular lock dependency involving
- * four locks, including the DQM lock and mmap_lock.
+ * four locks, including the DQM lock and mmap_sem.
  */
 #define read_user_wptr(mmptr, wptr, dst)				\
 	({								\
@@ -197,10 +190,10 @@ uint8_t amdgpu_amdkfd_get_xgmi_hops_count(struct kgd_dev *dst, struct kgd_dev *s
 			pagefault_disable();				\
 			if ((mmptr) == current->mm) {			\
 				valid = !get_user((dst), (wptr));	\
-			} else if (current->flags & PF_KTHREAD) {	\
-				kthread_use_mm(mmptr);			\
+			} else if (current->mm == NULL) {		\
+				use_mm(mmptr);				\
 				valid = !get_user((dst), (wptr));	\
-				kthread_unuse_mm(mmptr);		\
+				unuse_mm(mmptr);			\
 			}						\
 			pagefault_enable();				\
 		}							\
@@ -208,11 +201,11 @@ uint8_t amdgpu_amdkfd_get_xgmi_hops_count(struct kgd_dev *dst, struct kgd_dev *s
 	})
 
 /* GPUVM API */
-int amdgpu_amdkfd_gpuvm_create_process_vm(struct kgd_dev *kgd, u32 pasid,
+int amdgpu_amdkfd_gpuvm_create_process_vm(struct kgd_dev *kgd, unsigned int pasid,
 					void **vm, void **process_info,
 					struct dma_fence **ef);
 int amdgpu_amdkfd_gpuvm_acquire_process_vm(struct kgd_dev *kgd,
-					struct file *filp, u32 pasid,
+					struct file *filp, unsigned int pasid,
 					void **vm, void **process_info,
 					struct dma_fence **ef);
 void amdgpu_amdkfd_gpuvm_destroy_cb(struct amdgpu_device *adev,
@@ -225,7 +218,7 @@ int amdgpu_amdkfd_gpuvm_alloc_memory_of_gpu(
 		void *vm, struct kgd_mem **mem,
 		uint64_t *offset, uint32_t flags);
 int amdgpu_amdkfd_gpuvm_free_memory_of_gpu(
-		struct kgd_dev *kgd, struct kgd_mem *mem, uint64_t *size);
+		struct kgd_dev *kgd, struct kgd_mem *mem);
 int amdgpu_amdkfd_gpuvm_map_memory_to_gpu(
 		struct kgd_dev *kgd, struct kgd_mem *mem, void *vm);
 int amdgpu_amdkfd_gpuvm_unmap_memory_from_gpu(
@@ -271,6 +264,5 @@ int kgd2kfd_resume_mm(struct mm_struct *mm);
 int kgd2kfd_schedule_evict_and_restore_process(struct mm_struct *mm,
 					       struct dma_fence *fence);
 void kgd2kfd_set_sram_ecc_flag(struct kfd_dev *kfd);
-void kgd2kfd_smi_event_throttle(struct kfd_dev *kfd, uint32_t throttle_bitmask);
 
 #endif /* AMDGPU_AMDKFD_H_INCLUDED */

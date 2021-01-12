@@ -4,7 +4,7 @@
  * and monitor. Users can read all ADC inputs along with their labels
  * using the sysfs nodes.
  *
- * Copyright (c) 2014 Echo360 https://www.echo360.com
+ * Copyright (c) 2014 Echo360 http://www.echo360.com
  * Scott Kanowitz <skanowitz@echo360.com> <scott.kanowitz@gmail.com>
  */
 
@@ -297,7 +297,8 @@ static struct attribute *powr1220_attrs[] = {
 
 ATTRIBUTE_GROUPS(powr1220);
 
-static int powr1220_probe(struct i2c_client *client)
+static int powr1220_probe(struct i2c_client *client,
+		const struct i2c_device_id *id)
 {
 	struct powr1220_data *data;
 	struct device *hwmon_dev;
@@ -330,7 +331,7 @@ static struct i2c_driver powr1220_driver = {
 	.driver = {
 		.name	= "powr1220",
 	},
-	.probe_new	= powr1220_probe,
+	.probe		= powr1220_probe,
 	.id_table	= powr1220_ids,
 };
 

@@ -693,13 +693,13 @@ static int __init com90xx_setup(char *s)
 	switch (ints[0]) {
 	default:		/* ERROR */
 		pr_err("Too many arguments\n");
-		fallthrough;
+		/* Fall through */
 	case 3:		/* Mem address */
 		shmem = ints[3];
-		fallthrough;
+		/* Fall through */
 	case 2:		/* IRQ */
 		irq = ints[2];
-		fallthrough;
+		/* Fall through */
 	case 1:		/* IO address */
 		io = ints[1];
 	}

@@ -6,7 +6,6 @@
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-#define dev_fmt pr_fmt
 
 #include <linux/kernel.h>
 #include <linux/pci.h>
@@ -68,39 +67,53 @@ static int command_write(struct pci_dev *dev, int offset, u16 value, void *data)
 
 	dev_data = pci_get_drvdata(dev);
 	if (!pci_is_enabled(dev) && is_enable_cmd(value)) {
-		dev_dbg(&dev->dev, "enable\n");
+		if (unlikely(verbose_request))
+			printk(KERN_DEBUG DRV_NAME ": %s: enable\n",
+			       pci_name(dev));
 		err = pci_enable_device(dev);
 		if (err)
 			return err;
 		if (dev_data)
 			dev_data->enable_intx = 1;
 	} else if (pci_is_enabled(dev) && !is_enable_cmd(value)) {
-		dev_dbg(&dev->dev, "disable\n");
+		if (unlikely(verbose_request))
+			printk(KERN_DEBUG DRV_NAME ": %s: disable\n",
+			       pci_name(dev));
 		pci_disable_device(dev);
 		if (dev_data)
 			dev_data->enable_intx = 0;
 	}
 
 	if (!dev->is_busmaster && is_master_cmd(value)) {
-		dev_dbg(&dev->dev, "set bus master\n");
+		if (unlikely(verbose_request))
+			printk(KERN_DEBUG DRV_NAME ": %s: set bus master\n",
+			       pci_name(dev));
 		pci_set_master(dev);
 	} else if (dev->is_busmaster && !is_master_cmd(value)) {
-		dev_dbg(&dev->dev, "clear bus master\n");
+		if (unlikely(verbose_request))
+			printk(KERN_DEBUG DRV_NAME ": %s: clear bus master\n",
+			       pci_name(dev));
 		pci_clear_master(dev);
 	}
 
 	if (!(cmd->val & PCI_COMMAND_INVALIDATE) &&
 	    (value & PCI_COMMAND_INVALIDATE)) {
-		dev_dbg(&dev->dev, "enable memory-write-invalidate\n");
+		if (unlikely(verbose_request))
+			printk(KERN_DEBUG
+			       DRV_NAME ": %s: enable memory-write-invalidate\n",
+			       pci_name(dev));
 		err = pci_set_mwi(dev);
 		if (err) {
-			dev_warn(&dev->dev, "cannot enable memory-write-invalidate (%d)\n",
-				err);
+			pr_warn("%s: cannot enable memory-write-invalidate (%d)\n",
+				pci_name(dev), err);
 			value &= ~PCI_COMMAND_INVALIDATE;
 		}
 	} else if ((cmd->val & PCI_COMMAND_INVALIDATE) &&
 		   !(value & PCI_COMMAND_INVALIDATE)) {
-		dev_dbg(&dev->dev, "disable memory-write-invalidate\n");
+		if (unlikely(verbose_request))
+			printk(KERN_DEBUG
+			       DRV_NAME ": %s: disable memory-write-invalidate\n",
+			       pci_name(dev));
 		pci_clear_mwi(dev);
 	}
 
@@ -144,7 +157,8 @@ static int rom_write(struct pci_dev *dev, int offset, u32 value, void *data)
 	struct pci_bar_info *bar = data;
 
 	if (unlikely(!bar)) {
-		dev_warn(&dev->dev, "driver data not found\n");
+		pr_warn(DRV_NAME ": driver data not found for %s\n",
+		       pci_name(dev));
 		return XEN_PCI_ERR_op_failed;
 	}
 
@@ -180,7 +194,8 @@ static int bar_write(struct pci_dev *dev, int offset, u32 value, void *data)
 	u32 mask;
 
 	if (unlikely(!bar)) {
-		dev_warn(&dev->dev, "driver data not found\n");
+		pr_warn(DRV_NAME ": driver data not found for %s\n",
+		       pci_name(dev));
 		return XEN_PCI_ERR_op_failed;
 	}
 
@@ -213,7 +228,8 @@ static int bar_read(struct pci_dev *dev, int offset, u32 * value, void *data)
 	struct pci_bar_info *bar = data;
 
 	if (unlikely(!bar)) {
-		dev_warn(&dev->dev, "driver data not found\n");
+		pr_warn(DRV_NAME ": driver data not found for %s\n",
+		       pci_name(dev));
 		return XEN_PCI_ERR_op_failed;
 	}
 
@@ -417,8 +433,8 @@ int xen_pcibk_config_header_add_fields(struct pci_dev *dev)
 
 	default:
 		err = -EINVAL;
-		dev_err(&dev->dev, "Unsupported header type %d!\n",
-			dev->hdr_type);
+		pr_err("%s: Unsupported header type %d!\n",
+		       pci_name(dev), dev->hdr_type);
 		break;
 	}
 

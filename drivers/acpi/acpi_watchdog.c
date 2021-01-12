@@ -73,7 +73,6 @@ static const struct acpi_table_wdat *acpi_watchdog_get_wdat(void)
 	}
 
 	if (acpi_watchdog_uses_rtc(wdat)) {
-		acpi_put_table((struct acpi_table_header *)wdat);
 		pr_info("Skipping WDAT on this system because it uses RTC SRAM\n");
 		return NULL;
 	}
@@ -118,12 +117,12 @@ void __init acpi_watchdog_init(void)
 
 	/* Watchdog disabled by BIOS */
 	if (!(wdat->flags & ACPI_WDAT_ENABLED))
-		goto fail_put_wdat;
+		return;
 
 	/* Skip legacy PCI WDT devices */
 	if (wdat->pci_segment != 0xff || wdat->pci_bus != 0xff ||
 	    wdat->pci_device != 0xff || wdat->pci_function != 0xff)
-		goto fail_put_wdat;
+		return;
 
 	INIT_LIST_HEAD(&resource_list);
 
@@ -151,7 +150,11 @@ void __init acpi_watchdog_init(void)
 		found = false;
 		resource_list_for_each_entry(rentry, &resource_list) {
 			if (rentry->res->flags == res.flags &&
-			    resource_union(rentry->res, &res, rentry->res)) {
+			    resource_overlaps(rentry->res, &res)) {
+				if (res.start < rentry->res->start)
+					rentry->res->start = res.start;
+				if (res.end > rentry->res->end)
+					rentry->res->end = res.end;
 				found = true;
 				break;
 			}
@@ -185,6 +188,4 @@ void __init acpi_watchdog_init(void)
 
 fail_free_resource_list:
 	resource_list_free(&resource_list);
-fail_put_wdat:
-	acpi_put_table((struct acpi_table_header *)wdat);
 }

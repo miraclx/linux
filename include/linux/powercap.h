@@ -44,18 +44,19 @@ struct powercap_control_type_ops {
 };
 
 /**
- * struct powercap_control_type - Defines a powercap control_type
+ * struct powercap_control_type- Defines a powercap control_type
+ * @name:		name of control_type
  * @dev:		device for this control_type
  * @idr:		idr to have unique id for its child
- * @nr_zones:		counter for number of zones of this type
+ * @root_node:		Root holding power zones for this control_type
  * @ops:		Pointer to callback struct
- * @lock:		mutex for control type
+ * @node_lock:		mutex for control type
  * @allocated:		This is possible that client owns the memory
  *			used by this structure. In this case
  *			this flag is set to false by framework to
  *			prevent deallocation during release process.
  *			Otherwise this flag is set to true.
- * @node:		linked-list node
+ * @ctrl_inst:		link to the control_type list
  *
  * Defines powercap control_type. This acts as a container for power
  * zones, which use same method to control power. E.g. RAPL, RAPL-PCI etc.
@@ -128,7 +129,7 @@ struct powercap_zone_ops {
  *			this flag is set to false by framework to
  *			prevent deallocation during release process.
  *			Otherwise this flag is set to true.
- * @constraints:	List of constraints for this zone.
+ * @constraint_ptr:	List of constraints for this zone.
  *
  * This defines a power zone instance. The fields of this structure are
  * private, and should not be used by client drivers.

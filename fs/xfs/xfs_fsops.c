@@ -28,7 +28,7 @@ xfs_growfs_data_private(
 	xfs_mount_t		*mp,		/* mount point for filesystem */
 	xfs_growfs_data_t	*in)		/* growfs data input struct */
 {
-	struct xfs_buf		*bp;
+	xfs_buf_t		*bp;
 	int			error;
 	xfs_agnumber_t		nagcount;
 	xfs_agnumber_t		nagimax = 0;
@@ -433,10 +433,13 @@ xfs_fs_goingdown(
 {
 	switch (inflags) {
 	case XFS_FSOP_GOING_FLAGS_DEFAULT: {
-		if (!freeze_bdev(mp->m_super->s_bdev)) {
+		struct super_block *sb = freeze_bdev(mp->m_super->s_bdev);
+
+		if (sb && !IS_ERR(sb)) {
 			xfs_force_shutdown(mp, SHUTDOWN_FORCE_UMOUNT);
-			thaw_bdev(mp->m_super->s_bdev);
+			thaw_bdev(sb->s_bdev, sb);
 		}
+
 		break;
 	}
 	case XFS_FSOP_GOING_FLAGS_LOGFLUSH:
@@ -501,7 +504,10 @@ xfs_do_force_shutdown(
 	} else if (logerror) {
 		xfs_alert_tag(mp, XFS_PTAG_SHUTDOWN_LOGERROR,
 			"Log I/O Error Detected. Shutting down filesystem");
-	} else {
+	} else if (flags & SHUTDOWN_DEVICE_REQ) {
+		xfs_alert_tag(mp, XFS_PTAG_SHUTDOWN_IOERROR,
+			"All device paths lost. Shutting down filesystem");
+	} else if (!(flags & SHUTDOWN_REMOTE_REQ)) {
 		xfs_alert_tag(mp, XFS_PTAG_SHUTDOWN_IOERROR,
 			"I/O Error Detected. Shutting down filesystem");
 	}

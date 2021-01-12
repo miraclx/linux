@@ -45,9 +45,6 @@ static const guid_t prp_guids[] = {
 	/* Thunderbolt GUID for WAKE_SUPPORTED: 6c501103-c189-4296-ba72-9bf5a26ebe5d */
 	GUID_INIT(0x6c501103, 0xc189, 0x4296,
 		  0xba, 0x72, 0x9b, 0xf5, 0xa2, 0x6e, 0xbe, 0x5d),
-	/* Storage device needs D3 GUID: 5025030f-842f-4ab4-a561-99a5189762d0 */
-	GUID_INIT(0x5025030f, 0x842f, 0x4ab4,
-		  0xa5, 0x61, 0x99, 0xa5, 0x18, 0x97, 0x62, 0xd0),
 };
 
 /* ACPI _DSD data subnodes GUID: dbb8e3e6-5886-4ba6-8795-1319f52a966b */
@@ -76,7 +73,7 @@ static bool acpi_nondev_subnode_extract(const union acpi_object *desc,
 		return false;
 
 	dn->name = link->package.elements[0].string.pointer;
-	fwnode_init(&dn->fwnode, &acpi_data_fwnode_ops);
+	dn->fwnode.ops = &acpi_data_fwnode_ops;
 	dn->parent = parent;
 	INIT_LIST_HEAD(&dn->data.properties);
 	INIT_LIST_HEAD(&dn->data.subnodes);
@@ -609,7 +606,13 @@ static struct fwnode_handle *
 acpi_fwnode_get_named_child_node(const struct fwnode_handle *fwnode,
 				 const char *childname)
 {
+	char name[ACPI_PATH_SEGMENT_LENGTH];
 	struct fwnode_handle *child;
+	struct acpi_buffer path;
+	acpi_status status;
+
+	path.length = sizeof(name);
+	path.pointer = name;
 
 	fwnode_for_each_child_node(fwnode, child) {
 		if (is_acpi_data_node(child)) {
@@ -618,8 +621,12 @@ acpi_fwnode_get_named_child_node(const struct fwnode_handle *fwnode,
 			continue;
 		}
 
-		if (!strncmp(acpi_device_bid(to_acpi_device_node(child)),
-			     childname, ACPI_NAMESEG_SIZE))
+		status = acpi_get_name(ACPI_HANDLE_FWNODE(child),
+				       ACPI_SINGLE_NAME, &path);
+		if (ACPI_FAILURE(status))
+			break;
+
+		if (!strncmp(name, childname, ACPI_NAMESEG_SIZE))
 			return child;
 	}
 

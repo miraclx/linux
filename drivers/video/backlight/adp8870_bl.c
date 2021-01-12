@@ -399,7 +399,15 @@ static int adp8870_bl_set(struct backlight_device *bl, int brightness)
 
 static int adp8870_bl_update_status(struct backlight_device *bl)
 {
-	return adp8870_bl_set(bl, backlight_get_brightness(bl));
+	int brightness = bl->props.brightness;
+
+	if (bl->props.power != FB_BLANK_UNBLANK)
+		brightness = 0;
+
+	if (bl->props.fb_blank != FB_BLANK_UNBLANK)
+		brightness = 0;
+
+	return adp8870_bl_set(bl, brightness);
 }
 
 static int adp8870_bl_get_brightness(struct backlight_device *bl)

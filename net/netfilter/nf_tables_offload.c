@@ -28,23 +28,6 @@ static struct nft_flow_rule *nft_flow_rule_alloc(int num_actions)
 	return flow;
 }
 
-void nft_flow_rule_set_addr_type(struct nft_flow_rule *flow,
-				 enum flow_dissector_key_id addr_type)
-{
-	struct nft_flow_match *match = &flow->match;
-	struct nft_flow_key *mask = &match->mask;
-	struct nft_flow_key *key = &match->key;
-
-	if (match->dissector.used_keys & BIT(FLOW_DISSECTOR_KEY_CONTROL))
-		return;
-
-	key->control.addr_type = addr_type;
-	mask->control.addr_type = 0xffff;
-	match->dissector.used_keys |= BIT(FLOW_DISSECTOR_KEY_CONTROL);
-	match->dissector.offset[FLOW_DISSECTOR_KEY_CONTROL] =
-		offsetof(struct nft_flow_key, control);
-}
-
 struct nft_flow_rule *nft_flow_rule_create(struct net *net,
 					   const struct nft_rule *rule)
 {
@@ -54,7 +37,7 @@ struct nft_flow_rule *nft_flow_rule_create(struct net *net,
 	struct nft_expr *expr;
 
 	expr = nft_expr_first(rule);
-	while (nft_expr_more(rule, expr)) {
+	while (expr->ops && expr != nft_expr_last(rule)) {
 		if (expr->ops->offload_flags & NFT_OFFLOAD_F_ACTION)
 			num_actions++;
 
@@ -78,7 +61,7 @@ struct nft_flow_rule *nft_flow_rule_create(struct net *net,
 	ctx->net = net;
 	ctx->dep.type = NFT_OFFLOAD_DEP_UNSPEC;
 
-	while (nft_expr_more(rule, expr)) {
+	while (expr->ops && expr != nft_expr_last(rule)) {
 		if (!expr->ops->offload) {
 			err = -EOPNOTSUPP;
 			goto err_out;
@@ -302,43 +285,43 @@ static int nft_block_offload_cmd(struct nft_base_chain *chain,
 	return nft_block_setup(chain, &bo, cmd);
 }
 
-static void nft_indr_block_cleanup(struct flow_block_cb *block_cb)
+static void nft_indr_block_ing_cmd(struct net_device *dev,
+				   struct nft_base_chain *chain,
+				   flow_indr_block_bind_cb_t *cb,
+				   void *cb_priv,
+				   enum flow_block_command cmd)
 {
-	struct nft_base_chain *basechain = block_cb->indr.data;
-	struct net_device *dev = block_cb->indr.dev;
 	struct netlink_ext_ack extack = {};
-	struct net *net = dev_net(dev);
 	struct flow_block_offload bo;
 
-	nft_flow_block_offload_init(&bo, dev_net(dev), FLOW_BLOCK_UNBIND,
-				    basechain, &extack);
-	mutex_lock(&net->nft.commit_mutex);
-	list_del(&block_cb->driver_list);
-	list_move(&block_cb->list, &bo.cb_list);
-	nft_flow_offload_unbind(&bo, basechain);
-	mutex_unlock(&net->nft.commit_mutex);
+	if (!chain)
+		return;
+
+	nft_flow_block_offload_init(&bo, dev_net(dev), cmd, chain, &extack);
+
+	cb(dev, cb_priv, TC_SETUP_BLOCK, &bo);
+
+	nft_block_setup(chain, &bo, cmd);
 }
 
-static int nft_indr_block_offload_cmd(struct nft_base_chain *basechain,
+static int nft_indr_block_offload_cmd(struct nft_base_chain *chain,
 				      struct net_device *dev,
 				      enum flow_block_command cmd)
 {
 	struct netlink_ext_ack extack = {};
 	struct flow_block_offload bo;
-	int err;
 
-	nft_flow_block_offload_init(&bo, dev_net(dev), cmd, basechain, &extack);
+	nft_flow_block_offload_init(&bo, dev_net(dev), cmd, chain, &extack);
 
-	err = flow_indr_dev_setup_offload(dev, NULL, TC_SETUP_BLOCK, basechain, &bo,
-					  nft_indr_block_cleanup);
-	if (err < 0)
-		return err;
+	flow_indr_block_call(dev, &bo, cmd, TC_SETUP_BLOCK);
 
 	if (list_empty(&bo.cb_list))
 		return -EOPNOTSUPP;
 
-	return nft_block_setup(basechain, &bo, cmd);
+	return nft_block_setup(chain, &bo, cmd);
 }
+
+#define FLOW_SETUP_BLOCK TC_SETUP_BLOCK
 
 static int nft_chain_offload_cmd(struct nft_base_chain *basechain,
 				 struct net_device *dev,
@@ -572,6 +555,24 @@ static struct nft_chain *__nft_offload_get_chain(struct net_device *dev)
 	return NULL;
 }
 
+static void nft_indr_block_cb(struct net_device *dev,
+			      flow_indr_block_bind_cb_t *cb, void *cb_priv,
+			      enum flow_block_command cmd)
+{
+	struct net *net = dev_net(dev);
+	struct nft_chain *chain;
+
+	mutex_lock(&net->nft.commit_mutex);
+	chain = __nft_offload_get_chain(dev);
+	if (chain && chain->flags & NFT_CHAIN_HW_OFFLOAD) {
+		struct nft_base_chain *basechain;
+
+		basechain = nft_base_chain(chain);
+		nft_indr_block_ing_cmd(dev, basechain, cb, cb_priv, cmd);
+	}
+	mutex_unlock(&net->nft.commit_mutex);
+}
+
 static int nft_offload_netdev_event(struct notifier_block *this,
 				    unsigned long event, void *ptr)
 {
@@ -593,16 +594,30 @@ static int nft_offload_netdev_event(struct notifier_block *this,
 	return NOTIFY_DONE;
 }
 
+static struct flow_indr_block_entry block_ing_entry = {
+	.cb	= nft_indr_block_cb,
+	.list	= LIST_HEAD_INIT(block_ing_entry.list),
+};
+
 static struct notifier_block nft_offload_netdev_notifier = {
 	.notifier_call	= nft_offload_netdev_event,
 };
 
 int nft_offload_init(void)
 {
-	return register_netdevice_notifier(&nft_offload_netdev_notifier);
+	int err;
+
+	err = register_netdevice_notifier(&nft_offload_netdev_notifier);
+	if (err < 0)
+		return err;
+
+	flow_indr_add_block_cb(&block_ing_entry);
+
+	return 0;
 }
 
 void nft_offload_exit(void)
 {
+	flow_indr_del_block_cb(&block_ing_entry);
 	unregister_netdevice_notifier(&nft_offload_netdev_notifier);
 }

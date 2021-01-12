@@ -223,23 +223,24 @@ static irqreturn_t k3_dma_int_handler(int irq, void *dev_id)
 		i = __ffs(stat);
 		stat &= ~BIT(i);
 		if (likely(tc1 & BIT(i)) || (tc2 & BIT(i))) {
+			unsigned long flags;
 
 			p = &d->phy[i];
 			c = p->vchan;
 			if (c && (tc1 & BIT(i))) {
-				spin_lock(&c->vc.lock);
+				spin_lock_irqsave(&c->vc.lock, flags);
 				if (p->ds_run != NULL) {
 					vchan_cookie_complete(&p->ds_run->vd);
 					p->ds_done = p->ds_run;
 					p->ds_run = NULL;
 				}
-				spin_unlock(&c->vc.lock);
+				spin_unlock_irqrestore(&c->vc.lock, flags);
 			}
 			if (c && (tc2 & BIT(i))) {
-				spin_lock(&c->vc.lock);
+				spin_lock_irqsave(&c->vc.lock, flags);
 				if (p->ds_run != NULL)
 					vchan_cyclic_callback(&p->ds_run->vd);
-				spin_unlock(&c->vc.lock);
+				spin_unlock_irqrestore(&c->vc.lock, flags);
 			}
 			irq_chan |= BIT(i);
 		}
@@ -296,9 +297,9 @@ static int k3_dma_start_txd(struct k3_dma_chan *c)
 	return -EAGAIN;
 }
 
-static void k3_dma_tasklet(struct tasklet_struct *t)
+static void k3_dma_tasklet(unsigned long arg)
 {
-	struct k3_dma_dev *d = from_tasklet(d, t, task);
+	struct k3_dma_dev *d = (struct k3_dma_dev *)arg;
 	struct k3_dma_phy *p;
 	struct k3_dma_chan *c, *cn;
 	unsigned pch, pch_alloc = 0;
@@ -961,7 +962,7 @@ static int k3_dma_probe(struct platform_device *op)
 
 	spin_lock_init(&d->lock);
 	INIT_LIST_HEAD(&d->chan_pending);
-	tasklet_setup(&d->task, k3_dma_tasklet);
+	tasklet_init(&d->task, k3_dma_tasklet, (unsigned long)d);
 	platform_set_drvdata(op, d);
 	dev_info(&op->dev, "initialized\n");
 

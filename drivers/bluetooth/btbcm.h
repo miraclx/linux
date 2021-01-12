@@ -62,8 +62,9 @@ int btbcm_write_pcm_int_params(struct hci_dev *hdev,
 int btbcm_setup_patchram(struct hci_dev *hdev);
 int btbcm_setup_apple(struct hci_dev *hdev);
 
-int btbcm_initialize(struct hci_dev *hdev, bool *fw_load_done);
-int btbcm_finalize(struct hci_dev *hdev, bool *fw_load_done);
+int btbcm_initialize(struct hci_dev *hdev, char *fw_name, size_t len,
+		     bool reinit);
+int btbcm_finalize(struct hci_dev *hdev);
 
 #else
 
@@ -104,12 +105,13 @@ static inline int btbcm_setup_apple(struct hci_dev *hdev)
 	return 0;
 }
 
-static inline int btbcm_initialize(struct hci_dev *hdev, bool *fw_load_done)
+static inline int btbcm_initialize(struct hci_dev *hdev, char *fw_name,
+				   size_t len, bool reinit)
 {
 	return 0;
 }
 
-static inline int btbcm_finalize(struct hci_dev *hdev, bool *fw_load_done)
+static inline int btbcm_finalize(struct hci_dev *hdev)
 {
 	return 0;
 }

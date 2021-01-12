@@ -1144,6 +1144,7 @@ static int inno_hdmi_phy_probe(struct platform_device *pdev)
 {
 	struct inno_hdmi_phy *inno;
 	struct phy_provider *phy_provider;
+	struct resource *res;
 	void __iomem *regs;
 	int ret;
 
@@ -1157,7 +1158,8 @@ static int inno_hdmi_phy_probe(struct platform_device *pdev)
 	if (!inno->plat_data || !inno->plat_data->ops)
 		return -EINVAL;
 
-	regs = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	regs = devm_ioremap_resource(inno->dev, res);
 	if (IS_ERR(regs))
 		return PTR_ERR(regs);
 

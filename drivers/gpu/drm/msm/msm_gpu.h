@@ -7,16 +7,13 @@
 #ifndef __MSM_GPU_H__
 #define __MSM_GPU_H__
 
-#include <linux/adreno-smmu-priv.h>
 #include <linux/clk.h>
 #include <linux/interconnect.h>
-#include <linux/pm_opp.h>
 #include <linux/regulator/consumer.h>
 
 #include "msm_drv.h"
 #include "msm_fence.h"
 #include "msm_ringbuffer.h"
-#include "msm_gem.h"
 
 struct msm_gem_submit;
 struct msm_gpu_perfcntr;
@@ -24,6 +21,8 @@ struct msm_gpu_state;
 
 struct msm_gpu_config {
 	const char *ioname;
+	uint64_t va_start;
+	uint64_t va_end;
 	unsigned int nr_rings;
 };
 
@@ -46,7 +45,8 @@ struct msm_gpu_funcs {
 	int (*hw_init)(struct msm_gpu *gpu);
 	int (*pm_suspend)(struct msm_gpu *gpu);
 	int (*pm_resume)(struct msm_gpu *gpu);
-	void (*submit)(struct msm_gpu *gpu, struct msm_gem_submit *submit);
+	void (*submit)(struct msm_gpu *gpu, struct msm_gem_submit *submit,
+			struct msm_file_private *ctx);
 	void (*flush)(struct msm_gpu *gpu, struct msm_ringbuffer *ring);
 	irqreturn_t (*irq)(struct msm_gpu *irq);
 	struct msm_ringbuffer *(*active_ring)(struct msm_gpu *gpu);
@@ -57,18 +57,13 @@ struct msm_gpu_funcs {
 	void (*show)(struct msm_gpu *gpu, struct msm_gpu_state *state,
 			struct drm_printer *p);
 	/* for generation specific debugfs: */
-	void (*debugfs_init)(struct msm_gpu *gpu, struct drm_minor *minor);
+	int (*debugfs_init)(struct msm_gpu *gpu, struct drm_minor *minor);
 #endif
 	unsigned long (*gpu_busy)(struct msm_gpu *gpu);
 	struct msm_gpu_state *(*gpu_state_get)(struct msm_gpu *gpu);
 	int (*gpu_state_put)(struct msm_gpu_state *state);
 	unsigned long (*gpu_get_freq)(struct msm_gpu *gpu);
-	void (*gpu_set_freq)(struct msm_gpu *gpu, struct dev_pm_opp *opp);
-	struct msm_gem_address_space *(*create_address_space)
-		(struct msm_gpu *gpu, struct platform_device *pdev);
-	struct msm_gem_address_space *(*create_private_address_space)
-		(struct msm_gpu *gpu);
-	uint32_t (*get_rptr)(struct msm_gpu *gpu, struct msm_ringbuffer *ring);
+	void (*gpu_set_freq)(struct msm_gpu *gpu, unsigned long freq);
 };
 
 struct msm_gpu {
@@ -76,8 +71,6 @@ struct msm_gpu {
 	struct drm_device *dev;
 	struct platform_device *pdev;
 	const struct msm_gpu_funcs *funcs;
-
-	struct adreno_smmu_priv adreno_smmu;
 
 	/* performance counters (hw & sw): */
 	spinlock_t perf_lock;
@@ -94,10 +87,7 @@ struct msm_gpu {
 	struct msm_ringbuffer *rb[MSM_GPU_MAX_RINGS];
 	int nr_rings;
 
-	/*
-	 * List of GEM active objects on this gpu.  Protected by
-	 * msm_drm_private::mm_lock
-	 */
+	/* list of GEM active objects: */
 	struct list_head active_list;
 
 	/* does gpu need hw_init? */
@@ -105,6 +95,9 @@ struct msm_gpu {
 
 	/* number of GPU hangs (for all contexts) */
 	int global_faults;
+
+	/* worker for handling active-list retiring: */
+	struct work_struct retire_work;
 
 	void __iomem *mmio;
 	int irq;
@@ -134,15 +127,7 @@ struct msm_gpu {
 #define DRM_MSM_HANGCHECK_PERIOD 500 /* in ms */
 #define DRM_MSM_HANGCHECK_JIFFIES msecs_to_jiffies(DRM_MSM_HANGCHECK_PERIOD)
 	struct timer_list hangcheck_timer;
-
-	/* work for handling GPU recovery: */
-	struct kthread_work recover_work;
-
-	/* work for handling active-list retiring: */
-	struct kthread_work retire_work;
-
-	/* worker for retire/recover: */
-	struct kthread_worker *worker;
+	struct work_struct recover_work;
 
 	struct drm_gem_object *memptrs_bo;
 
@@ -153,17 +138,7 @@ struct msm_gpu {
 	} devfreq;
 
 	struct msm_gpu_state *crashstate;
-	/* True if the hardware supports expanded apriv (a650 and newer) */
-	bool hw_apriv;
-
-	struct thermal_cooling_device *cooling;
 };
-
-static inline struct msm_gpu *dev_to_gpu(struct device *dev)
-{
-	struct adreno_smmu_priv *adreno_smmu = dev_get_drvdata(dev);
-	return container_of(adreno_smmu, struct msm_gpu, adreno_smmu);
-}
 
 /* It turns out that all targets use the same ringbuffer size */
 #define MSM_GPU_RINGBUFFER_SZ SZ_32K
@@ -205,7 +180,6 @@ struct msm_gpu_submitqueue {
 	u32 flags;
 	u32 prio;
 	int faults;
-	struct msm_file_private *ctx;
 	struct list_head node;
 	struct kref ref;
 };
@@ -256,7 +230,10 @@ static inline u32 gpu_read(struct msm_gpu *gpu, u32 reg)
 
 static inline void gpu_rmw(struct msm_gpu *gpu, u32 reg, u32 mask, u32 or)
 {
-	msm_rmw(gpu->mmio + (reg << 2), mask, or);
+	uint32_t val = gpu_read(gpu, reg);
+
+	val &= ~mask;
+	gpu_write(gpu, reg, val | or);
 }
 
 static inline u64 gpu_read64(struct msm_gpu *gpu, u32 lo, u32 hi)
@@ -302,14 +279,12 @@ int msm_gpu_perfcntr_sample(struct msm_gpu *gpu, uint32_t *activetime,
 		uint32_t *totaltime, uint32_t ncntrs, uint32_t *cntrs);
 
 void msm_gpu_retire(struct msm_gpu *gpu);
-void msm_gpu_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit);
+void msm_gpu_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit,
+		struct msm_file_private *ctx);
 
 int msm_gpu_init(struct drm_device *drm, struct platform_device *pdev,
 		struct msm_gpu *gpu, const struct msm_gpu_funcs *funcs,
 		const char *name, struct msm_gpu_config *config);
-
-struct msm_gem_address_space *
-msm_gpu_create_private_address_space(struct msm_gpu *gpu, struct task_struct *task);
 
 void msm_gpu_cleanup(struct msm_gpu *gpu);
 
@@ -350,13 +325,5 @@ static inline void msm_gpu_crashstate_put(struct msm_gpu *gpu)
 
 	mutex_unlock(&gpu->dev->struct_mutex);
 }
-
-/*
- * Simple macro to semi-cleanly add the MAP_PRIV flag for targets that can
- * support expanded privileges
- */
-#define check_apriv(gpu, flags) \
-	(((gpu)->hw_apriv ? MSM_BO_MAP_PRIV : 0) | (flags))
-
 
 #endif /* __MSM_GPU_H__ */

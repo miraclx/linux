@@ -30,7 +30,6 @@
 
 #define DM_VERITY_OPT_LOGGING		"ignore_corruption"
 #define DM_VERITY_OPT_RESTART		"restart_on_corruption"
-#define DM_VERITY_OPT_PANIC		"panic_on_corruption"
 #define DM_VERITY_OPT_IGN_ZEROES	"ignore_zero_blocks"
 #define DM_VERITY_OPT_AT_MOST_ONCE	"check_at_most_once"
 
@@ -254,9 +253,6 @@ out:
 
 	if (v->mode == DM_VERITY_MODE_RESTART)
 		kernel_restart("dm-verity device corrupted");
-
-	if (v->mode == DM_VERITY_MODE_PANIC)
-		panic("dm-verity device corrupted");
 
 	return 1;
 }
@@ -538,15 +534,6 @@ static int verity_verify_io(struct dm_verity_io *io)
 }
 
 /*
- * Skip verity work in response to I/O error when system is shutting down.
- */
-static inline bool verity_is_system_shutting_down(void)
-{
-	return system_state == SYSTEM_HALT || system_state == SYSTEM_POWER_OFF
-		|| system_state == SYSTEM_RESTART;
-}
-
-/*
  * End one "io" structure with a given error.
  */
 static void verity_finish_io(struct dm_verity_io *io, blk_status_t status)
@@ -573,8 +560,7 @@ static void verity_end_io(struct bio *bio)
 {
 	struct dm_verity_io *io = bio->bi_private;
 
-	if (bio->bi_status &&
-	    (!verity_fec_is_enabled(io->v) || verity_is_system_shutting_down())) {
+	if (bio->bi_status && !verity_fec_is_enabled(io->v)) {
 		verity_finish_io(io, bio->bi_status);
 		return;
 	}
@@ -695,7 +681,7 @@ static int verity_map(struct dm_target *ti, struct bio *bio)
 
 	verity_submit_prefetch(v, io);
 
-	submit_bio_noacct(bio);
+	generic_make_request(bio);
 
 	return DM_MAPIO_SUBMITTED;
 }
@@ -755,9 +741,6 @@ static void verity_status(struct dm_target *ti, status_type_t type,
 				break;
 			case DM_VERITY_MODE_RESTART:
 				DMEMIT(DM_VERITY_OPT_RESTART);
-				break;
-			case DM_VERITY_MODE_PANIC:
-				DMEMIT(DM_VERITY_OPT_PANIC);
 				break;
 			default:
 				BUG();
@@ -922,10 +905,6 @@ static int verity_parse_opt_args(struct dm_arg_set *as, struct dm_verity *v,
 
 		} else if (!strcasecmp(arg_name, DM_VERITY_OPT_RESTART)) {
 			v->mode = DM_VERITY_MODE_RESTART;
-			continue;
-
-		} else if (!strcasecmp(arg_name, DM_VERITY_OPT_PANIC)) {
-			v->mode = DM_VERITY_MODE_PANIC;
 			continue;
 
 		} else if (!strcasecmp(arg_name, DM_VERITY_OPT_IGN_ZEROES)) {
@@ -1242,7 +1221,7 @@ bad:
 
 static struct target_type verity_target = {
 	.name		= "verity",
-	.version	= {1, 7, 0},
+	.version	= {1, 6, 0},
 	.module		= THIS_MODULE,
 	.ctr		= verity_ctr,
 	.dtr		= verity_dtr,

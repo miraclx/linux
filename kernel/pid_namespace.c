@@ -102,7 +102,7 @@ static struct pid_namespace *create_pid_namespace(struct user_namespace *user_ns
 		goto out_free_idr;
 	ns->ns.ops = &pidns_operations;
 
-	refcount_set(&ns->ns.count, 1);
+	kref_init(&ns->kref);
 	ns->level = level;
 	ns->parent = get_pid_ns(parent_pid_ns);
 	ns->user_ns = get_user_ns(user_ns);
@@ -148,15 +148,22 @@ struct pid_namespace *copy_pid_ns(unsigned long flags,
 	return create_pid_namespace(user_ns, old_ns);
 }
 
+static void free_pid_ns(struct kref *kref)
+{
+	struct pid_namespace *ns;
+
+	ns = container_of(kref, struct pid_namespace, kref);
+	destroy_pid_namespace(ns);
+}
+
 void put_pid_ns(struct pid_namespace *ns)
 {
 	struct pid_namespace *parent;
 
 	while (ns != &init_pid_ns) {
 		parent = ns->parent;
-		if (!refcount_dec_and_test(&ns->ns.count))
+		if (!kref_put(&ns->kref, free_pid_ns))
 			break;
-		destroy_pid_namespace(ns);
 		ns = parent;
 	}
 }
@@ -226,7 +233,7 @@ void zap_pid_ns_processes(struct pid_namespace *pid_ns)
 	 * to pid_ns->child_reaper.  Thus pidns->child_reaper needs to
 	 * stay valid until they all go away.
 	 *
-	 * The code relies on the pid_ns->child_reaper ignoring
+	 * The code relies on the the pid_ns->child_reaper ignoring
 	 * SIGCHILD to cause those EXIT_ZOMBIE processes to be
 	 * autoreaped if reparented.
 	 *
@@ -256,13 +263,13 @@ void zap_pid_ns_processes(struct pid_namespace *pid_ns)
 
 #ifdef CONFIG_CHECKPOINT_RESTORE
 static int pid_ns_ctl_handler(struct ctl_table *table, int write,
-		void *buffer, size_t *lenp, loff_t *ppos)
+		void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct pid_namespace *pid_ns = task_active_pid_ns(current);
 	struct ctl_table tmp = *table;
 	int ret, next;
 
-	if (write && !checkpoint_restore_ns_capable(pid_ns->user_ns))
+	if (write && !ns_capable(pid_ns->user_ns, CAP_SYS_ADMIN))
 		return -EPERM;
 
 	/*
@@ -371,14 +378,13 @@ static void pidns_put(struct ns_common *ns)
 	put_pid_ns(to_pid_ns(ns));
 }
 
-static int pidns_install(struct nsset *nsset, struct ns_common *ns)
+static int pidns_install(struct nsproxy *nsproxy, struct ns_common *ns)
 {
-	struct nsproxy *nsproxy = nsset->nsproxy;
 	struct pid_namespace *active = task_active_pid_ns(current);
 	struct pid_namespace *ancestor, *new = to_pid_ns(ns);
 
 	if (!ns_capable(new->user_ns, CAP_SYS_ADMIN) ||
-	    !ns_capable(nsset->cred->user_ns, CAP_SYS_ADMIN))
+	    !ns_capable(current_user_ns(), CAP_SYS_ADMIN))
 		return -EPERM;
 
 	/*

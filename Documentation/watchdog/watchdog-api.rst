@@ -168,7 +168,7 @@ the fields returned in the ident struct are:
 
 the options field can have the following bits set, and describes what
 kind of information that the GET_STATUS and GET_BOOT_STATUS ioctls can
-return.
+return.   [FIXME -- Is this correct?]
 
 	================	=========================
 	WDIOF_OVERHEAT		Reset due to CPU overheat

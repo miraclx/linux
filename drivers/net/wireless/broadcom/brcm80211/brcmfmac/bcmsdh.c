@@ -43,9 +43,7 @@
 
 #define SDIO_FUNC1_BLOCKSIZE		64
 #define SDIO_FUNC2_BLOCKSIZE		512
-#define SDIO_4373_FUNC2_BLOCKSIZE	256
-#define SDIO_435X_FUNC2_BLOCKSIZE	256
-#define SDIO_4329_FUNC2_BLOCKSIZE	128
+#define SDIO_4359_FUNC2_BLOCKSIZE	256
 /* Maximum milliseconds to wait for F2 to come up */
 #define SDIO_WAIT_F2RDY	3000
 
@@ -74,7 +72,7 @@ static irqreturn_t brcmf_sdiod_oob_irqhandler(int irq, void *dev_id)
 		sdiodev->irq_en = false;
 	}
 
-	brcmf_sdio_isr(sdiodev->bus, true);
+	brcmf_sdio_isr(sdiodev->bus);
 
 	return IRQ_HANDLED;
 }
@@ -86,7 +84,7 @@ static void brcmf_sdiod_ib_irqhandler(struct sdio_func *func)
 
 	brcmf_dbg(INTR, "IB intr triggered\n");
 
-	brcmf_sdio_isr(sdiodev->bus, false);
+	brcmf_sdio_isr(sdiodev->bus);
 }
 
 /* dummy handler for SDIO function 2 interrupt */
@@ -367,7 +365,7 @@ static int mmc_submit_one(struct mmc_data *md, struct mmc_request *mr,
  * @func: SDIO function
  * @write: direction flag
  * @addr: dongle memory address as source/destination
- * @pktlist: skb buffer head pointer
+ * @pkt: skb pointer
  *
  * This function takes the respbonsibility as the interface function to MMC
  * stack for block data access. It assumes that the skb passed down by the
@@ -864,7 +862,7 @@ static void brcmf_sdiod_freezer_detach(struct brcmf_sdio_dev *sdiodev)
 }
 #endif /* CONFIG_PM_SLEEP */
 
-int brcmf_sdiod_remove(struct brcmf_sdio_dev *sdiodev)
+static int brcmf_sdiod_remove(struct brcmf_sdio_dev *sdiodev)
 {
 	sdiodev->state = BRCMF_SDIOD_DOWN;
 	if (sdiodev->bus) {
@@ -899,7 +897,7 @@ static void brcmf_sdiod_host_fixup(struct mmc_host *host)
 	host->caps |= MMC_CAP_NONREMOVABLE;
 }
 
-int brcmf_sdiod_probe(struct brcmf_sdio_dev *sdiodev)
+static int brcmf_sdiod_probe(struct brcmf_sdio_dev *sdiodev)
 {
 	int ret = 0;
 	unsigned int f2_blksz = SDIO_FUNC2_BLOCKSIZE;
@@ -912,29 +910,13 @@ int brcmf_sdiod_probe(struct brcmf_sdio_dev *sdiodev)
 		sdio_release_host(sdiodev->func1);
 		goto out;
 	}
-	switch (sdiodev->func2->device) {
-	case SDIO_DEVICE_ID_BROADCOM_CYPRESS_4373:
-		f2_blksz = SDIO_4373_FUNC2_BLOCKSIZE;
-		break;
-	case SDIO_DEVICE_ID_BROADCOM_4359:
-	case SDIO_DEVICE_ID_BROADCOM_4354:
-	case SDIO_DEVICE_ID_BROADCOM_4356:
-		f2_blksz = SDIO_435X_FUNC2_BLOCKSIZE;
-		break;
-	case SDIO_DEVICE_ID_BROADCOM_4329:
-		f2_blksz = SDIO_4329_FUNC2_BLOCKSIZE;
-		break;
-	default:
-		break;
-	}
-
+	if (sdiodev->func2->device == SDIO_DEVICE_ID_BROADCOM_4359)
+		f2_blksz = SDIO_4359_FUNC2_BLOCKSIZE;
 	ret = sdio_set_block_size(sdiodev->func2, f2_blksz);
 	if (ret) {
 		brcmf_err("Failed to set F2 blocksize\n");
 		sdio_release_host(sdiodev->func1);
 		goto out;
-	} else {
-		brcmf_dbg(SDIO, "set F2 blocksize to %d\n", f2_blksz);
 	}
 
 	/* increase F2 timeout */
@@ -979,7 +961,7 @@ static const struct sdio_device_id brcmf_sdmmc_ids[] = {
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_43340),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_43341),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_43362),
-	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_43364),
+ 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_43364),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_4335_4339),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_4339),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_43430),
@@ -988,9 +970,9 @@ static const struct sdio_device_id brcmf_sdmmc_ids[] = {
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_4354),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_4356),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_4359),
-	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_CYPRESS_4373),
-	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_CYPRESS_43012),
-	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_CYPRESS_89359),
+	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_CYPRESS_4373),
+	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_CYPRESS_43012),
+	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_CYPRESS_89359),
 	{ /* end: all zeroes */ }
 };
 MODULE_DEVICE_TABLE(sdio, brcmf_sdmmc_ids);

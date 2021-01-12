@@ -431,8 +431,9 @@ static irqreturn_t hisi_dma_irq(int irq, void *data)
 	struct hisi_dma_dev *hdma_dev = chan->hdma_dev;
 	struct hisi_dma_desc *desc;
 	struct hisi_dma_cqe *cqe;
+	unsigned long flags;
 
-	spin_lock(&chan->vc.lock);
+	spin_lock_irqsave(&chan->vc.lock, flags);
 
 	desc = chan->desc;
 	cqe = chan->cq + chan->cq_head;
@@ -451,7 +452,7 @@ static irqreturn_t hisi_dma_irq(int irq, void *data)
 		chan->desc = NULL;
 	}
 
-	spin_unlock(&chan->vc.lock);
+	spin_unlock_irqrestore(&chan->vc.lock, flags);
 
 	return IRQ_HANDLED;
 }
@@ -510,6 +511,7 @@ static int hisi_dma_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct device *dev = &pdev->dev;
 	struct hisi_dma_dev *hdma_dev;
 	struct dma_device *dma_dev;
+	size_t dev_size;
 	int ret;
 
 	ret = pcim_enable_device(pdev);
@@ -532,7 +534,9 @@ static int hisi_dma_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (ret)
 		return ret;
 
-	hdma_dev = devm_kzalloc(dev, struct_size(hdma_dev, chan, HISI_DMA_CHAN_NUM), GFP_KERNEL);
+	dev_size = sizeof(struct hisi_dma_chan) * HISI_DMA_CHAN_NUM +
+		   sizeof(*hdma_dev);
+	hdma_dev = devm_kzalloc(dev, dev_size, GFP_KERNEL);
 	if (!hdma_dev)
 		return -EINVAL;
 

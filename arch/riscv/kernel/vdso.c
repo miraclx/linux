@@ -11,12 +11,8 @@
 #include <linux/slab.h>
 #include <linux/binfmts.h>
 #include <linux/err.h>
-#include <asm/page.h>
-#ifdef GENERIC_TIME_VSYSCALL
-#include <vdso/datapage.h>
-#else
+
 #include <asm/vdso.h>
-#endif
 
 extern char vdso_start[], vdso_end[];
 
@@ -30,7 +26,7 @@ static union {
 	struct vdso_data	data;
 	u8			page[PAGE_SIZE];
 } vdso_data_store __page_aligned_data;
-struct vdso_data *vdso_data = &vdso_data_store.data;
+static struct vdso_data *vdso_data = &vdso_data_store.data;
 
 static int __init vdso_init(void)
 {
@@ -65,7 +61,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm,
 
 	vdso_len = (vdso_pages + 1) << PAGE_SHIFT;
 
-	mmap_write_lock(mm);
+	down_write(&mm->mmap_sem);
 	vdso_base = get_unmapped_area(NULL, 0, vdso_len, 0, 0);
 	if (IS_ERR_VALUE(vdso_base)) {
 		ret = vdso_base;
@@ -79,24 +75,15 @@ int arch_setup_additional_pages(struct linux_binprm *bprm,
 	 */
 	mm->context.vdso = (void *)vdso_base;
 
-	ret =
-	   install_special_mapping(mm, vdso_base, vdso_pages << PAGE_SHIFT,
+	ret = install_special_mapping(mm, vdso_base, vdso_len,
 		(VM_READ | VM_EXEC | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC),
 		vdso_pagelist);
 
-	if (unlikely(ret)) {
-		mm->context.vdso = NULL;
-		goto end;
-	}
-
-	vdso_base += (vdso_pages << PAGE_SHIFT);
-	ret = install_special_mapping(mm, vdso_base, PAGE_SIZE,
-		(VM_READ | VM_MAYREAD), &vdso_pagelist[vdso_pages]);
-
 	if (unlikely(ret))
 		mm->context.vdso = NULL;
+
 end:
-	mmap_write_unlock(mm);
+	up_write(&mm->mmap_sem);
 	return ret;
 }
 
@@ -104,8 +91,5 @@ const char *arch_vma_name(struct vm_area_struct *vma)
 {
 	if (vma->vm_mm && (vma->vm_start == (long)vma->vm_mm->context.vdso))
 		return "[vdso]";
-	if (vma->vm_mm && (vma->vm_start ==
-			   (long)vma->vm_mm->context.vdso + PAGE_SIZE))
-		return "[vdso_data]";
 	return NULL;
 }

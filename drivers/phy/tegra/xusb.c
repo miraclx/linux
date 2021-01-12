@@ -146,7 +146,7 @@ static void tegra_xusb_pad_release(struct device *dev)
 	pad->soc->ops->remove(pad);
 }
 
-static const struct device_type tegra_xusb_pad_type = {
+static struct device_type tegra_xusb_pad_type = {
 	.release = tegra_xusb_pad_release,
 };
 
@@ -513,7 +513,7 @@ static void tegra_xusb_port_release(struct device *dev)
 		port->ops->release(port);
 }
 
-static const struct device_type tegra_xusb_port_type = {
+static struct device_type tegra_xusb_port_type = {
 	.release = tegra_xusb_port_release,
 };
 
@@ -688,7 +688,7 @@ static int tegra_xusb_setup_usb_role_switch(struct tegra_xusb_port *port)
 	 * reference to retrieve usb-phy details.
 	 */
 	port->usb_phy.dev = &lane->pad->lanes[port->index]->dev;
-	port->usb_phy.dev->driver = port->dev.driver;
+	port->usb_phy.dev->driver = port->padctl->dev->driver;
 	port->usb_phy.otg->usb_phy = &port->usb_phy;
 	port->usb_phy.otg->set_peripheral = tegra_xusb_set_peripheral;
 	port->usb_phy.otg->set_host = tegra_xusb_set_host;
@@ -1148,6 +1148,7 @@ static int tegra_xusb_padctl_probe(struct platform_device *pdev)
 	const struct tegra_xusb_padctl_soc *soc;
 	struct tegra_xusb_padctl *padctl;
 	const struct of_device_id *match;
+	struct resource *res;
 	int err;
 
 	/* for backwards compatibility with old device trees */
@@ -1172,7 +1173,8 @@ static int tegra_xusb_padctl_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&padctl->pads);
 	mutex_init(&padctl->lock);
 
-	padctl->regs = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	padctl->regs = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(padctl->regs)) {
 		err = PTR_ERR(padctl->regs);
 		goto remove;
@@ -1198,7 +1200,7 @@ static int tegra_xusb_padctl_probe(struct platform_device *pdev)
 	err = devm_regulator_bulk_get(&pdev->dev, padctl->soc->num_supplies,
 				      padctl->supplies);
 	if (err < 0) {
-		dev_err_probe(&pdev->dev, err, "failed to get regulators\n");
+		dev_err(&pdev->dev, "failed to get regulators: %d\n", err);
 		goto remove;
 	}
 
@@ -1240,7 +1242,6 @@ power_down:
 reset:
 	reset_control_assert(padctl->rst);
 remove:
-	platform_set_drvdata(pdev, NULL);
 	soc->ops->remove(padctl);
 	return err;
 }

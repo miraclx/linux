@@ -116,8 +116,7 @@ static int uvd_v5_0_sw_init(void *handle)
 
 	ring = &adev->uvd.inst->ring;
 	sprintf(ring->name, "uvd");
-	r = amdgpu_ring_init(adev, ring, 512, &adev->uvd.inst->irq, 0,
-			     AMDGPU_RING_PRIO_DEFAULT);
+	r = amdgpu_ring_init(adev, ring, 512, &adev->uvd.inst->irq, 0);
 	if (r)
 		return r;
 
@@ -145,7 +144,7 @@ static int uvd_v5_0_sw_fini(void *handle)
 /**
  * uvd_v5_0_hw_init - start and test UVD block
  *
- * @handle: handle used to pass amdgpu_device pointer
+ * @adev: amdgpu_device pointer
  *
  * Initialize the hardware, boot up the VCPU and do some testing
  */
@@ -202,16 +201,19 @@ done:
 /**
  * uvd_v5_0_hw_fini - stop the hardware block
  *
- * @handle: handle used to pass amdgpu_device pointer
+ * @adev: amdgpu_device pointer
  *
  * Stop the UVD block, mark ring as not ready any more
  */
 static int uvd_v5_0_hw_fini(void *handle)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_ring *ring = &adev->uvd.inst->ring;
 
 	if (RREG32(mmUVD_STATUS) != 0)
 		uvd_v5_0_stop(adev);
+
+	ring->sched.ready = false;
 
 	return 0;
 }
@@ -253,7 +255,7 @@ static void uvd_v5_0_mc_resume(struct amdgpu_device *adev)
 	uint64_t offset;
 	uint32_t size;
 
-	/* program memory controller bits 0-27 */
+	/* programm memory controller bits 0-27 */
 	WREG32(mmUVD_LMI_VCPU_CACHE_64BIT_BAR_LOW,
 			lower_32_bits(adev->uvd.inst->gpu_addr));
 	WREG32(mmUVD_LMI_VCPU_CACHE_64BIT_BAR_HIGH,
@@ -404,7 +406,7 @@ static int uvd_v5_0_start(struct amdgpu_device *adev)
 	/* set the wb address */
 	WREG32(mmUVD_RBC_RB_RPTR_ADDR, (upper_32_bits(ring->gpu_addr) >> 2));
 
-	/* program the RB_BASE for ring buffer */
+	/* programm the RB_BASE for ring buffer */
 	WREG32(mmUVD_LMI_RBC_RB_64BIT_BAR_LOW,
 			lower_32_bits(ring->gpu_addr));
 	WREG32(mmUVD_LMI_RBC_RB_64BIT_BAR_HIGH,
@@ -454,9 +456,7 @@ static void uvd_v5_0_stop(struct amdgpu_device *adev)
  * uvd_v5_0_ring_emit_fence - emit an fence & trap command
  *
  * @ring: amdgpu_ring pointer
- * @addr: address
- * @seq: sequence number
- * @flags: fence related flags
+ * @fence: fence to emit
  *
  * Write a fence and a trap command to the ring.
  */
@@ -520,9 +520,7 @@ static int uvd_v5_0_ring_test_ring(struct amdgpu_ring *ring)
  * uvd_v5_0_ring_emit_ib - execute indirect buffer
  *
  * @ring: amdgpu_ring pointer
- * @job: job to retrieve vmid from
  * @ib: indirect buffer to execute
- * @flags: unused
  *
  * Write ring commands to execute the indirect buffer
  */

@@ -223,11 +223,6 @@ static int dr_domain_caps_init(struct mlx5_core_dev *mdev,
 	if (ret)
 		return ret;
 
-	if (dmn->info.caps.sw_format_ver != MLX5_STEERING_FORMAT_CONNECTX_5) {
-		mlx5dr_err(dmn, "SW steering is not supported on this device\n");
-		return -EOPNOTSUPP;
-	}
-
 	ret = dr_domain_query_fdb_caps(mdev, dmn);
 	if (ret)
 		return ret;
@@ -302,8 +297,7 @@ mlx5dr_domain_create(struct mlx5_core_dev *mdev, enum mlx5dr_domain_type type)
 	dmn->mdev = mdev;
 	dmn->type = type;
 	refcount_set(&dmn->refcount, 1);
-	mutex_init(&dmn->info.rx.mutex);
-	mutex_init(&dmn->info.tx.mutex);
+	mutex_init(&dmn->mutex);
 
 	if (dr_domain_caps_init(mdev, dmn)) {
 		mlx5dr_err(dmn, "Failed init domain, no caps\n");
@@ -351,9 +345,9 @@ int mlx5dr_domain_sync(struct mlx5dr_domain *dmn, u32 flags)
 	int ret = 0;
 
 	if (flags & MLX5DR_DOMAIN_SYNC_FLAGS_SW) {
-		mlx5dr_domain_lock(dmn);
+		mutex_lock(&dmn->mutex);
 		ret = mlx5dr_send_ring_force_drain(dmn);
-		mlx5dr_domain_unlock(dmn);
+		mutex_unlock(&dmn->mutex);
 		if (ret) {
 			mlx5dr_err(dmn, "Force drain failed flags: %d, ret: %d\n",
 				   flags, ret);
@@ -377,8 +371,7 @@ int mlx5dr_domain_destroy(struct mlx5dr_domain *dmn)
 	dr_domain_uninit_cache(dmn);
 	dr_domain_uninit_resources(dmn);
 	dr_domain_caps_uninit(dmn);
-	mutex_destroy(&dmn->info.tx.mutex);
-	mutex_destroy(&dmn->info.rx.mutex);
+	mutex_destroy(&dmn->mutex);
 	kfree(dmn);
 	return 0;
 }
@@ -386,7 +379,7 @@ int mlx5dr_domain_destroy(struct mlx5dr_domain *dmn)
 void mlx5dr_domain_set_peer(struct mlx5dr_domain *dmn,
 			    struct mlx5dr_domain *peer_dmn)
 {
-	mlx5dr_domain_lock(dmn);
+	mutex_lock(&dmn->mutex);
 
 	if (dmn->peer_dmn)
 		refcount_dec(&dmn->peer_dmn->refcount);
@@ -396,5 +389,5 @@ void mlx5dr_domain_set_peer(struct mlx5dr_domain *dmn,
 	if (dmn->peer_dmn)
 		refcount_inc(&dmn->peer_dmn->refcount);
 
-	mlx5dr_domain_unlock(dmn);
+	mutex_unlock(&dmn->mutex);
 }

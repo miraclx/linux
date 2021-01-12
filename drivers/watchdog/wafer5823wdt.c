@@ -174,7 +174,7 @@ static long wafwdt_ioctl(struct file *file, unsigned int cmd,
 		timeout = new_timeout;
 		wafwdt_stop();
 		wafwdt_start();
-		fallthrough;
+		/* Fall through */
 	case WDIOC_GETTIMEOUT:
 		return put_user(timeout, p);
 

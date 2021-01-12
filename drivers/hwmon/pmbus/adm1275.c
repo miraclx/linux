@@ -462,9 +462,9 @@ static const struct i2c_device_id adm1275_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, adm1275_id);
 
-static int adm1275_probe(struct i2c_client *client)
+static int adm1275_probe(struct i2c_client *client,
+			 const struct i2c_device_id *id)
 {
-	s32 (*config_read_fn)(const struct i2c_client *client, u8 reg);
 	u8 block_buffer[I2C_SMBUS_BLOCK_MAX + 1];
 	int config, device_config;
 	int ret;
@@ -505,21 +505,16 @@ static int adm1275_probe(struct i2c_client *client)
 		return -ENODEV;
 	}
 
-	if (strcmp(client->name, mid->name) != 0)
+	if (id->driver_data != mid->driver_data)
 		dev_notice(&client->dev,
 			   "Device mismatch: Configured %s, detected %s\n",
-			   client->name, mid->name);
+			   id->name, mid->name);
 
-	if (mid->driver_data == adm1272 || mid->driver_data == adm1278 ||
-	    mid->driver_data == adm1293 || mid->driver_data == adm1294)
-		config_read_fn = i2c_smbus_read_word_data;
-	else
-		config_read_fn = i2c_smbus_read_byte_data;
-	config = config_read_fn(client, ADM1275_PMON_CONFIG);
+	config = i2c_smbus_read_byte_data(client, ADM1275_PMON_CONFIG);
 	if (config < 0)
 		return config;
 
-	device_config = config_read_fn(client, ADM1275_DEVICE_CONFIG);
+	device_config = i2c_smbus_read_byte_data(client, ADM1275_DEVICE_CONFIG);
 	if (device_config < 0)
 		return device_config;
 
@@ -682,13 +677,11 @@ static int adm1275_probe(struct i2c_client *client)
 		tindex = 3;
 
 		info->func[0] |= PMBUS_HAVE_PIN | PMBUS_HAVE_STATUS_INPUT |
-			PMBUS_HAVE_VOUT | PMBUS_HAVE_STATUS_VOUT |
-			PMBUS_HAVE_TEMP | PMBUS_HAVE_STATUS_TEMP;
+			PMBUS_HAVE_VOUT | PMBUS_HAVE_STATUS_VOUT;
 
-		/* Enable VOUT & TEMP1 if not enabled (disabled by default) */
-		if ((config & (ADM1278_VOUT_EN | ADM1278_TEMP1_EN)) !=
-		    (ADM1278_VOUT_EN | ADM1278_TEMP1_EN)) {
-			config |= ADM1278_VOUT_EN | ADM1278_TEMP1_EN;
+		/* Enable VOUT if not enabled (it is disabled by default) */
+		if (!(config & ADM1278_VOUT_EN)) {
+			config |= ADM1278_VOUT_EN;
 			ret = i2c_smbus_write_byte_data(client,
 							ADM1275_PMON_CONFIG,
 							config);
@@ -699,6 +692,9 @@ static int adm1275_probe(struct i2c_client *client)
 			}
 		}
 
+		if (config & ADM1278_TEMP1_EN)
+			info->func[0] |=
+				PMBUS_HAVE_TEMP | PMBUS_HAVE_STATUS_TEMP;
 		if (config & ADM1278_VIN_EN)
 			info->func[0] |= PMBUS_HAVE_VIN;
 		break;
@@ -789,14 +785,15 @@ static int adm1275_probe(struct i2c_client *client)
 		info->R[PSC_TEMPERATURE] = coefficients[tindex].R;
 	}
 
-	return pmbus_do_probe(client, info);
+	return pmbus_do_probe(client, id, info);
 }
 
 static struct i2c_driver adm1275_driver = {
 	.driver = {
 		   .name = "adm1275",
 		   },
-	.probe_new = adm1275_probe,
+	.probe = adm1275_probe,
+	.remove = pmbus_do_remove,
 	.id_table = adm1275_id,
 };
 

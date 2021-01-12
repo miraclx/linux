@@ -135,11 +135,7 @@ static const int hrtimer_clock_to_base_table[MAX_CLOCKS] = {
  * timer->base->cpu_base
  */
 static struct hrtimer_cpu_base migration_cpu_base = {
-	.clock_base = { {
-		.cpu_base = &migration_cpu_base,
-		.seq      = SEQCNT_RAW_SPINLOCK_ZERO(migration_cpu_base.seq,
-						     &migration_cpu_base.lock),
-	}, },
+	.clock_base = { { .cpu_base = &migration_cpu_base, }, },
 };
 
 #define migration_base	migration_cpu_base.clock_base[0]
@@ -342,7 +338,7 @@ EXPORT_SYMBOL_GPL(ktime_add_safe);
 
 #ifdef CONFIG_DEBUG_OBJECTS_TIMERS
 
-static const struct debug_obj_descr hrtimer_debug_descr;
+static struct debug_obj_descr hrtimer_debug_descr;
 
 static void *hrtimer_debug_hint(void *addr)
 {
@@ -377,7 +373,7 @@ static bool hrtimer_fixup_activate(void *addr, enum debug_obj_state state)
 	switch (state) {
 	case ODEBUG_STATE_ACTIVE:
 		WARN_ON(1);
-		fallthrough;
+		/* fall through */
 	default:
 		return false;
 	}
@@ -401,7 +397,7 @@ static bool hrtimer_fixup_free(void *addr, enum debug_obj_state state)
 	}
 }
 
-static const struct debug_obj_descr hrtimer_debug_descr = {
+static struct debug_obj_descr hrtimer_debug_descr = {
 	.name		= "hrtimer",
 	.debug_hint	= hrtimer_debug_hint,
 	.fixup_init	= hrtimer_fixup_init,
@@ -423,6 +419,11 @@ static inline void debug_hrtimer_activate(struct hrtimer *timer,
 static inline void debug_hrtimer_deactivate(struct hrtimer *timer)
 {
 	debug_object_deactivate(timer, &hrtimer_debug_descr);
+}
+
+static inline void debug_hrtimer_free(struct hrtimer *timer)
+{
+	debug_object_free(timer, &hrtimer_debug_descr);
 }
 
 static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
@@ -1284,7 +1285,7 @@ int hrtimer_cancel(struct hrtimer *timer)
 EXPORT_SYMBOL_GPL(hrtimer_cancel);
 
 /**
- * __hrtimer_get_remaining - get remaining time for the timer
+ * hrtimer_get_remaining - get remaining time for the timer
  * @timer:	the timer to read
  * @adjust:	adjust relative timers when CONFIG_TIME_LOW_RES=y
  */
@@ -1997,11 +1998,8 @@ int hrtimers_prepare_cpu(unsigned int cpu)
 	int i;
 
 	for (i = 0; i < HRTIMER_MAX_CLOCK_BASES; i++) {
-		struct hrtimer_clock_base *clock_b = &cpu_base->clock_base[i];
-
-		clock_b->cpu_base = cpu_base;
-		seqcount_raw_spinlock_init(&clock_b->seq, &cpu_base->lock);
-		timerqueue_init_head(&clock_b->active);
+		cpu_base->clock_base[i].cpu_base = cpu_base;
+		timerqueue_init_head(&cpu_base->clock_base[i].active);
 	}
 
 	cpu_base->cpu = cpu;

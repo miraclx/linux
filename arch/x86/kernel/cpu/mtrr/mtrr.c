@@ -794,6 +794,8 @@ void mtrr_ap_init(void)
 	if (!use_intel() || mtrr_aps_delayed_init)
 		return;
 
+	rcu_cpu_starting(smp_processor_id());
+
 	/*
 	 * Ideally we should hold mtrr_mutex here to avoid mtrr entries
 	 * changed, but this routine will be called in cpu boot time,
@@ -811,8 +813,7 @@ void mtrr_ap_init(void)
 }
 
 /**
- * mtrr_save_state - Save current fixed-range MTRR state of the first
- *	cpu in cpu_online_mask.
+ * Save current fixed-range MTRR state of the first cpu in cpu_online_mask.
  */
 void mtrr_save_state(void)
 {

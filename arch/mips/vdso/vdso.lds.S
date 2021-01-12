@@ -91,7 +91,7 @@ PHDRS
 VERSION
 {
 	LINUX_2.6 {
-#ifndef CONFIG_MIPS_DISABLE_VDSO
+#ifndef DISABLE_MIPS_VDSO
 	global:
 		__vdso_clock_gettime;
 		__vdso_gettimeofday;

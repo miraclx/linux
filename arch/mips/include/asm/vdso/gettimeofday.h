@@ -167,8 +167,7 @@ static __always_inline u64 read_gic_count(const struct vdso_data *data)
 
 #endif
 
-static __always_inline u64 __arch_get_hw_counter(s32 clock_mode,
-						 const struct vdso_data *vd)
+static __always_inline u64 __arch_get_hw_counter(s32 clock_mode)
 {
 #ifdef CONFIG_CSRC_R4K
 	if (clock_mode == VDSO_CLOCKMODE_R4K)
@@ -176,7 +175,7 @@ static __always_inline u64 __arch_get_hw_counter(s32 clock_mode,
 #endif
 #ifdef CONFIG_CLKSRC_MIPS_GIC
 	if (clock_mode == VDSO_CLOCKMODE_GIC)
-		return read_gic_count(vd);
+		return read_gic_count(get_vdso_data());
 #endif
 	/*
 	 * Core checks mode already. So this raced against a concurrent

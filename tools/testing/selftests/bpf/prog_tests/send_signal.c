@@ -48,19 +48,21 @@ static void test_send_signal_common(struct perf_event_attr *attr,
 		close(pipe_p2c[1]); /* close write */
 
 		/* notify parent signal handler is installed */
-		CHECK(write(pipe_c2p[1], buf, 1) != 1, "pipe_write", "err %d\n", -errno);
+		write(pipe_c2p[1], buf, 1);
 
 		/* make sure parent enabled bpf program to send_signal */
-		CHECK(read(pipe_p2c[0], buf, 1) != 1, "pipe_read", "err %d\n", -errno);
+		read(pipe_p2c[0], buf, 1);
 
 		/* wait a little for signal handler */
 		sleep(1);
 
-		buf[0] = sigusr1_received ? '2' : '0';
-		CHECK(write(pipe_c2p[1], buf, 1) != 1, "pipe_write", "err %d\n", -errno);
+		if (sigusr1_received)
+			write(pipe_c2p[1], "2", 1);
+		else
+			write(pipe_c2p[1], "0", 1);
 
 		/* wait for parent notification and exit */
-		CHECK(read(pipe_p2c[0], buf, 1) != 1, "pipe_read", "err %d\n", -errno);
+		read(pipe_p2c[0], buf, 1);
 
 		close(pipe_c2p[1]);
 		close(pipe_p2c[0]);
@@ -97,7 +99,7 @@ static void test_send_signal_common(struct perf_event_attr *attr,
 	}
 
 	/* wait until child signal handler installed */
-	CHECK(read(pipe_c2p[0], buf, 1) != 1, "pipe_read", "err %d\n", -errno);
+	read(pipe_c2p[0], buf, 1);
 
 	/* trigger the bpf send_signal */
 	skel->bss->pid = pid;
@@ -105,7 +107,7 @@ static void test_send_signal_common(struct perf_event_attr *attr,
 	skel->bss->signal_thread = signal_thread;
 
 	/* notify child that bpf program can send_signal now */
-	CHECK(write(pipe_p2c[1], buf, 1) != 1, "pipe_write", "err %d\n", -errno);
+	write(pipe_p2c[1], buf, 1);
 
 	/* wait for result */
 	err = read(pipe_c2p[0], buf, 1);
@@ -119,7 +121,7 @@ static void test_send_signal_common(struct perf_event_attr *attr,
 	CHECK(buf[0] != '2', test_name, "incorrect result\n");
 
 	/* notify child safe to exit */
-	CHECK(write(pipe_p2c[1], buf, 1) != 1, "pipe_write", "err %d\n", -errno);
+	write(pipe_p2c[1], buf, 1);
 
 disable_pmu:
 	close(pmu_fd);

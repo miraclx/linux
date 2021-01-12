@@ -610,9 +610,12 @@ static int ether3_rx(struct net_device *dev, unsigned int maxcnt)
 		ether3_readbuffer(dev, addrs+2, 12);
 
 if (next_ptr < RX_START || next_ptr >= RX_END) {
+ int i;
  printk("%s: bad next pointer @%04X: ", dev->name, priv(dev)->rx_head);
  printk("%02X %02X %02X %02X ", next_ptr >> 8, next_ptr & 255, status & 255, status >> 8);
- printk("%pM %pM\n", addrs + 2, addrs + 8);
+ for (i = 2; i < 14; i++)
+   printk("%02X ", addrs[i]);
+ printk("\n");
  next_ptr = priv(dev)->rx_head;
  break;
 }

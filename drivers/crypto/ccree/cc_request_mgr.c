@@ -107,7 +107,7 @@ void cc_req_mgr_fini(struct cc_drvdata *drvdata)
 	/* Kill tasklet */
 	tasklet_kill(&req_mgr_h->comptask);
 #endif
-	kfree_sensitive(req_mgr_h);
+	kzfree(req_mgr_h);
 	drvdata->request_mgr_handle = NULL;
 }
 

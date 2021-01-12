@@ -6,7 +6,6 @@
 #include <linux/init.h>
 #include <linux/interconnect.h>
 #include <linux/ioctl.h>
-#include <linux/delay.h>
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
@@ -41,7 +40,13 @@ static void venus_event_notify(struct venus_core *core, u32 event)
 	mutex_unlock(&core->lock);
 
 	disable_irq_nosync(core->irq);
-	schedule_delayed_work(&core->work, msecs_to_jiffies(10));
+
+	/*
+	 * Delay recovery to ensure venus has completed any pending cache
+	 * operations. Without this sleep, we see device reset when firmware is
+	 * unloaded after a system error.
+	 */
+	schedule_delayed_work(&core->work, msecs_to_jiffies(100));
 }
 
 static const struct hfi_core_ops venus_core_ops = {
@@ -54,29 +59,23 @@ static void venus_sys_error_handler(struct work_struct *work)
 			container_of(work, struct venus_core, work.work);
 	int ret = 0;
 
+	dev_warn(core->dev, "system error has occurred, starting recovery!\n");
+
 	pm_runtime_get_sync(core->dev);
 
 	hfi_core_deinit(core, true);
-
-	dev_warn(core->dev, "system error has occurred, starting recovery!\n");
-
+	hfi_destroy(core);
 	mutex_lock(&core->lock);
-
-	while (pm_runtime_active(core->dev_dec) || pm_runtime_active(core->dev_enc))
-		msleep(10);
-
 	venus_shutdown(core);
 
 	pm_runtime_put_sync(core->dev);
 
-	while (core->pmdomains[0] && pm_runtime_active(core->pmdomains[0]))
-		usleep_range(1000, 1500);
-
-	hfi_reinit(core);
+	ret |= hfi_create(core, &venus_core_ops);
 
 	pm_runtime_get_sync(core->dev);
 
 	ret |= venus_boot(core);
+
 	ret |= hfi_core_resume(core, true);
 
 	enable_irq(core->irq);
@@ -211,8 +210,6 @@ static int venus_probe(struct platform_device *pdev)
 	if (!core->res)
 		return -ENODEV;
 
-	mutex_init(&core->pm_lock);
-
 	core->pm_ops = venus_pm_get(core->res->hfi_version);
 	if (!core->pm_ops)
 		return -ENODEV;
@@ -225,9 +222,15 @@ static int venus_probe(struct platform_device *pdev)
 
 	ret = dma_set_mask_and_coherent(dev, core->res->dma_mask);
 	if (ret)
-		goto err_core_put;
+		return ret;
 
-	dma_set_max_seg_size(dev, UINT_MAX);
+	if (!dev->dma_parms) {
+		dev->dma_parms = devm_kzalloc(dev, sizeof(*dev->dma_parms),
+					      GFP_KERNEL);
+		if (!dev->dma_parms)
+			return -ENOMEM;
+	}
+	dma_set_max_seg_size(dev, DMA_BIT_MASK(32));
 
 	INIT_LIST_HEAD(&core->instances);
 	mutex_init(&core->lock);
@@ -237,11 +240,15 @@ static int venus_probe(struct platform_device *pdev)
 					IRQF_TRIGGER_HIGH | IRQF_ONESHOT,
 					"venus", core);
 	if (ret)
-		goto err_core_put;
+		return ret;
+
+	ret = icc_set_bw(core->cpucfg_path, 0, kbps_to_icc(1000));
+	if (ret)
+		return ret;
 
 	ret = hfi_create(core, &venus_core_ops);
 	if (ret)
-		goto err_core_put;
+		return ret;
 
 	pm_runtime_enable(dev);
 
@@ -282,12 +289,8 @@ static int venus_probe(struct platform_device *pdev)
 		goto err_core_deinit;
 
 	ret = pm_runtime_put_sync(dev);
-	if (ret) {
-		pm_runtime_get_noresume(dev);
+	if (ret)
 		goto err_dev_unregister;
-	}
-
-	venus_dbgfs_init(core);
 
 	return 0;
 
@@ -298,13 +301,9 @@ err_core_deinit:
 err_venus_shutdown:
 	venus_shutdown(core);
 err_runtime_disable:
-	pm_runtime_put_noidle(dev);
 	pm_runtime_set_suspended(dev);
 	pm_runtime_disable(dev);
 	hfi_destroy(core);
-err_core_put:
-	if (core->pm_ops->core_put)
-		core->pm_ops->core_put(dev);
 	return ret;
 }
 
@@ -321,6 +320,7 @@ static int venus_remove(struct platform_device *pdev)
 	ret = hfi_core_deinit(core, true);
 	WARN_ON(ret);
 
+	hfi_destroy(core);
 	venus_shutdown(core);
 	of_platform_depopulate(dev);
 
@@ -332,25 +332,12 @@ static int venus_remove(struct platform_device *pdev)
 	if (pm_ops->core_put)
 		pm_ops->core_put(dev);
 
-	hfi_destroy(core);
-
 	icc_put(core->video_path);
 	icc_put(core->cpucfg_path);
 
 	v4l2_device_unregister(&core->v4l2_dev);
-	mutex_destroy(&core->pm_lock);
-	mutex_destroy(&core->lock);
-	venus_dbgfs_deinit(core);
 
 	return ret;
-}
-
-static void venus_core_shutdown(struct platform_device *pdev)
-{
-	struct venus_core *core = platform_get_drvdata(pdev);
-
-	venus_shutdown(core);
-	venus_firmware_deinit(core);
 }
 
 static __maybe_unused int venus_runtime_suspend(struct device *dev)
@@ -363,26 +350,8 @@ static __maybe_unused int venus_runtime_suspend(struct device *dev)
 	if (ret)
 		return ret;
 
-	if (pm_ops->core_power) {
+	if (pm_ops->core_power)
 		ret = pm_ops->core_power(dev, POWER_OFF);
-		if (ret)
-			return ret;
-	}
-
-	ret = icc_set_bw(core->cpucfg_path, 0, 0);
-	if (ret)
-		goto err_cpucfg_path;
-
-	ret = icc_set_bw(core->video_path, 0, 0);
-	if (ret)
-		goto err_video_path;
-
-	return ret;
-
-err_video_path:
-	icc_set_bw(core->cpucfg_path, kbps_to_icc(1000), 0);
-err_cpucfg_path:
-	pm_ops->core_power(dev, POWER_ON);
 
 	return ret;
 }
@@ -392,14 +361,6 @@ static __maybe_unused int venus_runtime_resume(struct device *dev)
 	struct venus_core *core = dev_get_drvdata(dev);
 	const struct venus_pm_ops *pm_ops = core->pm_ops;
 	int ret;
-
-	ret = icc_set_bw(core->video_path, kbps_to_icc(20000), 0);
-	if (ret)
-		return ret;
-
-	ret = icc_set_bw(core->cpucfg_path, kbps_to_icc(1000), 0);
-	if (ret)
-		return ret;
 
 	if (pm_ops->core_power) {
 		ret = pm_ops->core_power(dev, POWER_ON);
@@ -486,7 +447,7 @@ static const struct freq_tbl sdm845_freq_table[] = {
 	{  244800, 100000000 },	/* 1920x1080@30 */
 };
 
-static const struct codec_freq_data sdm845_codec_freq_data[] =  {
+static struct codec_freq_data sdm845_codec_freq_data[] =  {
 	{ V4L2_PIX_FMT_H264, VIDC_SESSION_TYPE_ENC, 675, 10 },
 	{ V4L2_PIX_FMT_HEVC, VIDC_SESSION_TYPE_ENC, 675, 10 },
 	{ V4L2_PIX_FMT_VP8, VIDC_SESSION_TYPE_ENC, 675, 10 },
@@ -550,7 +511,6 @@ static const struct venus_resources sdm845_res_v2 = {
 	.vcodec_clks_num = 2,
 	.vcodec_pmdomains = { "venus", "vcodec0", "vcodec1" },
 	.vcodec_pmdomains_num = 3,
-	.opp_pmdomain = (const char *[]) { "cx", NULL },
 	.vcodec_num = 2,
 	.max_load = 3110400,	/* 4096x2160@90 */
 	.hfi_version = HFI_VERSION_4XX,
@@ -558,10 +518,6 @@ static const struct venus_resources sdm845_res_v2 = {
 	.vmem_size = 0,
 	.vmem_addr = 0,
 	.dma_mask = 0xe0000000 - 1,
-	.cp_start = 0,
-	.cp_size = 0x70800000,
-	.cp_nonpixel_start = 0x1000000,
-	.cp_nonpixel_size = 0x24800000,
 	.fwname = "qcom/venus-5.2/venus.mdt",
 };
 
@@ -600,7 +556,6 @@ static const struct venus_resources sc7180_res = {
 	.vcodec_clks_num = 2,
 	.vcodec_pmdomains = { "venus", "vcodec0" },
 	.vcodec_pmdomains_num = 2,
-	.opp_pmdomain = (const char *[]) { "cx", NULL },
 	.vcodec_num = 1,
 	.hfi_version = HFI_VERSION_4XX,
 	.vmem_id = VIDC_RESOURCE_NONE,
@@ -628,7 +583,6 @@ static struct platform_driver qcom_venus_driver = {
 		.of_match_table = venus_dt_match,
 		.pm = &venus_pm_ops,
 	},
-	.shutdown = venus_core_shutdown,
 };
 module_platform_driver(qcom_venus_driver);
 

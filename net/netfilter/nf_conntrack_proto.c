@@ -565,7 +565,6 @@ static int nf_ct_netns_inet_get(struct net *net)
 	int err;
 
 	err = nf_ct_netns_do_get(net, NFPROTO_IPV4);
-#if IS_ENABLED(CONFIG_IPV6)
 	if (err < 0)
 		goto err1;
 	err = nf_ct_netns_do_get(net, NFPROTO_IPV6);
@@ -576,7 +575,6 @@ static int nf_ct_netns_inet_get(struct net *net)
 err2:
 	nf_ct_netns_put(net, NFPROTO_IPV4);
 err1:
-#endif
 	return err;
 }
 
@@ -612,7 +610,7 @@ void nf_ct_netns_put(struct net *net, uint8_t nfproto)
 	switch (nfproto) {
 	case NFPROTO_BRIDGE:
 		nf_ct_netns_do_put(net, NFPROTO_BRIDGE);
-		fallthrough;
+		/* fall through */
 	case NFPROTO_INET:
 		nf_ct_netns_do_put(net, NFPROTO_IPV4);
 		nf_ct_netns_do_put(net, NFPROTO_IPV6);

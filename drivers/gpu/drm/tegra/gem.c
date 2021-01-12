@@ -24,7 +24,7 @@ static void tegra_bo_put(struct host1x_bo *bo)
 {
 	struct tegra_bo *obj = host1x_to_tegra_bo(bo);
 
-	drm_gem_object_put(&obj->gem);
+	drm_gem_object_put_unlocked(&obj->gem);
 }
 
 /* XXX move this into lib/scatterlist.c? */
@@ -98,8 +98,8 @@ static struct sg_table *tegra_bo_pin(struct device *dev, struct host1x_bo *bo,
 		 * the SG table needs to be copied to avoid overwriting any
 		 * other potential users of the original SG table.
 		 */
-		err = sg_alloc_table_from_sg(sgt, obj->sgt->sgl,
-					     obj->sgt->orig_nents, GFP_KERNEL);
+		err = sg_alloc_table_from_sg(sgt, obj->sgt->sgl, obj->sgt->nents,
+					     GFP_KERNEL);
 		if (err < 0)
 			goto free;
 	} else {
@@ -132,29 +132,24 @@ static void tegra_bo_unpin(struct device *dev, struct sg_table *sgt)
 static void *tegra_bo_mmap(struct host1x_bo *bo)
 {
 	struct tegra_bo *obj = host1x_to_tegra_bo(bo);
-	struct dma_buf_map map;
-	int ret;
 
-	if (obj->vaddr) {
+	if (obj->vaddr)
 		return obj->vaddr;
-	} else if (obj->gem.import_attach) {
-		ret = dma_buf_vmap(obj->gem.import_attach->dmabuf, &map);
-		return ret ? NULL : map.vaddr;
-	} else {
+	else if (obj->gem.import_attach)
+		return dma_buf_vmap(obj->gem.import_attach->dmabuf);
+	else
 		return vmap(obj->pages, obj->num_pages, VM_MAP,
 			    pgprot_writecombine(PAGE_KERNEL));
-	}
 }
 
 static void tegra_bo_munmap(struct host1x_bo *bo, void *addr)
 {
 	struct tegra_bo *obj = host1x_to_tegra_bo(bo);
-	struct dma_buf_map map = DMA_BUF_MAP_INIT_VADDR(addr);
 
 	if (obj->vaddr)
 		return;
 	else if (obj->gem.import_attach)
-		dma_buf_vunmap(obj->gem.import_attach->dmabuf, &map);
+		dma_buf_vunmap(obj->gem.import_attach->dmabuf, addr);
 	else
 		vunmap(addr);
 }
@@ -201,7 +196,8 @@ static int tegra_bo_iommu_map(struct tegra_drm *tegra, struct tegra_bo *bo)
 
 	bo->iova = bo->mm->start;
 
-	bo->size = iommu_map_sgtable(tegra->domain, bo->iova, bo->sgt, prot);
+	bo->size = iommu_map_sg(tegra->domain, bo->iova, bo->sgt->sgl,
+				bo->sgt->nents, prot);
 	if (!bo->size) {
 		dev_err(tegra->drm->dev, "failed to map buffer\n");
 		err = -ENOMEM;
@@ -235,12 +231,6 @@ static int tegra_bo_iommu_unmap(struct tegra_drm *tegra, struct tegra_bo *bo)
 	return 0;
 }
 
-static const struct drm_gem_object_funcs tegra_gem_object_funcs = {
-	.free = tegra_bo_free_object,
-	.export = tegra_gem_prime_export,
-	.vm_ops = &tegra_bo_vm_ops,
-};
-
 static struct tegra_bo *tegra_bo_alloc_object(struct drm_device *drm,
 					      size_t size)
 {
@@ -250,8 +240,6 @@ static struct tegra_bo *tegra_bo_alloc_object(struct drm_device *drm,
 	bo = kzalloc(sizeof(*bo), GFP_KERNEL);
 	if (!bo)
 		return ERR_PTR(-ENOMEM);
-
-	bo->gem.funcs = &tegra_gem_object_funcs;
 
 	host1x_bo_init(&bo->base, &tegra_bo_ops);
 	size = round_up(size, PAGE_SIZE);
@@ -276,7 +264,8 @@ free:
 static void tegra_bo_free(struct drm_device *drm, struct tegra_bo *bo)
 {
 	if (bo->pages) {
-		dma_unmap_sgtable(drm->dev, bo->sgt, DMA_FROM_DEVICE, 0);
+		dma_unmap_sg(drm->dev, bo->sgt->sgl, bo->sgt->nents,
+			     DMA_FROM_DEVICE);
 		drm_gem_put_pages(&bo->gem, bo->pages, true, true);
 		sg_free_table(bo->sgt);
 		kfree(bo->sgt);
@@ -295,15 +284,18 @@ static int tegra_bo_get_pages(struct drm_device *drm, struct tegra_bo *bo)
 
 	bo->num_pages = bo->gem.size >> PAGE_SHIFT;
 
-	bo->sgt = drm_prime_pages_to_sg(bo->gem.dev, bo->pages, bo->num_pages);
+	bo->sgt = drm_prime_pages_to_sg(bo->pages, bo->num_pages);
 	if (IS_ERR(bo->sgt)) {
 		err = PTR_ERR(bo->sgt);
 		goto put_pages;
 	}
 
-	err = dma_map_sgtable(drm->dev, bo->sgt, DMA_FROM_DEVICE, 0);
-	if (err)
+	err = dma_map_sg(drm->dev, bo->sgt->sgl, bo->sgt->nents,
+			 DMA_FROM_DEVICE);
+	if (err == 0) {
+		err = -EFAULT;
 		goto free_sgt;
+	}
 
 	return 0;
 
@@ -393,7 +385,7 @@ struct tegra_bo *tegra_bo_create_with_handle(struct drm_file *file,
 		return ERR_PTR(err);
 	}
 
-	drm_gem_object_put(&bo->gem);
+	drm_gem_object_put_unlocked(&bo->gem);
 
 	return bo;
 }
@@ -579,7 +571,7 @@ tegra_gem_prime_map_dma_buf(struct dma_buf_attachment *attach,
 			goto free;
 	}
 
-	if (dma_map_sgtable(attach->dev, sgt, dir, 0))
+	if (dma_map_sg(attach->dev, sgt->sgl, sgt->nents, dir) == 0)
 		goto free;
 
 	return sgt;
@@ -598,7 +590,7 @@ static void tegra_gem_prime_unmap_dma_buf(struct dma_buf_attachment *attach,
 	struct tegra_bo *bo = to_tegra_bo(gem);
 
 	if (bo->pages)
-		dma_unmap_sgtable(attach->dev, sgt, dir, 0);
+		dma_unmap_sg(attach->dev, sgt->sgl, sgt->nents, dir);
 
 	sg_free_table(sgt);
 	kfree(sgt);
@@ -617,7 +609,8 @@ static int tegra_gem_prime_begin_cpu_access(struct dma_buf *buf,
 	struct drm_device *drm = gem->dev;
 
 	if (bo->pages)
-		dma_sync_sgtable_for_cpu(drm->dev, bo->sgt, DMA_FROM_DEVICE);
+		dma_sync_sg_for_cpu(drm->dev, bo->sgt->sgl, bo->sgt->nents,
+				    DMA_FROM_DEVICE);
 
 	return 0;
 }
@@ -630,7 +623,8 @@ static int tegra_gem_prime_end_cpu_access(struct dma_buf *buf,
 	struct drm_device *drm = gem->dev;
 
 	if (bo->pages)
-		dma_sync_sgtable_for_device(drm->dev, bo->sgt, DMA_TO_DEVICE);
+		dma_sync_sg_for_device(drm->dev, bo->sgt->sgl, bo->sgt->nents,
+				       DMA_TO_DEVICE);
 
 	return 0;
 }
@@ -647,17 +641,15 @@ static int tegra_gem_prime_mmap(struct dma_buf *buf, struct vm_area_struct *vma)
 	return __tegra_gem_mmap(gem, vma);
 }
 
-static int tegra_gem_prime_vmap(struct dma_buf *buf, struct dma_buf_map *map)
+static void *tegra_gem_prime_vmap(struct dma_buf *buf)
 {
 	struct drm_gem_object *gem = buf->priv;
 	struct tegra_bo *bo = to_tegra_bo(gem);
 
-	dma_buf_map_set_vaddr(map, bo->vaddr);
-
-	return 0;
+	return bo->vaddr;
 }
 
-static void tegra_gem_prime_vunmap(struct dma_buf *buf, struct dma_buf_map *map)
+static void tegra_gem_prime_vunmap(struct dma_buf *buf, void *vaddr)
 {
 }
 

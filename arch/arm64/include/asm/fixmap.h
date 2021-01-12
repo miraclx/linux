@@ -28,9 +28,10 @@
  * compile time, but to set the physical address only
  * in the boot process.
  *
- * Each enum increment in these 'compile-time allocated'
- * memory buffers is page-sized. Use set_fixmap(idx,phys)
- * to associate physical memory with a fixmap index.
+ * These 'compile-time allocated' memory buffers are
+ * page-sized. Use set_fixmap(idx,phys) to associate
+ * physical memory with fixmap indices.
+ *
  */
 enum fixed_addresses {
 	FIX_HOLE,

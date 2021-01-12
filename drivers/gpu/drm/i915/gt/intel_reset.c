@@ -15,11 +15,9 @@
 #include "i915_drv.h"
 #include "i915_gpu_error.h"
 #include "i915_irq.h"
-#include "intel_breadcrumbs.h"
 #include "intel_engine_pm.h"
 #include "intel_gt.h"
 #include "intel_gt_pm.h"
-#include "intel_gt_requests.h"
 #include "intel_reset.h"
 
 #include "uc/intel_guc.h"
@@ -111,7 +109,7 @@ static bool mark_guilty(struct i915_request *rq)
 		goto out;
 	}
 
-	drm_notice(&ctx->i915->drm,
+	dev_notice(ctx->i915->drm.dev,
 		   "%s context reset due to GPU hang\n",
 		   ctx->name);
 
@@ -344,7 +342,7 @@ static int gen6_reset_engines(struct intel_gt *gt,
 static int gen11_lock_sfc(struct intel_engine_cs *engine, u32 *hw_mask)
 {
 	struct intel_uncore *uncore = engine->uncore;
-	u8 vdbox_sfc_access = engine->gt->info.vdbox_sfc_access;
+	u8 vdbox_sfc_access = RUNTIME_INFO(engine->i915)->vdbox_sfc_access;
 	i915_reg_t sfc_forced_lock, sfc_forced_lock_ack;
 	u32 sfc_forced_lock_bit, sfc_forced_lock_ack_bit;
 	i915_reg_t sfc_usage;
@@ -419,7 +417,7 @@ static int gen11_lock_sfc(struct intel_engine_cs *engine, u32 *hw_mask)
 static void gen11_unlock_sfc(struct intel_engine_cs *engine)
 {
 	struct intel_uncore *uncore = engine->uncore;
-	u8 vdbox_sfc_access = engine->gt->info.vdbox_sfc_access;
+	u8 vdbox_sfc_access = RUNTIME_INFO(engine->i915)->vdbox_sfc_access;
 	i915_reg_t sfc_forced_lock;
 	u32 sfc_forced_lock_bit;
 
@@ -640,7 +638,7 @@ int __intel_gt_reset(struct intel_gt *gt, intel_engine_mask_t engine_mask)
 
 bool intel_has_gpu_reset(const struct intel_gt *gt)
 {
-	if (!gt->i915->params.reset)
+	if (!i915_modparams.reset)
 		return NULL;
 
 	return intel_get_gpu_reset(gt);
@@ -648,7 +646,7 @@ bool intel_has_gpu_reset(const struct intel_gt *gt)
 
 bool intel_has_reset_engine(const struct intel_gt *gt)
 {
-	if (gt->i915->params.reset < 2)
+	if (i915_modparams.reset < 2)
 		return false;
 
 	return INTEL_INFO(gt->i915)->has_reset_engine;
@@ -757,7 +755,7 @@ static int gt_reset(struct intel_gt *gt, intel_engine_mask_t stalled_mask)
 	for_each_engine(engine, gt, id)
 		__intel_engine_reset(engine, stalled_mask & engine->mask);
 
-	intel_ggtt_restore_fences(gt->ggtt);
+	i915_gem_restore_fences(gt->ggtt);
 
 	return err;
 }
@@ -882,7 +880,7 @@ static bool __intel_gt_unset_wedged(struct intel_gt *gt)
 		return true;
 
 	/* Never fully initialised, recovery impossible */
-	if (intel_gt_has_unrecoverable_error(gt))
+	if (test_bit(I915_WEDGED_ON_INIT, &gt->reset.flags))
 		return false;
 
 	GT_TRACE(gt, "start\n");
@@ -932,7 +930,7 @@ static bool __intel_gt_unset_wedged(struct intel_gt *gt)
 		 * Warn CI about the unrecoverable wedged condition.
 		 * Time for a reboot.
 		 */
-		add_taint_for_CI(gt->i915, TAINT_WARN);
+		add_taint_for_CI(TAINT_WARN);
 		return false;
 	}
 
@@ -1033,15 +1031,15 @@ void intel_gt_reset(struct intel_gt *gt,
 		goto unlock;
 
 	if (reason)
-		drm_notice(&gt->i915->drm,
+		dev_notice(gt->i915->drm.dev,
 			   "Resetting chip for %s\n", reason);
 	atomic_inc(&gt->i915->gpu_error.reset_count);
 
 	awake = reset_prepare(gt);
 
 	if (!intel_has_gpu_reset(gt)) {
-		if (gt->i915->params.reset)
-			drm_err(&gt->i915->drm, "GPU reset not supported\n");
+		if (i915_modparams.reset)
+			dev_err(gt->i915->drm.dev, "GPU reset not supported\n");
 		else
 			drm_dbg(&gt->i915->drm, "GPU reset disabled\n");
 		goto error;
@@ -1051,7 +1049,7 @@ void intel_gt_reset(struct intel_gt *gt,
 		intel_runtime_pm_disable_interrupts(gt->i915);
 
 	if (do_reset(gt, stalled_mask)) {
-		drm_err(&gt->i915->drm, "Failed to reset chip\n");
+		dev_err(gt->i915->drm.dev, "Failed to reset chip\n");
 		goto taint;
 	}
 
@@ -1099,7 +1097,7 @@ taint:
 	 * rather than continue on into oblivion. For everyone else,
 	 * the system should still plod along, but they have been warned!
 	 */
-	add_taint_for_CI(gt->i915, TAINT_WARN);
+	add_taint_for_CI(TAINT_WARN);
 error:
 	__intel_gt_set_wedged(gt);
 	goto finish;
@@ -1113,7 +1111,7 @@ static inline int intel_gt_reset_engine(struct intel_engine_cs *engine)
 /**
  * intel_engine_reset - reset GPU engine to recover from a hang
  * @engine: engine to reset
- * @msg: reason for GPU reset; or NULL for no drm_notice()
+ * @msg: reason for GPU reset; or NULL for no dev_notice()
  *
  * Reset a specific GPU engine. Useful if a hang is detected.
  * Returns zero on successful reset or otherwise an error code.
@@ -1138,7 +1136,7 @@ int intel_engine_reset(struct intel_engine_cs *engine, const char *msg)
 	reset_prepare_engine(engine);
 
 	if (msg)
-		drm_notice(&engine->i915->drm,
+		dev_notice(engine->i915->drm.dev,
 			   "Resetting %s for %s\n", engine->name, msg);
 	atomic_inc(&engine->i915->gpu_error.reset_engine_count[engine->uabi_class]);
 
@@ -1191,14 +1189,14 @@ static void intel_gt_reset_global(struct intel_gt *gt,
 
 	/* Use a watchdog to ensure that our reset completes */
 	intel_wedge_on_timeout(&w, gt, 5 * HZ) {
-		intel_display_prepare_reset(gt->i915);
+		intel_prepare_reset(gt->i915);
 
 		/* Flush everyone using a resource about to be clobbered */
 		synchronize_srcu_expedited(&gt->reset.backoff_srcu);
 
 		intel_gt_reset(gt, engine_mask, reason);
 
-		intel_display_finish_reset(gt->i915);
+		intel_finish_reset(gt->i915);
 	}
 
 	if (!test_bit(I915_WEDGED, &gt->reset.flags))
@@ -1248,10 +1246,10 @@ void intel_gt_handle_error(struct intel_gt *gt,
 	 */
 	wakeref = intel_runtime_pm_get(gt->uncore->rpm);
 
-	engine_mask &= gt->info.engine_mask;
+	engine_mask &= INTEL_INFO(gt->i915)->engine_mask;
 
 	if (flags & I915_ERROR_CAPTURE) {
-		i915_capture_error_state(gt, engine_mask);
+		i915_capture_error_state(gt->i915);
 		intel_gt_clear_error_registers(gt, engine_mask);
 	}
 
@@ -1344,7 +1342,7 @@ int intel_gt_terminally_wedged(struct intel_gt *gt)
 	if (!intel_gt_is_wedged(gt))
 		return 0;
 
-	if (intel_gt_has_unrecoverable_error(gt))
+	if (intel_gt_has_init_error(gt))
 		return -EIO;
 
 	/* Reset still in progress? Maybe we will recover? */
@@ -1362,16 +1360,6 @@ void intel_gt_set_wedged_on_init(struct intel_gt *gt)
 		     I915_WEDGED_ON_INIT);
 	intel_gt_set_wedged(gt);
 	set_bit(I915_WEDGED_ON_INIT, &gt->reset.flags);
-
-	/* Wedged on init is non-recoverable */
-	add_taint_for_CI(gt->i915, TAINT_WARN);
-}
-
-void intel_gt_set_wedged_on_fini(struct intel_gt *gt)
-{
-	intel_gt_set_wedged(gt);
-	set_bit(I915_WEDGED_ON_FINI, &gt->reset.flags);
-	intel_gt_retire_requests(gt); /* cleanup any wedged requests */
 }
 
 void intel_gt_init_reset(struct intel_gt *gt)
@@ -1393,7 +1381,7 @@ static void intel_wedge_me(struct work_struct *work)
 {
 	struct intel_wedge_me *w = container_of(work, typeof(*w), work.work);
 
-	drm_err(&w->gt->i915->drm,
+	dev_err(w->gt->i915->drm.dev,
 		"%s timed out, cancelling all in-flight rendering.\n",
 		w->name);
 	intel_gt_set_wedged(w->gt);

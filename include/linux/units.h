@@ -2,7 +2,7 @@
 #ifndef _LINUX_UNITS_H
 #define _LINUX_UNITS_H
 
-#include <linux/math.h>
+#include <linux/kernel.h>
 
 #define ABSOLUTE_ZERO_MILLICELSIUS -273150
 

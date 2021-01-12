@@ -47,7 +47,7 @@ static inline struct ipu_crtc *to_ipu_crtc(struct drm_crtc *crtc)
 }
 
 static void ipu_crtc_atomic_enable(struct drm_crtc *crtc,
-				   struct drm_atomic_state *state)
+				   struct drm_crtc_state *old_state)
 {
 	struct ipu_crtc *ipu_crtc = to_ipu_crtc(crtc);
 	struct ipu_soc *ipu = dev_get_drvdata(ipu_crtc->dev->parent);
@@ -79,10 +79,8 @@ static void ipu_crtc_disable_planes(struct ipu_crtc *ipu_crtc,
 }
 
 static void ipu_crtc_atomic_disable(struct drm_crtc *crtc,
-				    struct drm_atomic_state *state)
+				    struct drm_crtc_state *old_crtc_state)
 {
-	struct drm_crtc_state *old_crtc_state = drm_atomic_get_old_crtc_state(state,
-									      crtc);
 	struct ipu_crtc *ipu_crtc = to_ipu_crtc(crtc);
 	struct ipu_soc *ipu = dev_get_drvdata(ipu_crtc->dev->parent);
 
@@ -111,15 +109,20 @@ static void imx_drm_crtc_reset(struct drm_crtc *crtc)
 {
 	struct imx_crtc_state *state;
 
-	if (crtc->state)
-		__drm_atomic_helper_crtc_destroy_state(crtc->state);
+	if (crtc->state) {
+		if (crtc->state->mode_blob)
+			drm_property_blob_put(crtc->state->mode_blob);
 
-	kfree(to_imx_crtc_state(crtc->state));
-	crtc->state = NULL;
+		state = to_imx_crtc_state(crtc->state);
+		memset(state, 0, sizeof(*state));
+	} else {
+		state = kzalloc(sizeof(*state), GFP_KERNEL);
+		if (!state)
+			return;
+		crtc->state = &state->base;
+	}
 
-	state = kzalloc(sizeof(*state), GFP_KERNEL);
-	if (state)
-		__drm_atomic_helper_crtc_reset(crtc, &state->base);
+	state->base.crtc = crtc;
 }
 
 static struct drm_crtc_state *imx_drm_crtc_duplicate_state(struct drm_crtc *crtc)
@@ -227,26 +230,24 @@ static bool ipu_crtc_mode_fixup(struct drm_crtc *crtc,
 }
 
 static int ipu_crtc_atomic_check(struct drm_crtc *crtc,
-				 struct drm_atomic_state *state)
+				 struct drm_crtc_state *state)
 {
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state,
-									  crtc);
 	u32 primary_plane_mask = drm_plane_mask(crtc->primary);
 
-	if (crtc_state->active && (primary_plane_mask & crtc_state->plane_mask) == 0)
+	if (state->active && (primary_plane_mask & state->plane_mask) == 0)
 		return -EINVAL;
 
 	return 0;
 }
 
 static void ipu_crtc_atomic_begin(struct drm_crtc *crtc,
-				  struct drm_atomic_state *state)
+				  struct drm_crtc_state *old_crtc_state)
 {
 	drm_crtc_vblank_on(crtc);
 }
 
 static void ipu_crtc_atomic_flush(struct drm_crtc *crtc,
-				  struct drm_atomic_state *state)
+				  struct drm_crtc_state *old_crtc_state)
 {
 	spin_lock_irq(&crtc->dev->event_lock);
 	if (crtc->state->event) {
@@ -437,13 +438,21 @@ static int ipu_drm_bind(struct device *dev, struct device *master, void *data)
 	struct ipu_client_platformdata *pdata = dev->platform_data;
 	struct drm_device *drm = data;
 	struct ipu_crtc *ipu_crtc;
+	int ret;
 
-	ipu_crtc = dev_get_drvdata(dev);
-	memset(ipu_crtc, 0, sizeof(*ipu_crtc));
+	ipu_crtc = devm_kzalloc(dev, sizeof(*ipu_crtc), GFP_KERNEL);
+	if (!ipu_crtc)
+		return -ENOMEM;
 
 	ipu_crtc->dev = dev;
 
-	return ipu_crtc_init(ipu_crtc, pdata, drm);
+	ret = ipu_crtc_init(ipu_crtc, pdata, drm);
+	if (ret)
+		return ret;
+
+	dev_set_drvdata(dev, ipu_crtc);
+
+	return 0;
 }
 
 static void ipu_drm_unbind(struct device *dev, struct device *master,
@@ -465,7 +474,6 @@ static const struct component_ops ipu_crtc_ops = {
 static int ipu_drm_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct ipu_crtc *ipu_crtc;
 	int ret;
 
 	if (!dev->platform_data)
@@ -474,12 +482,6 @@ static int ipu_drm_probe(struct platform_device *pdev)
 	ret = dma_set_coherent_mask(dev, DMA_BIT_MASK(32));
 	if (ret)
 		return ret;
-
-	ipu_crtc = devm_kzalloc(dev, sizeof(*ipu_crtc), GFP_KERNEL);
-	if (!ipu_crtc)
-		return -ENOMEM;
-
-	dev_set_drvdata(dev, ipu_crtc);
 
 	return component_add(dev, &ipu_crtc_ops);
 }

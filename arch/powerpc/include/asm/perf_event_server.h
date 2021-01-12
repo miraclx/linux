@@ -17,13 +17,6 @@
 
 struct perf_event;
 
-struct mmcr_regs {
-	unsigned long mmcr0;
-	unsigned long mmcr1;
-	unsigned long mmcr2;
-	unsigned long mmcra;
-	unsigned long mmcr3;
-};
 /*
  * This struct provides the constants and functions needed to
  * describe the PMU on a particular POWER-family CPU.
@@ -35,7 +28,7 @@ struct power_pmu {
 	unsigned long	add_fields;
 	unsigned long	test_adder;
 	int		(*compute_mmcr)(u64 events[], int n_ev,
-				unsigned int hwc[], struct mmcr_regs *mmcr,
+				unsigned int hwc[], unsigned long mmcr[],
 				struct perf_event *pevents[]);
 	int		(*get_constraint)(u64 event_id, unsigned long *mskp,
 				unsigned long *valp);
@@ -48,13 +41,13 @@ struct power_pmu {
 	unsigned long	group_constraint_val;
 	u64             (*bhrb_filter_map)(u64 branch_sample_type);
 	void            (*config_bhrb)(u64 pmu_bhrb_filter);
-	void		(*disable_pmc)(unsigned int pmc, struct mmcr_regs *mmcr);
+	void		(*disable_pmc)(unsigned int pmc, unsigned long mmcr[]);
 	int		(*limited_pmc_event)(u64 event_id);
 	u32		flags;
 	const struct attribute_group	**attr_groups;
 	int		n_generic;
 	int		*generic_events;
-	u64		(*cache_events)[PERF_COUNT_HW_CACHE_MAX]
+	int		(*cache_events)[PERF_COUNT_HW_CACHE_MAX]
 			       [PERF_COUNT_HW_CACHE_OP_MAX]
 			       [PERF_COUNT_HW_CACHE_RESULT_MAX];
 
@@ -62,11 +55,6 @@ struct power_pmu {
 	int 		*blacklist_ev;
 	/* BHRB entries in the PMU */
 	int		bhrb_nr;
-	/*
-	 * set this flag with `PERF_PMU_CAP_EXTENDED_REGS` if
-	 * the pmu supports extended perf regs capability
-	 */
-	int		capabilities;
 };
 
 /*
@@ -81,8 +69,6 @@ struct power_pmu {
 #define PPMU_HAS_SIER		0x00000040 /* Has SIER */
 #define PPMU_ARCH_207S		0x00000080 /* PMC is architecture v2.07S */
 #define PPMU_NO_SIAR		0x00000100 /* Do not use SIAR */
-#define PPMU_ARCH_31		0x00000200 /* Has MMCR3, SIER2 and SIER3 */
-#define PPMU_P10_DD1		0x00000400 /* Is power10 DD1 processor version */
 
 /*
  * Values for flags to get_alternatives()

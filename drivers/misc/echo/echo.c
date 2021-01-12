@@ -66,13 +66,13 @@
        Path Models", IEEE Transactions on communications, COM-25,
        No. 6, June
        1977.
-       https://www.rowetel.com/images/echo/dual_path_paper.pdf
+       http://www.rowetel.com/images/echo/dual_path_paper.pdf
 
    [2] The classic, very useful paper that tells you how to
        actually build a real world echo canceller:
 	 Messerschmitt, Hedberg, Cole, Haoui, Winship, "Digital Voice
 	 Echo Canceller with a TMS320020,
-	 https://www.rowetel.com/images/echo/spra129.pdf
+	 http://www.rowetel.com/images/echo/spra129.pdf
 
    [3] I have written a series of blog posts on this work, here is
        Part 1: http://www.rowetel.com/blog/?p=18
@@ -80,7 +80,7 @@
    [4] The source code http://svn.rowetel.com/software/oslec/
 
    [5] A nice reference on LMS filters:
-	 https://en.wikipedia.org/wiki/Least_mean_squares_filter
+	 http://en.wikipedia.org/wiki/Least_mean_squares_filter
 
    Credits:
 

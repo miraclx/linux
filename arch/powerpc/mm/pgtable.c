@@ -23,6 +23,7 @@
 #include <linux/percpu.h>
 #include <linux/hardirq.h>
 #include <linux/hugetlb.h>
+#include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <asm/tlb.h>
 #include <asm/hugetlb.h>
@@ -99,7 +100,7 @@ static pte_t set_pte_filter_hash(pte_t pte) { return pte; }
  * as we don't have two bits to spare for _PAGE_EXEC and _PAGE_HWEXEC so
  * instead we "filter out" the exec permission for non clean pages.
  */
-static inline pte_t set_pte_filter(pte_t pte)
+static pte_t set_pte_filter(pte_t pte)
 {
 	struct page *pg;
 
@@ -184,6 +185,9 @@ void set_pte_at(struct mm_struct *mm, unsigned long addr, pte_t *ptep,
 	 */
 	VM_WARN_ON(pte_hw_valid(*ptep) && !pte_protnone(*ptep));
 
+	/* Add the pte bit when trying to set a pte */
+	pte = pte_mkpte(pte);
+
 	/* Note: mm->context.id might not yet have been assigned as
 	 * this context might not have been activated yet when this
 	 * is called.
@@ -245,49 +249,22 @@ int huge_ptep_set_access_flags(struct vm_area_struct *vma,
 
 #else
 		/*
-		 * Not used on non book3s64 platforms.
-		 * 8xx compares it with mmu_virtual_psize to
-		 * know if it is a huge page or not.
+		 * Not used on non book3s64 platforms. But 8xx
+		 * can possibly use tsize derived from hstate.
 		 */
-		psize = MMU_PAGE_COUNT;
+		psize = 0;
 #endif
 		__ptep_set_access_flags(vma, ptep, pte, addr, psize);
 	}
 	return changed;
 #endif
 }
-
-#if defined(CONFIG_PPC_8xx)
-void set_huge_pte_at(struct mm_struct *mm, unsigned long addr, pte_t *ptep, pte_t pte)
-{
-	pmd_t *pmd = pmd_off(mm, addr);
-	pte_basic_t val;
-	pte_basic_t *entry = &ptep->pte;
-	int num, i;
-
-	/*
-	 * Make sure hardware valid bit is not set. We don't do
-	 * tlb flush for this update.
-	 */
-	VM_WARN_ON(pte_hw_valid(*ptep) && !pte_protnone(*ptep));
-
-	pte = set_pte_filter(pte);
-
-	val = pte_val(pte);
-
-	num = number_of_cells_per_pte(pmd, val, 1);
-
-	for (i = 0; i < num; i++, entry++, val += SZ_4K)
-		*entry = val;
-}
-#endif
 #endif /* CONFIG_HUGETLB_PAGE */
 
 #ifdef CONFIG_DEBUG_VM
 void assert_pte_locked(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgd;
-	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 
@@ -295,14 +272,12 @@ void assert_pte_locked(struct mm_struct *mm, unsigned long addr)
 		return;
 	pgd = mm->pgd + pgd_index(addr);
 	BUG_ON(pgd_none(*pgd));
-	p4d = p4d_offset(pgd, addr);
-	BUG_ON(p4d_none(*p4d));
-	pud = pud_offset(p4d, addr);
+	pud = pud_offset(pgd, addr);
 	BUG_ON(pud_none(*pud));
 	pmd = pmd_offset(pud, addr);
 	/*
 	 * khugepaged to collapse normal pages to hugepage, first set
-	 * pmd to none to force page fault/gup to take mmap_lock. After
+	 * pmd to none to force page fault/gup to take mmap_sem. After
 	 * pmd is set to none, we do a pte_clear which does this assertion
 	 * so if we find pmd none, return.
 	 */
@@ -337,13 +312,12 @@ EXPORT_SYMBOL_GPL(vmalloc_to_phys);
 pte_t *__find_linux_pte(pgd_t *pgdir, unsigned long ea,
 			bool *is_thp, unsigned *hpage_shift)
 {
-	pgd_t *pgdp;
-	p4d_t p4d, *p4dp;
+	pgd_t pgd, *pgdp;
 	pud_t pud, *pudp;
 	pmd_t pmd, *pmdp;
 	pte_t *ret_pte;
 	hugepd_t *hpdp = NULL;
-	unsigned pdshift;
+	unsigned pdshift = PGDIR_SHIFT;
 
 	if (hpage_shift)
 		*hpage_shift = 0;
@@ -351,28 +325,24 @@ pte_t *__find_linux_pte(pgd_t *pgdir, unsigned long ea,
 	if (is_thp)
 		*is_thp = false;
 
+	pgdp = pgdir + pgd_index(ea);
+	pgd  = READ_ONCE(*pgdp);
 	/*
 	 * Always operate on the local stack value. This make sure the
 	 * value don't get updated by a parallel THP split/collapse,
 	 * page fault or a page unmap. The return pte_t * is still not
 	 * stable. So should be checked there for above conditions.
-	 * Top level is an exception because it is folded into p4d.
 	 */
-	pgdp = pgdir + pgd_index(ea);
-	p4dp = p4d_offset(pgdp, ea);
-	p4d  = READ_ONCE(*p4dp);
-	pdshift = P4D_SHIFT;
-
-	if (p4d_none(p4d))
+	if (pgd_none(pgd))
 		return NULL;
 
-	if (p4d_is_leaf(p4d)) {
-		ret_pte = (pte_t *)p4dp;
+	if (pgd_is_leaf(pgd)) {
+		ret_pte = (pte_t *)pgdp;
 		goto out;
 	}
 
-	if (is_hugepd(__hugepd(p4d_val(p4d)))) {
-		hpdp = (hugepd_t *)&p4d;
+	if (is_hugepd(__hugepd(pgd_val(pgd)))) {
+		hpdp = (hugepd_t *)&pgd;
 		goto out_huge;
 	}
 
@@ -382,7 +352,7 @@ pte_t *__find_linux_pte(pgd_t *pgdir, unsigned long ea,
 	 * irq disabled
 	 */
 	pdshift = PUD_SHIFT;
-	pudp = pud_offset(&p4d, ea);
+	pudp = pud_offset(&pgd, ea);
 	pud  = READ_ONCE(*pudp);
 
 	if (pud_none(pud))

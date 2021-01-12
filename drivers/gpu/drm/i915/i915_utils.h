@@ -266,6 +266,19 @@ static inline int list_is_last_rcu(const struct list_head *list,
 	return READ_ONCE(list->next) == head;
 }
 
+/*
+ * Wait until the work is finally complete, even if it tries to postpone
+ * by requeueing itself. Note, that if the worker never cancels itself,
+ * we will spin forever.
+ */
+static inline void drain_delayed_work(struct delayed_work *dw)
+{
+	do {
+		while (flush_delayed_work(dw))
+			;
+	} while (delayed_work_pending(dw));
+}
+
 static inline unsigned long msecs_to_jiffies_timeout(const unsigned int m)
 {
 	unsigned long j = msecs_to_jiffies(m);
@@ -423,8 +436,7 @@ static inline const char *enableddisabled(bool v)
 	return v ? "enabled" : "disabled";
 }
 
-void add_taint_for_CI(struct drm_i915_private *i915, unsigned int taint);
-static inline void __add_taint_for_CI(unsigned int taint)
+static inline void add_taint_for_CI(unsigned int taint)
 {
 	/*
 	 * The system is "ok", just about surviving for the user, but

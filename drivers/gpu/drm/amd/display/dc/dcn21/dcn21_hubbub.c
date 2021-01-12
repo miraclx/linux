@@ -49,6 +49,11 @@
 #define FN(reg_name, field_name) \
 	hubbub1->shifts->field_name, hubbub1->masks->field_name
 
+#ifdef NUM_VMID
+#undef NUM_VMID
+#endif
+#define NUM_VMID 16
+
 static uint32_t convert_and_clamp(
 	uint32_t wm_ns,
 	uint32_t refclk_mhz,
@@ -99,8 +104,6 @@ void dcn21_dchvm_init(struct hubbub *hubbub)
 
 		//Poll until HOSTVM_PREFETCH_DONE = 1
 		REG_WAIT(DCHVM_RIOMMU_STAT0, HOSTVM_PREFETCH_DONE, 1, 5, 100);
-
-		hubbub->riommu_active = true;
 	}
 }
 
@@ -135,7 +138,7 @@ int hubbub21_init_dchub(struct hubbub *hubbub,
 
 	dcn21_dchvm_init(hubbub);
 
-	return hubbub1->num_vmid;
+	return NUM_VMID;
 }
 
 bool hubbub21_program_urgent_watermarks(

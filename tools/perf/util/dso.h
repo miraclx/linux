@@ -30,7 +30,6 @@ enum dso_binary_type {
 	DSO_BINARY_TYPE__BUILD_ID_CACHE_DEBUGINFO,
 	DSO_BINARY_TYPE__FEDORA_DEBUGINFO,
 	DSO_BINARY_TYPE__UBUNTU_DEBUGINFO,
-	DSO_BINARY_TYPE__MIXEDUP_UBUNTU_DEBUGINFO,
 	DSO_BINARY_TYPE__BUILDID_DEBUGINFO,
 	DSO_BINARY_TYPE__SYSTEM_PATH_DSO,
 	DSO_BINARY_TYPE__GUEST_KMODULE,
@@ -41,15 +40,13 @@ enum dso_binary_type {
 	DSO_BINARY_TYPE__GUEST_KCORE,
 	DSO_BINARY_TYPE__OPENEMBEDDED_DEBUGINFO,
 	DSO_BINARY_TYPE__BPF_PROG_INFO,
-	DSO_BINARY_TYPE__BPF_IMAGE,
-	DSO_BINARY_TYPE__OOL,
 	DSO_BINARY_TYPE__NOT_FOUND,
 };
 
-enum dso_space_type {
-	DSO_SPACE__USER = 0,
-	DSO_SPACE__KERNEL,
-	DSO_SPACE__KERNEL_GUEST
+enum dso_kernel_type {
+	DSO_TYPE_USER = 0,
+	DSO_TYPE_KERNEL,
+	DSO_TYPE_GUEST_KERNEL
 };
 
 enum dso_swap_type {
@@ -139,7 +136,7 @@ struct dso_cache {
 	struct rb_node	rb_node;
 	u64 offset;
 	u64 size;
-	char data[];
+	char data[0];
 };
 
 struct auxtrace_cache;
@@ -160,7 +157,7 @@ struct dso {
 	void		 *a2l;
 	char		 *symsrc_filename;
 	unsigned int	 a2l_fails;
-	enum dso_space_type	kernel;
+	enum dso_kernel_type	kernel;
 	enum dso_swap_type	needs_swap;
 	enum dso_binary_type	symtab_type;
 	enum dso_binary_type	binary_type;
@@ -176,7 +173,7 @@ struct dso {
 	bool		 sorted_by_name;
 	bool		 loaded;
 	u8		 rel;
-	struct build_id	 bid;
+	u8		 build_id[BUILD_ID_SIZE];
 	u64		 text_offset;
 	const char	 *short_name;
 	const char	 *long_name;
@@ -211,7 +208,7 @@ struct dso {
 	struct nsinfo	*nsinfo;
 	struct dso_id	 id;
 	refcount_t	 refcnt;
-	char		 name[];
+	char		 name[0];
 };
 
 /* dso__for_each_symbol - iterate over the symbols of given type
@@ -260,8 +257,8 @@ bool dso__sorted_by_name(const struct dso *dso);
 void dso__set_sorted_by_name(struct dso *dso);
 void dso__sort_by_name(struct dso *dso);
 
-void dso__set_build_id(struct dso *dso, struct build_id *bid);
-bool dso__build_id_equal(const struct dso *dso, struct build_id *bid);
+void dso__set_build_id(struct dso *dso, void *build_id);
+bool dso__build_id_equal(const struct dso *dso, u8 *build_id);
 void dso__read_running_kernel_build_id(struct dso *dso,
 				       struct machine *machine);
 int dso__kernel_module_get_build_id(struct dso *dso, const char *root_dir);
@@ -274,8 +271,6 @@ bool dso__needs_decompress(struct dso *dso);
 int dso__decompress_kmodule_fd(struct dso *dso, const char *name);
 int dso__decompress_kmodule_path(struct dso *dso, const char *name,
 				 char *pathname, size_t len);
-int filename__decompress(const char *name, char *pathname,
-			 size_t len, int comp, int *err);
 
 #define KMOD_DECOMP_NAME  "/tmp/perf-kmod-XXXXXX"
 #define KMOD_DECOMP_LEN   sizeof(KMOD_DECOMP_NAME)
@@ -364,6 +359,7 @@ struct dso *machine__findnew_kernel(struct machine *machine, const char *name,
 
 void dso__reset_find_symbol_cache(struct dso *dso);
 
+size_t dso__fprintf_buildid(struct dso *dso, FILE *fp);
 size_t dso__fprintf_symbols_by_name(struct dso *dso, FILE *fp);
 size_t dso__fprintf(struct dso *dso, FILE *fp);
 

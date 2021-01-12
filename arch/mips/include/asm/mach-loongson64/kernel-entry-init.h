@@ -19,6 +19,10 @@
 	.macro	kernel_entry_setup
 	.set	push
 	.set	mips64
+	/* Set LPA on LOONGSON3 config3 */
+	mfc0	t0, CP0_CONFIG3
+	or	t0, (0x1 << 7)
+	mtc0	t0, CP0_CONFIG3
 	/* Set ELPA on LOONGSON3 pagegrain */
 	mfc0	t0, CP0_PAGEGRAIN
 	or	t0, (0x1 << 29)
@@ -50,6 +54,10 @@
 	.macro	smp_slave_setup
 	.set	push
 	.set	mips64
+	/* Set LPA on LOONGSON3 config3 */
+	mfc0	t0, CP0_CONFIG3
+	or	t0, (0x1 << 7)
+	mtc0	t0, CP0_CONFIG3
 	/* Set ELPA on LOONGSON3 pagegrain */
 	mfc0	t0, CP0_PAGEGRAIN
 	or	t0, (0x1 << 29)

@@ -1,7 +1,7 @@
 /*
  * OMAP2plus display device setup / initialization.
  *
- * Copyright (C) 2010 Texas Instruments Incorporated - https://www.ti.com/
+ * Copyright (C) 2010 Texas Instruments Incorporated - http://www.ti.com/
  *	Senthilvadivu Guruswamy
  *	Sumit Semwal
  *
@@ -385,7 +385,8 @@ int omap_dss_reset(struct omap_hwmod *oh)
 	}
 
 	for (i = oh->opt_clks_cnt, oc = oh->opt_clks; i > 0; i--, oc++)
-		clk_prepare_enable(oc->_clk);
+		if (oc->_clk)
+			clk_prepare_enable(oc->_clk);
 
 	dispc_disable_outputs();
 
@@ -411,7 +412,8 @@ int omap_dss_reset(struct omap_hwmod *oh)
 		pr_debug("dss_core: softreset done\n");
 
 	for (i = oh->opt_clks_cnt, oc = oh->opt_clks; i > 0; i--, oc++)
-		clk_disable_unprepare(oc->_clk);
+		if (oc->_clk)
+			clk_disable_unprepare(oc->_clk);
 
 	r = (c == MAX_MODULE_SOFTRESET_WAIT) ? -ETIMEDOUT : 0;
 

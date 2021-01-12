@@ -94,12 +94,13 @@ static int pxa_ssp_startup(struct snd_pcm_substream *substream,
 	struct snd_dmaengine_dai_dma_data *dma;
 	int ret = 0;
 
-	if (!snd_soc_dai_active(cpu_dai)) {
+	if (!cpu_dai->active) {
 		clk_prepare_enable(ssp->clk);
 		pxa_ssp_disable(ssp);
 	}
 
-	clk_prepare_enable(priv->extclk);
+	if (priv->extclk)
+		clk_prepare_enable(priv->extclk);
 
 	dma = kzalloc(sizeof(struct snd_dmaengine_dai_dma_data), GFP_KERNEL);
 	if (!dma)
@@ -118,12 +119,13 @@ static void pxa_ssp_shutdown(struct snd_pcm_substream *substream,
 	struct ssp_priv *priv = snd_soc_dai_get_drvdata(cpu_dai);
 	struct ssp_device *ssp = priv->ssp;
 
-	if (!snd_soc_dai_active(cpu_dai)) {
+	if (!cpu_dai->active) {
 		pxa_ssp_disable(ssp);
 		clk_disable_unprepare(ssp->clk);
 	}
 
-	clk_disable_unprepare(priv->extclk);
+	if (priv->extclk)
+		clk_disable_unprepare(priv->extclk);
 
 	kfree(snd_soc_dai_get_dma_data(cpu_dai, substream));
 	snd_soc_dai_set_dma_data(cpu_dai, substream, NULL);
@@ -136,7 +138,7 @@ static int pxa_ssp_suspend(struct snd_soc_component *component)
 	struct ssp_priv *priv = snd_soc_component_get_drvdata(component);
 	struct ssp_device *ssp = priv->ssp;
 
-	if (!snd_soc_component_active(component))
+	if (!component->active)
 		clk_prepare_enable(ssp->clk);
 
 	priv->cr0 = __raw_readl(ssp->mmio_base + SSCR0);
@@ -163,7 +165,7 @@ static int pxa_ssp_resume(struct snd_soc_component *component)
 	__raw_writel(priv->to,  ssp->mmio_base + SSTO);
 	__raw_writel(priv->psp, ssp->mmio_base + SSPSP);
 
-	if (snd_soc_component_active(component))
+	if (component->active)
 		pxa_ssp_enable(ssp);
 	else
 		clk_disable_unprepare(ssp->clk);
@@ -176,7 +178,7 @@ static int pxa_ssp_resume(struct snd_soc_component *component)
 #define pxa_ssp_resume	NULL
 #endif
 
-/*
+/**
  * ssp_set_clkdiv - set SSP clock divider
  * @div: serial clock rate divider
  */
@@ -486,7 +488,7 @@ static int pxa_ssp_configure_dai_fmt(struct ssp_priv *priv)
 
 	case SND_SOC_DAIFMT_DSP_A:
 		sspsp |= SSPSP_FSRT;
-		fallthrough;
+		/* fall through */
 	case SND_SOC_DAIFMT_DSP_B:
 		sscr0 |= SSCR0_MOD | SSCR0_PSP;
 		sscr1 |= SSCR1_TRAIL | SSCR1_RWOT;

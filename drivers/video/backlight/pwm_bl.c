@@ -108,8 +108,13 @@ static int compute_duty_cycle(struct pwm_bl_data *pb, int brightness)
 static int pwm_backlight_update_status(struct backlight_device *bl)
 {
 	struct pwm_bl_data *pb = bl_get_data(bl);
-	int brightness = backlight_get_brightness(bl);
+	int brightness = bl->props.brightness;
 	struct pwm_state state;
+
+	if (bl->props.power != FB_BLANK_UNBLANK ||
+	    bl->props.fb_blank != FB_BLANK_UNBLANK ||
+	    bl->props.state & BL_CORE_FBBLANK)
+		brightness = 0;
 
 	if (pb->notify)
 		brightness = pb->notify(pb->dev, brightness);
@@ -230,7 +235,8 @@ static int pwm_backlight_parse_dt(struct device *dev,
 				  struct platform_pwm_backlight_data *data)
 {
 	struct device_node *node = dev->of_node;
-	unsigned int num_levels;
+	unsigned int num_levels = 0;
+	unsigned int levels_count;
 	unsigned int num_steps = 0;
 	struct property *prop;
 	unsigned int *table;
@@ -259,11 +265,12 @@ static int pwm_backlight_parse_dt(struct device *dev,
 	if (!prop)
 		return 0;
 
-	num_levels = length / sizeof(u32);
+	data->max_brightness = length / sizeof(u32);
 
 	/* read brightness levels from DT property */
-	if (num_levels > 0) {
-		size_t size = sizeof(*data->levels) * num_levels;
+	if (data->max_brightness > 0) {
+		size_t size = sizeof(*data->levels) * data->max_brightness;
+		unsigned int i, j, n = 0;
 
 		data->levels = devm_kzalloc(dev, size, GFP_KERNEL);
 		if (!data->levels)
@@ -271,7 +278,7 @@ static int pwm_backlight_parse_dt(struct device *dev,
 
 		ret = of_property_read_u32_array(node, "brightness-levels",
 						 data->levels,
-						 num_levels);
+						 data->max_brightness);
 		if (ret < 0)
 			return ret;
 
@@ -296,13 +303,7 @@ static int pwm_backlight_parse_dt(struct device *dev,
 		 * between two points.
 		 */
 		if (num_steps) {
-			unsigned int num_input_levels = num_levels;
-			unsigned int i;
-			u32 x1, x2, x, dx;
-			u32 y1, y2;
-			s64 dy;
-
-			if (num_input_levels < 2) {
+			if (data->max_brightness < 2) {
 				dev_err(dev, "can't interpolate\n");
 				return -EINVAL;
 			}
@@ -312,7 +313,14 @@ static int pwm_backlight_parse_dt(struct device *dev,
 			 * taking in consideration the number of interpolated
 			 * steps between two levels.
 			 */
-			num_levels = (num_input_levels - 1) * num_steps + 1;
+			for (i = 0; i < data->max_brightness - 1; i++) {
+				if ((data->levels[i + 1] - data->levels[i]) /
+				   num_steps)
+					num_levels += num_steps;
+				else
+					num_levels++;
+			}
+			num_levels++;
 			dev_dbg(dev, "new number of brightness levels: %d\n",
 				num_levels);
 
@@ -324,25 +332,24 @@ static int pwm_backlight_parse_dt(struct device *dev,
 			table = devm_kzalloc(dev, size, GFP_KERNEL);
 			if (!table)
 				return -ENOMEM;
-			/*
-			 * Fill the interpolated table[x] = y
-			 * by draw lines between each (x1, y1) to (x2, y2).
-			 */
-			dx = num_steps;
-			for (i = 0; i < num_input_levels - 1; i++) {
-				x1 = i * dx;
-				x2 = x1 + dx;
-				y1 = data->levels[i];
-				y2 = data->levels[i + 1];
-				dy = (s64)y2 - y1;
 
-				for (x = x1; x < x2; x++) {
-					table[x] = y1 +
-						div_s64(dy * (x - x1), dx);
+			/* Fill the interpolated table. */
+			levels_count = 0;
+			for (i = 0; i < data->max_brightness - 1; i++) {
+				value = data->levels[i];
+				n = (data->levels[i + 1] - value) / num_steps;
+				if (n > 0) {
+					for (j = 0; j < num_steps; j++) {
+						table[levels_count] = value;
+						value += n;
+						levels_count++;
+					}
+				} else {
+					table[levels_count] = data->levels[i];
+					levels_count++;
 				}
 			}
-			/* Fill in the last point, since no line starts here. */
-			table[x2] = y2;
+			table[levels_count] = data->levels[i];
 
 			/*
 			 * As we use interpolation lets remove current
@@ -351,9 +358,15 @@ static int pwm_backlight_parse_dt(struct device *dev,
 			 */
 			devm_kfree(dev, data->levels);
 			data->levels = table;
+
+			/*
+			 * Reassign max_brightness value to the new total number
+			 * of brightness levels.
+			 */
+			data->max_brightness = num_levels;
 		}
 
-		data->max_brightness = num_levels - 1;
+		data->max_brightness--;
 	}
 
 	return 0;
@@ -593,8 +606,7 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 		pb->scale = data->max_brightness;
 	}
 
-	pb->lth_brightness = data->lth_brightness * (div_u64(state.period,
-				pb->scale));
+	pb->lth_brightness = data->lth_brightness * (state.period / pb->scale);
 
 	props.type = BACKLIGHT_RAW;
 	props.max_brightness = data->max_brightness;

@@ -57,9 +57,14 @@ static inline int put_reg(struct task_struct *task,
 
 static int gpr_get(struct task_struct *target,
 		   const struct user_regset *regset,
-		   struct membuf to)
+		   unsigned int pos, unsigned int count,
+		   void *kbuf, void __user *ubuf)
 {
-	return membuf_write(&to, task_pt_regs(target), sizeof(struct pt_regs));
+	struct pt_regs *regs = task_pt_regs(target);
+
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				   regs,
+				   0, sizeof(*regs));
 }
 
 enum c6x_regset {
@@ -72,7 +77,7 @@ static const struct user_regset c6x_regsets[] = {
 		.n = ELF_NGREG,
 		.size = sizeof(u32),
 		.align = sizeof(u32),
-		.regset_get = gpr_get,
+		.get = gpr_get,
 	},
 };
 

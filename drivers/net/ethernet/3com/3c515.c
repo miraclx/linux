@@ -22,6 +22,7 @@
 
 */
 
+#include <linux/vermagic.h>
 #define DRV_NAME		"3c515"
 
 #define CORKSCREW 1

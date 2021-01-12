@@ -8,16 +8,34 @@
 #include <linux/ratelimit.h>
 #include <linux/kasan.h>
 
-bool _page_poisoning_enabled_early;
-EXPORT_SYMBOL(_page_poisoning_enabled_early);
-DEFINE_STATIC_KEY_FALSE(_page_poisoning_enabled);
-EXPORT_SYMBOL(_page_poisoning_enabled);
+static bool want_page_poisoning __read_mostly;
 
 static int __init early_page_poison_param(char *buf)
 {
-	return kstrtobool(buf, &_page_poisoning_enabled_early);
+	if (!buf)
+		return -EINVAL;
+	return strtobool(buf, &want_page_poisoning);
 }
 early_param("page_poison", early_page_poison_param);
+
+/**
+ * page_poisoning_enabled - check if page poisoning is enabled
+ *
+ * Return true if page poisoning is enabled, or false if not.
+ */
+bool page_poisoning_enabled(void)
+{
+	/*
+	 * Assumes that debug_pagealloc_enabled is set before
+	 * memblock_free_all.
+	 * Page poisoning is debug page alloc for some arches. If
+	 * either of those options are enabled, enable poisoning.
+	 */
+	return (want_page_poisoning ||
+		(!IS_ENABLED(CONFIG_ARCH_SUPPORTS_DEBUG_PAGEALLOC) &&
+		debug_pagealloc_enabled()));
+}
+EXPORT_SYMBOL_GPL(page_poisoning_enabled);
 
 static void poison_page(struct page *page)
 {
@@ -25,12 +43,12 @@ static void poison_page(struct page *page)
 
 	/* KASAN still think the page is in-use, so skip it. */
 	kasan_disable_current();
-	memset(kasan_reset_tag(addr), PAGE_POISON, PAGE_SIZE);
+	memset(addr, PAGE_POISON, PAGE_SIZE);
 	kasan_enable_current();
 	kunmap_atomic(addr);
 }
 
-void __kernel_poison_pages(struct page *page, int n)
+static void poison_pages(struct page *page, int n)
 {
 	int i;
 
@@ -50,6 +68,9 @@ static void check_poison_mem(unsigned char *mem, size_t bytes)
 	static DEFINE_RATELIMIT_STATE(ratelimit, 5 * HZ, 10);
 	unsigned char *start;
 	unsigned char *end;
+
+	if (IS_ENABLED(CONFIG_PAGE_POISONING_NO_SANITY))
+		return;
 
 	start = memchr_inv(mem, PAGE_POISON, bytes);
 	if (!start)
@@ -86,12 +107,23 @@ static void unpoison_page(struct page *page)
 	kunmap_atomic(addr);
 }
 
-void __kernel_unpoison_pages(struct page *page, int n)
+static void unpoison_pages(struct page *page, int n)
 {
 	int i;
 
 	for (i = 0; i < n; i++)
 		unpoison_page(page + i);
+}
+
+void kernel_poison_pages(struct page *page, int numpages, int enable)
+{
+	if (!page_poisoning_enabled())
+		return;
+
+	if (enable)
+		unpoison_pages(page, numpages);
+	else
+		poison_pages(page, numpages);
 }
 
 #ifndef CONFIG_ARCH_SUPPORTS_DEBUG_PAGEALLOC

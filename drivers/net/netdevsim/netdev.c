@@ -22,7 +22,6 @@
 #include <net/netlink.h>
 #include <net/pkt_cls.h>
 #include <net/rtnetlink.h>
-#include <net/udp_tunnel.h>
 
 #include "netdevsim.h"
 
@@ -258,8 +257,6 @@ static const struct net_device_ops nsim_netdev_ops = {
 	.ndo_setup_tc		= nsim_setup_tc,
 	.ndo_set_features	= nsim_set_features,
 	.ndo_bpf		= nsim_bpf,
-	.ndo_udp_tunnel_add	= udp_tunnel_nic_add_port,
-	.ndo_udp_tunnel_del	= udp_tunnel_nic_del_port,
 	.ndo_get_devlink_port	= nsim_get_devlink_port,
 };
 
@@ -301,16 +298,11 @@ nsim_create(struct nsim_dev *nsim_dev, struct nsim_dev_port *nsim_dev_port)
 	ns->nsim_bus_dev = nsim_dev->nsim_bus_dev;
 	SET_NETDEV_DEV(dev, &ns->nsim_bus_dev->dev);
 	dev->netdev_ops = &nsim_netdev_ops;
-	nsim_ethtool_init(ns);
-
-	err = nsim_udp_tunnels_info_create(nsim_dev, dev);
-	if (err)
-		goto err_free_netdev;
 
 	rtnl_lock();
 	err = nsim_bpf_init(ns);
 	if (err)
-		goto err_utn_destroy;
+		goto err_free_netdev;
 
 	nsim_ipsec_init(ns);
 
@@ -324,9 +316,7 @@ nsim_create(struct nsim_dev *nsim_dev, struct nsim_dev_port *nsim_dev_port)
 err_ipsec_teardown:
 	nsim_ipsec_teardown(ns);
 	nsim_bpf_uninit(ns);
-err_utn_destroy:
 	rtnl_unlock();
-	nsim_udp_tunnels_info_destroy(dev);
 err_free_netdev:
 	free_netdev(dev);
 	return ERR_PTR(err);
@@ -341,7 +331,6 @@ void nsim_destroy(struct netdevsim *ns)
 	nsim_ipsec_teardown(ns);
 	nsim_bpf_uninit(ns);
 	rtnl_unlock();
-	nsim_udp_tunnels_info_destroy(dev);
 	free_netdev(dev);
 }
 

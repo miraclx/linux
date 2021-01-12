@@ -112,13 +112,13 @@ static int ccp_check_key_length(unsigned int len)
 static void ccp_rsa_free_key_bufs(struct ccp_ctx *ctx)
 {
 	/* Clean up old key data */
-	kfree_sensitive(ctx->u.rsa.e_buf);
+	kzfree(ctx->u.rsa.e_buf);
 	ctx->u.rsa.e_buf = NULL;
 	ctx->u.rsa.e_len = 0;
-	kfree_sensitive(ctx->u.rsa.n_buf);
+	kzfree(ctx->u.rsa.n_buf);
 	ctx->u.rsa.n_buf = NULL;
 	ctx->u.rsa.n_len = 0;
-	kfree_sensitive(ctx->u.rsa.d_buf);
+	kzfree(ctx->u.rsa.d_buf);
 	ctx->u.rsa.d_buf = NULL;
 	ctx->u.rsa.d_len = 0;
 }

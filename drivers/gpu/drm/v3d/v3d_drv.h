@@ -14,6 +14,7 @@
 #include "uapi/drm/v3d_drm.h"
 
 struct clk;
+struct device;
 struct platform_device;
 struct reset_control;
 
@@ -46,6 +47,8 @@ struct v3d_dev {
 	int ver;
 	bool single_irq_line;
 
+	struct device *dev;
+	struct platform_device *pdev;
 	void __iomem *hub_regs;
 	void __iomem *core_regs[3];
 	void __iomem *bridge_regs;
@@ -118,7 +121,7 @@ struct v3d_dev {
 static inline struct v3d_dev *
 to_v3d_dev(struct drm_device *dev)
 {
-	return container_of(dev, struct v3d_dev, drm);
+	return (struct v3d_dev *)dev->dev_private;
 }
 
 static inline bool
@@ -126,8 +129,6 @@ v3d_has_csd(struct v3d_dev *v3d)
 {
 	return v3d->ver >= 41;
 }
-
-#define v3d_to_pdev(v3d) to_platform_device((v3d)->drm.dev)
 
 /* The per-fd struct, which tracks the MMU mappings. */
 struct v3d_file_priv {
@@ -315,7 +316,7 @@ struct drm_gem_object *v3d_prime_import_sg_table(struct drm_device *dev,
 						 struct sg_table *sgt);
 
 /* v3d_debugfs.c */
-void v3d_debugfs_init(struct drm_minor *minor);
+int v3d_debugfs_init(struct drm_minor *minor);
 
 /* v3d_fence.c */
 extern const struct dma_fence_ops v3d_fence_ops;

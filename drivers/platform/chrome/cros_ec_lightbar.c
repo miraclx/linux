@@ -116,10 +116,8 @@ static int get_lightbar_version(struct cros_ec_dev *ec,
 
 	param = (struct ec_params_lightbar *)msg->data;
 	param->cmd = LIGHTBAR_CMD_VERSION;
-	msg->outsize = sizeof(param->cmd);
-	msg->result = sizeof(resp->version);
 	ret = cros_ec_cmd_xfer_status(ec->ec_dev, msg);
-	if (ret < 0 && ret != -EINVAL) {
+	if (ret < 0) {
 		ret = 0;
 		goto exit;
 	}
@@ -300,9 +298,11 @@ static ssize_t sequence_show(struct device *dev,
 		goto exit;
 
 	ret = cros_ec_cmd_xfer_status(ec->ec_dev, msg);
-	if (ret < 0) {
-		ret = scnprintf(buf, PAGE_SIZE, "XFER / EC ERROR %d / %d\n",
-				ret, msg->result);
+	if (ret == -EPROTO) {
+		ret = scnprintf(buf, PAGE_SIZE,
+				"ERROR: EC returned %d\n", msg->result);
+		goto exit;
+	} else if (ret < 0) {
 		goto exit;
 	}
 

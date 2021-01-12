@@ -11,5 +11,3 @@ PCI Endpoint Framework
    pci-endpoint-cfs
    pci-test-function
    pci-test-howto
-
-   function/binding/pci-test

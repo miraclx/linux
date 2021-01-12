@@ -267,6 +267,7 @@ static int intel_dsi_compute_config(struct intel_encoder *encoder,
 	struct intel_dsi *intel_dsi = container_of(encoder, struct intel_dsi,
 						   base);
 	struct intel_connector *intel_connector = intel_dsi->attached_connector;
+	struct intel_crtc *crtc = to_intel_crtc(pipe_config->uapi.crtc);
 	const struct drm_display_mode *fixed_mode = intel_connector->panel.fixed_mode;
 	struct drm_display_mode *adjusted_mode = &pipe_config->hw.adjusted_mode;
 	int ret;
@@ -278,11 +279,11 @@ static int intel_dsi_compute_config(struct intel_encoder *encoder,
 		intel_fixed_panel_mode(fixed_mode, adjusted_mode);
 
 		if (HAS_GMCH(dev_priv))
-			ret = intel_gmch_panel_fitting(pipe_config, conn_state);
+			intel_gmch_panel_fitting(crtc, pipe_config,
+						 conn_state->scaling_mode);
 		else
-			ret = intel_pch_panel_fitting(pipe_config, conn_state);
-		if (ret)
-			return ret;
+			intel_pch_panel_fitting(crtc, pipe_config,
+						conn_state->scaling_mode);
 	}
 
 	if (adjusted_mode->flags & DRM_MODE_FLAG_DBLSCAN)
@@ -298,7 +299,7 @@ static int intel_dsi_compute_config(struct intel_encoder *encoder,
 
 	if (IS_GEN9_LP(dev_priv)) {
 		/* Enable Frame time stamp based scanline reporting */
-		pipe_config->mode_flags |=
+		adjusted_mode->private_flags |=
 			I915_MODE_FLAG_GET_SCANLINE_FROM_TIMESTAMP;
 
 		/* Dual link goes to DSI transcoder A. */
@@ -758,8 +759,7 @@ static void intel_dsi_unprepare(struct intel_encoder *encoder);
  * DSI port enable has to be done before pipe and plane enable, so we do it in
  * the pre_enable hook instead of the enable hook.
  */
-static void intel_dsi_pre_enable(struct intel_atomic_state *state,
-				 struct intel_encoder *encoder,
+static void intel_dsi_pre_enable(struct intel_encoder *encoder,
 				 const struct intel_crtc_state *pipe_config,
 				 const struct drm_connector_state *conn_state)
 {
@@ -858,12 +858,11 @@ static void intel_dsi_pre_enable(struct intel_atomic_state *state,
 	intel_dsi_vbt_exec_sequence(intel_dsi, MIPI_SEQ_BACKLIGHT_ON);
 }
 
-static void bxt_dsi_enable(struct intel_atomic_state *state,
-			   struct intel_encoder *encoder,
+static void bxt_dsi_enable(struct intel_encoder *encoder,
 			   const struct intel_crtc_state *crtc_state,
 			   const struct drm_connector_state *conn_state)
 {
-	drm_WARN_ON(state->base.dev, crtc_state->has_pch_encoder);
+	WARN_ON(crtc_state->has_pch_encoder);
 
 	intel_crtc_vblank_on(crtc_state);
 }
@@ -872,16 +871,14 @@ static void bxt_dsi_enable(struct intel_atomic_state *state,
  * DSI port disable has to be done after pipe and plane disable, so we do it in
  * the post_disable hook.
  */
-static void intel_dsi_disable(struct intel_atomic_state *state,
-			      struct intel_encoder *encoder,
+static void intel_dsi_disable(struct intel_encoder *encoder,
 			      const struct intel_crtc_state *old_crtc_state,
 			      const struct drm_connector_state *old_conn_state)
 {
-	struct drm_i915_private *i915 = to_i915(encoder->base.dev);
 	struct intel_dsi *intel_dsi = enc_to_intel_dsi(encoder);
 	enum port port;
 
-	drm_dbg_kms(&i915->drm, "\n");
+	DRM_DEBUG_KMS("\n");
 
 	intel_dsi_vbt_exec_sequence(intel_dsi, MIPI_SEQ_BACKLIGHT_OFF);
 	intel_panel_disable_backlight(old_conn_state);
@@ -909,8 +906,7 @@ static void intel_dsi_clear_device_ready(struct intel_encoder *encoder)
 		vlv_dsi_clear_device_ready(encoder);
 }
 
-static void intel_dsi_post_disable(struct intel_atomic_state *state,
-				   struct intel_encoder *encoder,
+static void intel_dsi_post_disable(struct intel_encoder *encoder,
 				   const struct intel_crtc_state *old_crtc_state,
 				   const struct drm_connector_state *old_conn_state)
 {
@@ -982,13 +978,6 @@ static void intel_dsi_post_disable(struct intel_atomic_state *state,
 	 * FIXME As we do with eDP, just make a note of the time here
 	 * and perform the wait before the next panel power on.
 	 */
-	intel_dsi_msleep(intel_dsi, intel_dsi->panel_pwr_cycle_delay);
-}
-
-static void intel_dsi_shutdown(struct intel_encoder *encoder)
-{
-	struct intel_dsi *intel_dsi = enc_to_intel_dsi(encoder);
-
 	intel_dsi_msleep(intel_dsi, intel_dsi->panel_pwr_cycle_delay);
 }
 
@@ -1104,8 +1093,8 @@ static void bxt_dsi_get_pipe_config(struct intel_encoder *encoder,
 	pipe_config->pipe_bpp = bdw_get_pipemisc_bpp(crtc);
 
 	/* Enable Frame time stamo based scanline reporting */
-	pipe_config->mode_flags |=
-		I915_MODE_FLAG_GET_SCANLINE_FROM_TIMESTAMP;
+	adjusted_mode->private_flags |=
+			I915_MODE_FLAG_GET_SCANLINE_FROM_TIMESTAMP;
 
 	/* In terms of pixels */
 	adjusted_mode->crtc_hdisplay =
@@ -1592,7 +1581,6 @@ static const struct drm_connector_helper_funcs intel_dsi_connector_helper_funcs 
 };
 
 static const struct drm_connector_funcs intel_dsi_connector_funcs = {
-	.detect = intel_panel_detect,
 	.late_register = intel_connector_register,
 	.early_unregister = intel_connector_unregister,
 	.destroy = intel_connector_destroy,
@@ -1850,7 +1838,6 @@ void vlv_dsi_init(struct drm_i915_private *dev_priv)
 	intel_encoder->get_hw_state = intel_dsi_get_hw_state;
 	intel_encoder->get_config = intel_dsi_get_config;
 	intel_encoder->update_pipe = intel_panel_update_backlight;
-	intel_encoder->shutdown = intel_dsi_shutdown;
 
 	intel_connector->get_hw_state = intel_connector_get_hw_state;
 

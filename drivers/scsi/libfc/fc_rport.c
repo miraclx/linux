@@ -58,8 +58,8 @@
 #include <asm/unaligned.h>
 
 #include <scsi/libfc.h>
+#include <scsi/fc_encode.h>
 
-#include "fc_encode.h"
 #include "fc_libfc.h"
 
 static struct workqueue_struct *rport_event_queue;
@@ -121,7 +121,7 @@ EXPORT_SYMBOL(fc_rport_lookup);
 /**
  * fc_rport_create() - Create a new remote port
  * @lport: The local port this remote port will be associated with
- * @port_id:   The identifiers for the new remote port
+ * @ids:   The identifiers for the new remote port
  *
  * The remote port will start in the INIT state.
  */
@@ -133,10 +133,8 @@ struct fc_rport_priv *fc_rport_create(struct fc_lport *lport, u32 port_id)
 	lockdep_assert_held(&lport->disc.disc_mutex);
 
 	rdata = fc_rport_lookup(lport, port_id);
-	if (rdata) {
-		kref_put(&rdata->kref, fc_rport_destroy);
+	if (rdata)
 		return rdata;
-	}
 
 	if (lport->rport_priv_size > 0)
 		rport_priv_size = lport->rport_priv_size;
@@ -483,11 +481,10 @@ static void fc_rport_enter_delete(struct fc_rport_priv *rdata,
 
 	fc_rport_state_enter(rdata, RPORT_ST_DELETE);
 
-	if (rdata->event == RPORT_EV_NONE) {
-		kref_get(&rdata->kref);
-		if (!queue_work(rport_event_queue, &rdata->event_work))
-			kref_put(&rdata->kref, fc_rport_destroy);
-	}
+	kref_get(&rdata->kref);
+	if (rdata->event == RPORT_EV_NONE &&
+	    !queue_work(rport_event_queue, &rdata->event_work))
+		kref_put(&rdata->kref, fc_rport_destroy);
 
 	rdata->event = event;
 }
@@ -1445,7 +1442,7 @@ drop:
  * fc_rport_logo_resp() - Handler for logout (LOGO) responses
  * @sp:	       The sequence the LOGO was on
  * @fp:	       The LOGO response frame
- * @rdata_arg: The remote port
+ * @lport_arg: The local port
  */
 static void fc_rport_logo_resp(struct fc_seq *sp, struct fc_frame *fp,
 			       void *rdata_arg)
@@ -1723,7 +1720,7 @@ static void fc_rport_recv_els_req(struct fc_lport *lport, struct fc_frame *fp)
 			kref_put(&rdata->kref, fc_rport_destroy);
 			goto busy;
 		}
-		fallthrough;
+		/* fall through */
 	default:
 		FC_RPORT_DBG(rdata,
 			     "Reject ELS 0x%02x while in state %s\n",

@@ -66,9 +66,10 @@ properties:
       - allwinner,sun50i-h6-display-engine
 
   allwinner,pipelines:
-    $ref: /schemas/types.yaml#/definitions/phandle-array
-    minItems: 1
-    maxItems: 2
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/phandle-array
+      - minItems: 1
+        maxItems: 2
     description: |
       Available display engine frontends (DE 1.0) or mixers (DE
       2.0/3.0) available.

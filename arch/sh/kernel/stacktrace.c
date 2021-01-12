@@ -15,6 +15,11 @@
 #include <asm/ptrace.h>
 #include <asm/stacktrace.h>
 
+static int save_stack_stack(void *data, char *name)
+{
+	return 0;
+}
+
 /*
  * Save stack-backtrace addresses into a stack_trace buffer.
  */
@@ -35,6 +40,7 @@ static void save_stack_address(void *data, unsigned long addr, int reliable)
 }
 
 static const struct stacktrace_ops save_stack_ops = {
+	.stack = save_stack_stack,
 	.address = save_stack_address,
 };
 
@@ -67,6 +73,7 @@ save_stack_address_nosched(void *data, unsigned long addr, int reliable)
 }
 
 static const struct stacktrace_ops save_stack_ops_nosched = {
+	.stack = save_stack_stack,
 	.address = save_stack_address_nosched,
 };
 

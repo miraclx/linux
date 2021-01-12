@@ -258,12 +258,12 @@ static int rtsx_acquire_irq(struct rtsx_dev *dev)
 	return 0;
 }
 
+#ifdef CONFIG_PM
 /*
  * power management
  */
-static int __maybe_unused rtsx_suspend(struct device *dev_d)
+static int rtsx_suspend(struct pci_dev *pci, pm_message_t state)
 {
-	struct pci_dev *pci = to_pci_dev(dev_d);
 	struct rtsx_dev *dev = pci_get_drvdata(pci);
 	struct rtsx_chip *chip;
 
@@ -283,9 +283,12 @@ static int __maybe_unused rtsx_suspend(struct device *dev_d)
 	}
 
 	if (chip->msi_en)
-		pci_free_irq_vectors(pci);
+		pci_disable_msi(pci);
 
-	device_wakeup_enable(dev_d);
+	pci_save_state(pci);
+	pci_enable_wake(pci, pci_choose_state(pci, state), 1);
+	pci_disable_device(pci);
+	pci_set_power_state(pci, pci_choose_state(pci, state));
 
 	/* unlock the device pointers */
 	mutex_unlock(&dev->dev_mutex);
@@ -293,9 +296,8 @@ static int __maybe_unused rtsx_suspend(struct device *dev_d)
 	return 0;
 }
 
-static int __maybe_unused rtsx_resume(struct device *dev_d)
+static int rtsx_resume(struct pci_dev *pci)
 {
-	struct pci_dev *pci = to_pci_dev(dev_d);
 	struct rtsx_dev *dev = pci_get_drvdata(pci);
 	struct rtsx_chip *chip;
 
@@ -307,10 +309,20 @@ static int __maybe_unused rtsx_resume(struct device *dev_d)
 	/* lock the device pointers */
 	mutex_lock(&dev->dev_mutex);
 
+	pci_set_power_state(pci, PCI_D0);
+	pci_restore_state(pci);
+	if (pci_enable_device(pci) < 0) {
+		dev_err(&dev->pci->dev,
+			"%s: pci_enable_device failed, disabling device\n",
+			CR_DRIVER_NAME);
+		/* unlock the device pointers */
+		mutex_unlock(&dev->dev_mutex);
+		return -EIO;
+	}
 	pci_set_master(pci);
 
 	if (chip->msi_en) {
-		if (pci_alloc_irq_vectors(pci, 1, 1, PCI_IRQ_MSI) < 0)
+		if (pci_enable_msi(pci) < 0)
 			chip->msi_en = 0;
 	}
 
@@ -328,6 +340,7 @@ static int __maybe_unused rtsx_resume(struct device *dev_d)
 
 	return 0;
 }
+#endif /* CONFIG_PM */
 
 static void rtsx_shutdown(struct pci_dev *pci)
 {
@@ -347,7 +360,7 @@ static void rtsx_shutdown(struct pci_dev *pci)
 	}
 
 	if (chip->msi_en)
-		pci_free_irq_vectors(pci);
+		pci_disable_msi(pci);
 
 	pci_disable_device(pci);
 }
@@ -594,7 +607,7 @@ static void rtsx_release_resources(struct rtsx_dev *dev)
 	if (dev->irq > 0)
 		free_irq(dev->irq, (void *)dev);
 	if (dev->chip->msi_en)
-		pci_free_irq_vectors(dev->pci);
+		pci_disable_msi(dev->pci);
 	if (dev->remap_addr)
 		iounmap(dev->remap_addr);
 
@@ -881,7 +894,7 @@ static int rtsx_probe(struct pci_dev *pci,
 	dev_info(&pci->dev, "pci->irq = %d\n", pci->irq);
 
 	if (dev->chip->msi_en) {
-		if (pci_alloc_irq_vectors(pci, 1, 1, PCI_IRQ_MSI) < 0)
+		if (pci_enable_msi(pci) < 0)
 			dev->chip->msi_en = 0;
 	}
 
@@ -952,14 +965,13 @@ irq_acquire_fail:
 	dev->chip->host_cmds_ptr = NULL;
 	dev->chip->host_sg_tbl_ptr = NULL;
 	if (dev->chip->msi_en)
-		pci_free_irq_vectors(dev->pci);
+		pci_disable_msi(dev->pci);
 dma_alloc_fail:
 	iounmap(dev->remap_addr);
 ioremap_fail:
 	kfree(dev->chip);
 chip_alloc_fail:
 	dev_err(&pci->dev, "%s failed\n", __func__);
-	scsi_host_put(host);
 scsi_host_alloc_fail:
 	pci_release_regions(pci);
 	return err;
@@ -987,15 +999,16 @@ static const struct pci_device_id rtsx_ids[] = {
 
 MODULE_DEVICE_TABLE(pci, rtsx_ids);
 
-static SIMPLE_DEV_PM_OPS(rtsx_pm_ops, rtsx_suspend, rtsx_resume);
-
 /* pci_driver definition */
 static struct pci_driver rtsx_driver = {
 	.name = CR_DRIVER_NAME,
 	.id_table = rtsx_ids,
 	.probe = rtsx_probe,
 	.remove = rtsx_remove,
-	.driver.pm = &rtsx_pm_ops,
+#ifdef CONFIG_PM
+	.suspend = rtsx_suspend,
+	.resume = rtsx_resume,
+#endif
 	.shutdown = rtsx_shutdown,
 };
 

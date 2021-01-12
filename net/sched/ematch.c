@@ -389,6 +389,7 @@ EXPORT_SYMBOL(tcf_em_tree_validate);
 /**
  * tcf_em_tree_destroy - destroy an ematch tree
  *
+ * @tp: classifier kind handle
  * @tree: ematch tree to be deleted
  *
  * This functions destroys an ematch tree previously created by
@@ -424,7 +425,7 @@ EXPORT_SYMBOL(tcf_em_tree_destroy);
  * tcf_em_tree_dump - dump ematch tree into a rtnl message
  *
  * @skb: skb holding the rtnl message
- * @tree: ematch tree to be dumped
+ * @t: ematch tree to be dumped
  * @tlv: TLV type to be used to encapsulate the tree
  *
  * This function dumps a ematch tree into a rtnl message. It is valid to

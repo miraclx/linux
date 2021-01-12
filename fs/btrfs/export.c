@@ -64,15 +64,24 @@ struct dentry *btrfs_get_dentry(struct super_block *sb, u64 objectid,
 	struct btrfs_fs_info *fs_info = btrfs_sb(sb);
 	struct btrfs_root *root;
 	struct inode *inode;
+	struct btrfs_key key;
 
 	if (objectid < BTRFS_FIRST_FREE_OBJECTID)
 		return ERR_PTR(-ESTALE);
 
-	root = btrfs_get_fs_root(fs_info, root_objectid, true);
+	key.objectid = root_objectid;
+	key.type = BTRFS_ROOT_ITEM_KEY;
+	key.offset = (u64)-1;
+
+	root = btrfs_get_fs_root(fs_info, &key, true);
 	if (IS_ERR(root))
 		return ERR_CAST(root);
 
-	inode = btrfs_iget(sb, objectid, root);
+	key.objectid = objectid;
+	key.type = BTRFS_INODE_ITEM_KEY;
+	key.offset = 0;
+
+	inode = btrfs_iget(sb, &key, root);
 	btrfs_put_root(root);
 	if (IS_ERR(inode))
 		return ERR_CAST(inode);
@@ -191,7 +200,9 @@ struct dentry *btrfs_get_parent(struct dentry *child)
 					found_key.offset, 0, 0);
 	}
 
-	return d_obtain_alias(btrfs_iget(fs_info->sb, key.objectid, root));
+	key.type = BTRFS_INODE_ITEM_KEY;
+	key.offset = 0;
+	return d_obtain_alias(btrfs_iget(fs_info->sb, &key, root));
 fail:
 	btrfs_free_path(path);
 	return ERR_PTR(ret);
@@ -222,6 +233,7 @@ static int btrfs_get_name(struct dentry *parent, char *name,
 	path = btrfs_alloc_path();
 	if (!path)
 		return -ENOMEM;
+	path->leave_spinning = 1;
 
 	if (ino == BTRFS_FIRST_FREE_OBJECTID) {
 		key.objectid = BTRFS_I(inode)->root->root_key.objectid;

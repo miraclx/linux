@@ -112,7 +112,7 @@ static int rt5677_spi_pcm_close(
 		struct snd_soc_component *component,
 		struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_component *codec_component =
 			snd_soc_rtdcom_lookup(rtd, "rt5677");
 	struct rt5677_priv *rt5677 =
@@ -158,7 +158,7 @@ static int rt5677_spi_prepare(
 		struct snd_soc_component *component,
 		struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_component *rt5677_component =
 			snd_soc_rtdcom_lookup(rtd, "rt5677");
 	struct rt5677_priv *rt5677 =
@@ -605,22 +605,25 @@ static int rt5677_spi_probe(struct spi_device *spi)
 
 	g_spi = spi;
 
-	ret = devm_snd_soc_register_component(&spi->dev,
-					      &rt5677_spi_dai_component,
-					      &rt5677_spi_dai, 1);
+	ret = snd_soc_register_component(&spi->dev, &rt5677_spi_dai_component,
+					 &rt5677_spi_dai, 1);
 	if (ret < 0)
 		dev_err(&spi->dev, "Failed to register component.\n");
 
 	return ret;
 }
 
-#ifdef CONFIG_ACPI
+static int rt5677_spi_remove(struct spi_device *spi)
+{
+	snd_soc_unregister_component(&spi->dev);
+	return 0;
+}
+
 static const struct acpi_device_id rt5677_spi_acpi_id[] = {
 	{ "RT5677AA", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, rt5677_spi_acpi_id);
-#endif
 
 static struct spi_driver rt5677_spi_driver = {
 	.driver = {
@@ -628,6 +631,7 @@ static struct spi_driver rt5677_spi_driver = {
 		.acpi_match_table = ACPI_PTR(rt5677_spi_acpi_id),
 	},
 	.probe = rt5677_spi_probe,
+	.remove = rt5677_spi_remove,
 };
 module_spi_driver(rt5677_spi_driver);
 

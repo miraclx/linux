@@ -296,6 +296,7 @@ static const struct drm_display_mode default_mode = {
 		.vsync_start = 1920 + 3,
 		.vsync_end = 1920 + 3 + 5,
 		.vtotal = 1920 + 3 + 5 + 6,
+		.vrefresh = 60,
 		.flags = 0,
 };
 
@@ -310,7 +311,7 @@ static int jdi_panel_get_modes(struct drm_panel *panel,
 	if (!mode) {
 		dev_err(dev, "failed to add mode %ux%ux@%u\n",
 			default_mode.hdisplay, default_mode.vdisplay,
-			drm_mode_vrefresh(&default_mode));
+			default_mode.vrefresh);
 		return -ENOMEM;
 	}
 
@@ -440,9 +441,9 @@ static int jdi_panel_add(struct jdi_panel *jdi)
 	drm_panel_init(&jdi->base, &jdi->dsi->dev, &jdi_panel_funcs,
 		       DRM_MODE_CONNECTOR_DSI);
 
-	drm_panel_add(&jdi->base);
+	ret = drm_panel_add(&jdi->base);
 
-	return 0;
+	return ret;
 }
 
 static void jdi_panel_del(struct jdi_panel *jdi)

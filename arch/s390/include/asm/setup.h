@@ -16,6 +16,8 @@
 #define EARLY_SCCB_OFFSET	0x11000
 #define HEAD_END		0x12000
 
+#define EARLY_SCCB_SIZE		PAGE_SIZE
+
 /*
  * Machine features detected in early.c
  */
@@ -86,11 +88,11 @@ extern unsigned int zlib_dfltcc_support;
 #define ZLIB_DFLTCC_FULL_DEBUG		4
 
 extern int noexec_disabled;
-extern unsigned long ident_map_size;
+extern int memory_end_set;
+extern unsigned long memory_end;
 extern unsigned long vmalloc_size;
-
-/* The Write Back bit position in the physaddr is given by the SLPC PCI */
-extern unsigned long mio_wb_bit_mask;
+extern unsigned long max_physmem_end;
+extern unsigned long __swsusp_reset_dma;
 
 #define MACHINE_IS_VM		(S390_lowcore.machine_flags & MACHINE_FLAG_VM)
 #define MACHINE_IS_KVM		(S390_lowcore.machine_flags & MACHINE_FLAG_KVM)
@@ -116,6 +118,9 @@ extern unsigned long mio_wb_bit_mask;
 extern unsigned int console_mode;
 extern unsigned int console_devno;
 extern unsigned int console_irq;
+
+extern char vmhalt_cmd[];
+extern char vmpoff_cmd[];
 
 #define CONSOLE_IS_UNDEFINED	(console_mode == 0)
 #define CONSOLE_IS_SCLP		(console_mode == 1)

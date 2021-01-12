@@ -37,15 +37,15 @@ static ssize_t testmode_write(struct file *file, const char __user *ubuf, size_t
 		return -EFAULT;
 
 	if (!strncmp(buf, "test_j", 6))
-		testmode = USB_TEST_J;
+		testmode = TEST_J;
 	else if (!strncmp(buf, "test_k", 6))
-		testmode = USB_TEST_K;
+		testmode = TEST_K;
 	else if (!strncmp(buf, "test_se0_nak", 12))
-		testmode = USB_TEST_SE0_NAK;
+		testmode = TEST_SE0_NAK;
 	else if (!strncmp(buf, "test_packet", 11))
-		testmode = USB_TEST_PACKET;
+		testmode = TEST_PACKET;
 	else if (!strncmp(buf, "test_force_enable", 17))
-		testmode = USB_TEST_FORCE_ENABLE;
+		testmode = TEST_FORCE_EN;
 	else
 		testmode = 0;
 
@@ -78,19 +78,19 @@ static int testmode_show(struct seq_file *s, void *unused)
 	case 0:
 		seq_puts(s, "no test\n");
 		break;
-	case USB_TEST_J:
+	case TEST_J:
 		seq_puts(s, "test_j\n");
 		break;
-	case USB_TEST_K:
+	case TEST_K:
 		seq_puts(s, "test_k\n");
 		break;
-	case USB_TEST_SE0_NAK:
+	case TEST_SE0_NAK:
 		seq_puts(s, "test_se0_nak\n");
 		break;
-	case USB_TEST_PACKET:
+	case TEST_PACKET:
 		seq_puts(s, "test_packet\n");
 		break;
-	case USB_TEST_FORCE_ENABLE:
+	case TEST_FORCE_EN:
 		seq_puts(s, "test_force_enable\n");
 		break;
 	default:

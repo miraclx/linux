@@ -2,6 +2,8 @@
 #include <linux/mm.h>
 #include <linux/hugetlb.h>
 #include <linux/security.h>
+#include <asm/pgtable.h>
+#include <asm/pgalloc.h>
 #include <asm/cacheflush.h>
 #include <asm/machdep.h>
 #include <asm/mman.h>

@@ -9,7 +9,7 @@
  * Copyright (c) 2012 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com
  * Copyright (c) 2012 Linaro Ltd
- *		https://www.linaro.org
+ *		http://www.linaro.org
  *
  * and pinctrl-at91:
  * Copyright (C) 2011-2012 Jean-Christophe PLAGNIOL-VILLARD <plagnioj@jcrosoft.com>
@@ -63,7 +63,7 @@ enum rockchip_pinctrl_type {
 	RK3399,
 };
 
-/*
+/**
  * Encode variants of iomux registers into a type variable
  */
 #define IOMUX_GPIO_ONLY		BIT(0)
@@ -74,7 +74,6 @@ enum rockchip_pinctrl_type {
 #define IOMUX_WIDTH_2BIT	BIT(5)
 
 /**
- * struct rockchip_iomux
  * @type: iomux variant using IOMUX_* constants
  * @offset: if initialized to -1 it will be autocalculated, by specifying
  *	    an initial offset value the relevant source offset can be reset
@@ -85,7 +84,7 @@ struct rockchip_iomux {
 	int				offset;
 };
 
-/*
+/**
  * enum type index corresponding to rockchip_perpin_drv_list arrays index.
  */
 enum rockchip_pin_drv_type {
@@ -97,7 +96,7 @@ enum rockchip_pin_drv_type {
 	DRV_TYPE_MAX
 };
 
-/*
+/**
  * enum type index corresponding to rockchip_pull_list arrays index.
  */
 enum rockchip_pin_pull_type {
@@ -107,7 +106,6 @@ enum rockchip_pin_pull_type {
 };
 
 /**
- * struct rockchip_drv
  * @drv_type: drive strength variant using rockchip_perpin_drv_type
  * @offset: if initialized to -1 it will be autocalculated, by specifying
  *	    an initial offset value the relevant source offset can be reset
@@ -121,9 +119,8 @@ struct rockchip_drv {
 };
 
 /**
- * struct rockchip_pin_bank
  * @reg_base: register base of the gpio bank
- * @regmap_pull: optional separate register for additional pull settings
+ * @reg_pull: optional separate register for additional pull settings
  * @clk: clock of the gpio bank
  * @irq: interrupt of the gpio bank
  * @saved_masks: Saved content of GPIO_INTEN at suspend time.
@@ -141,8 +138,6 @@ struct rockchip_drv {
  * @gpio_chip: gpiolib chip
  * @grange: gpio range
  * @slock: spinlock for the gpio bank
- * @toggle_edge_mode: bit mask to toggle (falling/rising) edge mode
- * @recalced_mask: bit mask to indicate a need to recalulate the mask
  * @route_mask: bits describing the routing pins of per bank
  */
 struct rockchip_pin_bank {
@@ -317,7 +312,6 @@ enum rockchip_mux_route_location {
  * @bank_num: bank number.
  * @pin: index at register or used to calc index.
  * @func: the min pin.
- * @route_location: the mux route location (same, pmu, grf).
  * @route_offset: the max pin.
  * @route_val: the register offset.
  */
@@ -330,6 +324,8 @@ struct rockchip_mux_route_data {
 	u32 route_val;
 };
 
+/**
+ */
 struct rockchip_pin_ctrl {
 	struct rockchip_pin_bank	*pin_banks;
 	u32				nr_banks;
@@ -367,7 +363,9 @@ struct rockchip_pin_config {
  * @name: name of the pin group, used to lookup the group.
  * @pins: the pins included in this group.
  * @npins: number of pins included in this group.
- * @data: local pin configuration
+ * @func: the mux function number to be programmed when selected.
+ * @configs: the config values to be set for each pin
+ * @nconfigs: number of configs for each pin
  */
 struct rockchip_pin_group {
 	const char			*name;
@@ -380,7 +378,7 @@ struct rockchip_pin_group {
  * struct rockchip_pmx_func: represent a pin function.
  * @name: name of the pin function, used to lookup the function.
  * @groups: one or more names of pin groups that provide this function.
- * @ngroups: number of groups included in @groups.
+ * @num_groups: number of groups included in @groups.
  */
 struct rockchip_pmx_func {
 	const char		*name;
@@ -510,8 +508,8 @@ static int rockchip_dt_node_to_map(struct pinctrl_dev *pctldev,
 	}
 
 	map_num += grp->npins;
-
-	new_map = kcalloc(map_num, sizeof(*new_map), GFP_KERNEL);
+	new_map = devm_kcalloc(pctldev->dev, map_num, sizeof(*new_map),
+								GFP_KERNEL);
 	if (!new_map)
 		return -ENOMEM;
 
@@ -521,7 +519,7 @@ static int rockchip_dt_node_to_map(struct pinctrl_dev *pctldev,
 	/* create mux map */
 	parent = of_get_parent(np);
 	if (!parent) {
-		kfree(new_map);
+		devm_kfree(pctldev->dev, new_map);
 		return -EINVAL;
 	}
 	new_map[0].type = PIN_MAP_TYPE_MUX_GROUP;
@@ -548,7 +546,6 @@ static int rockchip_dt_node_to_map(struct pinctrl_dev *pctldev,
 static void rockchip_dt_free_map(struct pinctrl_dev *pctldev,
 				    struct pinctrl_map *map, unsigned num_maps)
 {
-	kfree(map);
 }
 
 static const struct pinctrl_ops rockchip_pctrl_ops = {
@@ -2943,14 +2940,14 @@ static int rockchip_pinctrl_parse_dt(struct platform_device *pdev,
 					      sizeof(struct rockchip_pmx_func),
 					      GFP_KERNEL);
 	if (!info->functions)
-		return -ENOMEM;
+		return -EINVAL;
 
 	info->groups = devm_kcalloc(dev,
 					    info->ngroups,
 					    sizeof(struct rockchip_pin_group),
 					    GFP_KERNEL);
 	if (!info->groups)
-		return -ENOMEM;
+		return -EINVAL;
 
 	i = 0;
 
@@ -3155,9 +3152,7 @@ static int rockchip_gpio_to_irq(struct gpio_chip *gc, unsigned offset)
 	if (!bank->domain)
 		return -ENXIO;
 
-	clk_enable(bank->clk);
 	virq = irq_create_mapping(bank->domain, offset);
-	clk_disable(bank->clk);
 
 	return (virq) ? : -ENXIO;
 }
@@ -3196,7 +3191,7 @@ static void rockchip_irq_demux(struct irq_desc *desc)
 
 		irq = __ffs(pend);
 		pend &= ~BIT(irq);
-		virq = irq_find_mapping(bank->domain, irq);
+		virq = irq_linear_revmap(bank->domain, irq);
 
 		if (!virq) {
 			dev_err(bank->drvdata->dev, "unmapped irq %d\n", irq);
@@ -3375,7 +3370,7 @@ static int rockchip_interrupts_register(struct platform_device *pdev,
 	unsigned int clr = IRQ_NOREQUEST | IRQ_NOPROBE | IRQ_NOAUTOEN;
 	struct irq_chip_generic *gc;
 	int ret;
-	int i;
+	int i, j;
 
 	for (i = 0; i < ctrl->nr_banks; ++i, ++bank) {
 		if (!bank->valid) {
@@ -3402,7 +3397,7 @@ static int rockchip_interrupts_register(struct platform_device *pdev,
 
 		ret = irq_alloc_domain_generic_chips(bank->domain, 32, 1,
 					 "rockchip_gpio_irq", handle_level_irq,
-					 clr, 0, 0);
+					 clr, 0, IRQ_GC_INIT_MASK_CACHE);
 		if (ret) {
 			dev_err(&pdev->dev, "could not alloc generic chips for bank %s\n",
 				bank->name);
@@ -3410,6 +3405,14 @@ static int rockchip_interrupts_register(struct platform_device *pdev,
 			clk_disable(bank->clk);
 			continue;
 		}
+
+		/*
+		 * Linux assumes that all interrupts start out disabled/masked.
+		 * Our driver only uses the concept of masked and always keeps
+		 * things enabled, so for us that's all masked and all enabled.
+		 */
+		writel_relaxed(0xffffffff, bank->reg_base + GPIO_INTMASK);
+		writel_relaxed(0xffffffff, bank->reg_base + GPIO_INTEN);
 
 		gc = irq_get_domain_generic_chip(bank->domain, 0);
 		gc->reg_base = bank->reg_base;
@@ -3427,17 +3430,13 @@ static int rockchip_interrupts_register(struct platform_device *pdev,
 		gc->chip_types[0].chip.irq_set_type = rockchip_irq_set_type;
 		gc->wake_enabled = IRQ_MSK(bank->nr_pins);
 
-		/*
-		 * Linux assumes that all interrupts start out disabled/masked.
-		 * Our driver only uses the concept of masked and always keeps
-		 * things enabled, so for us that's all masked and all enabled.
-		 */
-		writel_relaxed(0xffffffff, bank->reg_base + GPIO_INTMASK);
-		writel_relaxed(0xffffffff, bank->reg_base + GPIO_INTEN);
-		gc->mask_cache = 0xffffffff;
-
 		irq_set_chained_handler_and_data(bank->irq,
 						 rockchip_irq_demux, bank);
+
+		/* map the gpio irqs here, when the clock is still running */
+		for (j = 0 ; j < 32 ; j++)
+			irq_create_mapping(bank->domain, j);
+
 		clk_disable(bank->clk);
 	}
 

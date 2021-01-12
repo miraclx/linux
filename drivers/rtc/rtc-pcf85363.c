@@ -418,11 +418,11 @@ static int pcf85363_probe(struct i2c_client *client,
 			pcf85363->rtc->ops = &rtc_ops_alarm;
 	}
 
-	ret = devm_rtc_register_device(pcf85363->rtc);
+	ret = rtc_register_device(pcf85363->rtc);
 
 	for (i = 0; i < config->num_nvram; i++) {
 		nvmem_cfg[i].priv = pcf85363;
-		devm_rtc_nvmem_register(pcf85363->rtc, &nvmem_cfg[i]);
+		rtc_nvmem_register(pcf85363->rtc, &nvmem_cfg[i]);
 	}
 
 	return ret;

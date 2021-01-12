@@ -56,15 +56,11 @@ struct drm_i915_gem_object_ops {
 	void (*truncate)(struct drm_i915_gem_object *obj);
 	void (*writeback)(struct drm_i915_gem_object *obj);
 
-	int (*pread)(struct drm_i915_gem_object *obj,
-		     const struct drm_i915_gem_pread *arg);
 	int (*pwrite)(struct drm_i915_gem_object *obj,
 		      const struct drm_i915_gem_pwrite *arg);
 
 	int (*dmabuf_export)(struct drm_i915_gem_object *obj);
 	void (*release)(struct drm_i915_gem_object *obj);
-
-	const char *name; /* friendly name for debug, e.g. lockdep classes */
 };
 
 enum i915_mmap_type {
@@ -80,14 +76,6 @@ struct i915_mmap_offset {
 	enum i915_mmap_type mmap_type;
 
 	struct rb_node offset;
-};
-
-struct i915_gem_object_page_iter {
-	struct scatterlist *sg_pos;
-	unsigned int sg_idx; /* in pages, but 32bit eek! */
-
-	struct radix_tree_root radix;
-	struct mutex lock; /* protects this cache */
 };
 
 struct drm_i915_gem_object {
@@ -131,16 +119,6 @@ struct drm_i915_gem_object {
 	 * this translation from object to context->handles_vma.
 	 */
 	struct list_head lut_list;
-	spinlock_t lut_lock; /* guards lut_list */
-
-	/**
-	 * @obj_link: Link into @i915_gem_ww_ctx.obj_list
-	 *
-	 * When we lock this object through i915_gem_object_lock() with a
-	 * context, we add it to the list to ensure we can unlock everything
-	 * when i915_gem_ww_ctx_backoff() or i915_gem_ww_ctx_fini() are called.
-	 */
-	struct list_head obj_link;
 
 	/** Stolen memory for this object, instead of being backed by shmem. */
 	struct drm_mm_node *stolen;
@@ -201,6 +179,9 @@ struct drm_i915_gem_object {
 #define TILING_MASK (FENCE_MINIMUM_STRIDE - 1)
 #define STRIDE_MASK (~TILING_MASK)
 
+	/** Count of VMA actually bound by this object */
+	atomic_t bind_count;
+
 	struct {
 		/*
 		 * Protects the pages and their use. Do not use directly, but
@@ -256,8 +237,13 @@ struct drm_i915_gem_object {
 
 		I915_SELFTEST_DECLARE(unsigned int page_mask);
 
-		struct i915_gem_object_page_iter get_page;
-		struct i915_gem_object_page_iter get_dma_page;
+		struct i915_gem_object_page_iter {
+			struct scatterlist *sg_pos;
+			unsigned int sg_idx; /* in pages, but 32bit eek! */
+
+			struct radix_tree_root radix;
+			struct mutex lock; /* protects this cache */
+		} get_page;
 
 		/**
 		 * Element within i915->mm.unbound_list or i915->mm.bound_list,
@@ -296,7 +282,6 @@ struct drm_i915_gem_object {
 		} userptr;
 
 		unsigned long scratch;
-		u64 encode;
 
 		void *gvt_info;
 	};

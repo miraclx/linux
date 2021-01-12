@@ -166,8 +166,7 @@ static int rionet_queue_tx_msg(struct sk_buff *skb, struct net_device *ndev,
 	return 0;
 }
 
-static netdev_tx_t rionet_start_xmit(struct sk_buff *skb,
-				     struct net_device *ndev)
+static int rionet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	int i;
 	struct rionet_private *rnet = netdev_priv(ndev);

@@ -9,7 +9,6 @@ obj-$(CONFIG_UDMABUF)		+= udmabuf.o
 
 dmabuf_selftests-y := \
 	selftest.o \
-	st-dma-fence.o \
-	st-dma-fence-chain.o
+	st-dma-fence.o
 
 obj-$(CONFIG_DMABUF_SELFTESTS)	+= dmabuf_selftests.o

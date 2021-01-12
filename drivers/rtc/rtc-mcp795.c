@@ -7,7 +7,7 @@
  * based on other Linux RTC drivers
  *
  * Device datasheet:
- * https://ww1.microchip.com/downloads/en/DeviceDoc/22280A.pdf
+ * http://ww1.microchip.com/downloads/en/DeviceDoc/22280A.pdf
  */
 
 #include <linux/module.h>

@@ -65,28 +65,6 @@ static const struct proto_ops rose_proto_ops;
 ax25_address rose_callsign;
 
 /*
- * ROSE network devices are virtual network devices encapsulating ROSE
- * frames into AX.25 which will be sent through an AX.25 device, so form a
- * special "super class" of normal net devices; split their locks off into a
- * separate class since they always nest.
- */
-static struct lock_class_key rose_netdev_xmit_lock_key;
-static struct lock_class_key rose_netdev_addr_lock_key;
-
-static void rose_set_lockdep_one(struct net_device *dev,
-				 struct netdev_queue *txq,
-				 void *_unused)
-{
-	lockdep_set_class(&txq->_xmit_lock, &rose_netdev_xmit_lock_key);
-}
-
-static void rose_set_lockdep_key(struct net_device *dev)
-{
-	lockdep_set_class(&dev->addr_list_lock, &rose_netdev_addr_lock_key);
-	netdev_for_each_tx_queue(dev, rose_set_lockdep_one, NULL);
-}
-
-/*
  *	Convert a ROSE address into text.
  */
 char *rose2asc(char *buf, const rose_address *addr)
@@ -365,7 +343,7 @@ void rose_destroy_socket(struct sock *sk)
  */
 
 static int rose_setsockopt(struct socket *sock, int level, int optname,
-		sockptr_t optval, unsigned int optlen)
+	char __user *optval, unsigned int optlen)
 {
 	struct sock *sk = sock->sk;
 	struct rose_sock *rose = rose_sk(sk);
@@ -377,7 +355,7 @@ static int rose_setsockopt(struct socket *sock, int level, int optname,
 	if (optlen < sizeof(int))
 		return -EINVAL;
 
-	if (copy_from_sockptr(&opt, optval, sizeof(int)))
+	if (get_user(opt, (int __user *)optval))
 		return -EFAULT;
 
 	switch (optname) {
@@ -1533,7 +1511,6 @@ static int __init rose_proto_init(void)
 			free_netdev(dev);
 			goto fail;
 		}
-		rose_set_lockdep_key(dev);
 		dev_rose[i] = dev;
 	}
 

@@ -38,35 +38,9 @@ int lima_l2_cache_flush(struct lima_ip *ip)
 	return ret;
 }
 
-static int lima_l2_cache_hw_init(struct lima_ip *ip)
-{
-	int err;
-
-	err = lima_l2_cache_flush(ip);
-	if (err)
-		return err;
-
-	l2_cache_write(LIMA_L2_CACHE_ENABLE,
-		       LIMA_L2_CACHE_ENABLE_ACCESS |
-		       LIMA_L2_CACHE_ENABLE_READ_ALLOCATE);
-	l2_cache_write(LIMA_L2_CACHE_MAX_READS, 0x1c);
-
-	return 0;
-}
-
-int lima_l2_cache_resume(struct lima_ip *ip)
-{
-	return lima_l2_cache_hw_init(ip);
-}
-
-void lima_l2_cache_suspend(struct lima_ip *ip)
-{
-
-}
-
 int lima_l2_cache_init(struct lima_ip *ip)
 {
-	int i;
+	int i, err;
 	u32 size;
 	struct lima_device *dev = ip->dev;
 
@@ -89,7 +63,15 @@ int lima_l2_cache_init(struct lima_ip *ip)
 		 1 << (size & 0xff),
 		 1 << ((size >> 24) & 0xff));
 
-	return lima_l2_cache_hw_init(ip);
+	err = lima_l2_cache_flush(ip);
+	if (err)
+		return err;
+
+	l2_cache_write(LIMA_L2_CACHE_ENABLE,
+		       LIMA_L2_CACHE_ENABLE_ACCESS|LIMA_L2_CACHE_ENABLE_READ_ALLOCATE);
+	l2_cache_write(LIMA_L2_CACHE_MAX_READS, 0x1c);
+
+	return 0;
 }
 
 void lima_l2_cache_fini(struct lima_ip *ip)

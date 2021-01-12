@@ -18,6 +18,9 @@
 #include "perf-sys.h"
 #include "trace_helpers.h"
 
+#define __must_check
+#include <linux/err.h>
+
 #define DEFAULT_FREQ	99
 #define DEFAULT_SECS	5
 #define MAX_IPS		8192
@@ -54,7 +57,7 @@ static int sampling_start(int freq, struct bpf_program *prog,
 			return 1;
 		}
 		links[i] = bpf_program__attach_perf_event(prog, pmu_fd);
-		if (libbpf_get_error(links[i])) {
+		if (IS_ERR(links[i])) {
 			fprintf(stderr, "ERROR: Attach perf event\n");
 			links[i] = NULL;
 			close(pmu_fd);
@@ -179,7 +182,7 @@ int main(int argc, char **argv)
 
 	snprintf(filename, sizeof(filename), "%s_kern.o", argv[0]);
 	obj = bpf_object__open_file(filename, NULL);
-	if (libbpf_get_error(obj)) {
+	if (IS_ERR(obj)) {
 		fprintf(stderr, "ERROR: opening BPF object file failed\n");
 		obj = NULL;
 		goto cleanup;

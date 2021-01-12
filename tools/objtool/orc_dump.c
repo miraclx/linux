@@ -4,9 +4,7 @@
  */
 
 #include <unistd.h>
-#include <linux/objtool.h>
-#include <asm/orc_types.h>
-#include "objtool.h"
+#include "orc.h"
 #include "warn.h"
 
 static const char *reg_name(unsigned int reg)
@@ -38,12 +36,12 @@ static const char *reg_name(unsigned int reg)
 static const char *orc_type_name(unsigned int type)
 {
 	switch (type) {
-	case UNWIND_HINT_TYPE_CALL:
+	case ORC_TYPE_CALL:
 		return "call";
-	case UNWIND_HINT_TYPE_REGS:
+	case ORC_TYPE_REGS:
 		return "regs";
-	case UNWIND_HINT_TYPE_REGS_PARTIAL:
-		return "regs (partial)";
+	case ORC_TYPE_REGS_IRET:
+		return "iret";
 	default:
 		return "?";
 	}

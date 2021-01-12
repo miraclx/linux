@@ -22,6 +22,8 @@
 #include <asm/smp_scu.h>
 #include <asm/firmware.h>
 
+#include <mach/map.h>
+
 #include "common.h"
 
 extern void exynos4_secondary_startup(void);
@@ -186,7 +188,7 @@ void exynos_scu_enable(void)
 
 static void __iomem *cpu_boot_reg_base(void)
 {
-	if (soc_is_exynos4210() && exynos_rev() == EXYNOS4210_REV_1_1)
+	if (soc_is_exynos4210() && samsung_rev() == EXYNOS4210_REV_1_1)
 		return pmu_base_addr + S5P_INFORM5;
 	return sysram_base_addr;
 }
@@ -215,7 +217,7 @@ void exynos_core_restart(u32 core_id)
 	unsigned int timeout = 16;
 	u32 val;
 
-	if (!soc_is_exynos3250())
+	if (!of_machine_is_compatible("samsung,exynos3250"))
 		return;
 
 	while (timeout && !pmu_raw_readl(S5P_PMU_SPARE2)) {

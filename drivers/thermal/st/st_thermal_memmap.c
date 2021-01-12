@@ -94,8 +94,10 @@ static int st_mmap_register_enable_irq(struct st_thermal_sensor *sensor)
 	int ret;
 
 	sensor->irq = platform_get_irq(pdev, 0);
-	if (sensor->irq < 0)
+	if (sensor->irq < 0) {
+		dev_err(dev, "failed to register IRQ\n");
 		return sensor->irq;
+	}
 
 	ret = devm_request_threaded_irq(dev, sensor->irq,
 					NULL, st_mmap_thermal_trip_handler,

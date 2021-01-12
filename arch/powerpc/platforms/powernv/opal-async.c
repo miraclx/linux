@@ -104,7 +104,7 @@ static int __opal_async_release_token(int token)
 	 */
 	case ASYNC_TOKEN_DISPATCHED:
 		opal_async_tokens[token].state = ASYNC_TOKEN_ABANDONED;
-		fallthrough;
+		/* Fall through */
 	default:
 		rc = 1;
 	}

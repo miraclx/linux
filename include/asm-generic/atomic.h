@@ -159,6 +159,8 @@ ATOMIC_OP(xor, ^)
  * resource counting etc..
  */
 
+#define ATOMIC_INIT(i)	{ (i) }
+
 /**
  * atomic_read - read atomic variable
  * @v: pointer of type atomic_t

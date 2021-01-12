@@ -171,7 +171,7 @@ static void mark_screen_rdonly(struct mm_struct *mm)
 	pte_t *pte;
 	int i;
 
-	mmap_write_lock(mm);
+	down_write(&mm->mmap_sem);
 	pgd = pgd_offset(mm, 0xA0000);
 	if (pgd_none_or_clear_bad(pgd))
 		goto out;
@@ -197,7 +197,7 @@ static void mark_screen_rdonly(struct mm_struct *mm)
 	}
 	pte_unmap_unlock(pte, ptl);
 out:
-	mmap_write_unlock(mm);
+	up_write(&mm->mmap_sem);
 	flush_tlb_mm_range(mm, 0xA0000, 0xA0000 + 32*PAGE_SIZE, PAGE_SHIFT, false);
 }
 

@@ -1402,14 +1402,14 @@ static int fb_probe(struct platform_device *device)
 	if (IS_ERR(par->lcd_supply)) {
 		if (PTR_ERR(par->lcd_supply) == -EPROBE_DEFER) {
 			ret = -EPROBE_DEFER;
-			goto err_release_fb;
+			goto err_pm_runtime_disable;
 		}
 
 		par->lcd_supply = NULL;
 	} else {
 		ret = regulator_enable(par->lcd_supply);
 		if (ret)
-			goto err_release_fb;
+			goto err_pm_runtime_disable;
 	}
 
 	fb_videomode_to_var(&da8xx_fb_var, lcdc_info);

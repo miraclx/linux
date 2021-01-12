@@ -10,8 +10,6 @@
  * Author: Ryan Wilson <hap9@epoch.ncsc.mil>
  */
 
-#define dev_fmt(fmt) DRV_NAME ": " fmt
-
 #include <linux/kernel.h>
 #include <linux/moduleparam.h>
 #include <linux/pci.h>
@@ -156,7 +154,9 @@ int xen_pcibk_config_read(struct pci_dev *dev, int offset, int size,
 	 * (as if device didn't respond) */
 	u32 value = 0, tmp_val;
 
-	dev_dbg(&dev->dev, "read %d bytes at 0x%x\n", size, offset);
+	if (unlikely(verbose_request))
+		printk(KERN_DEBUG DRV_NAME ": %s: read %d bytes at 0x%x\n",
+		       pci_name(dev), size, offset);
 
 	if (!valid_request(offset, size)) {
 		err = XEN_PCI_ERR_invalid_offset;
@@ -195,7 +195,9 @@ int xen_pcibk_config_read(struct pci_dev *dev, int offset, int size,
 	}
 
 out:
-	dev_dbg(&dev->dev, "read %d bytes at 0x%x = %x\n", size, offset, value);
+	if (unlikely(verbose_request))
+		printk(KERN_DEBUG DRV_NAME ": %s: read %d bytes at 0x%x = %x\n",
+		       pci_name(dev), size, offset, value);
 
 	*ret_val = value;
 	return xen_pcibios_err_to_errno(err);
@@ -210,8 +212,10 @@ int xen_pcibk_config_write(struct pci_dev *dev, int offset, int size, u32 value)
 	u32 tmp_val;
 	int field_start, field_end;
 
-	dev_dbg(&dev->dev, "write request %d bytes at 0x%x = %x\n",
-		size, offset, value);
+	if (unlikely(verbose_request))
+		printk(KERN_DEBUG
+		       DRV_NAME ": %s: write request %d bytes at 0x%x = %x\n",
+		       pci_name(dev), size, offset, value);
 
 	if (!valid_request(offset, size))
 		return XEN_PCI_ERR_invalid_offset;

@@ -473,7 +473,9 @@ struct tomoyo_policy_namespace *tomoyo_assign_namespace(const char *domainname)
 		return ptr;
 	if (len >= TOMOYO_EXEC_TMPSIZE - 10 || !tomoyo_domain_def(domainname))
 		return NULL;
-	entry = kzalloc(sizeof(*entry) + len + 1, GFP_NOFS | __GFP_NOWARN);
+	entry = kzalloc(sizeof(*entry) + len + 1, GFP_NOFS);
+	if (!entry)
+		return NULL;
 	if (mutex_lock_interruptible(&tomoyo_policy_lock))
 		goto out;
 	ptr = tomoyo_find_namespace(domainname, len);
@@ -765,7 +767,7 @@ retry:
 
 	/*
 	 * Check for domain transition preference if "file execute" matched.
-	 * If preference is given, make execve() fail if domain transition
+	 * If preference is given, make do_execve() fail if domain transition
 	 * has failed, for domain transition preference should be used with
 	 * destination domain defined.
 	 */
@@ -808,7 +810,7 @@ force_reset_domain:
 		snprintf(ee->tmp, TOMOYO_EXEC_TMPSIZE - 1, "<%s>",
 			 candidate->name);
 		/*
-		 * Make execve() fail if domain transition across namespaces
+		 * Make do_execve() fail if domain transition across namespaces
 		 * has failed.
 		 */
 		reject_on_transition_failure = true;
@@ -889,7 +891,7 @@ force_jump_domain:
  *
  * @bprm: Pointer to "struct linux_binprm".
  * @pos:  Location to dump.
- * @dump: Pointer to "struct tomoyo_page_dump".
+ * @dump: Poiner to "struct tomoyo_page_dump".
  *
  * Returns true on success, false otherwise.
  */
@@ -912,7 +914,7 @@ bool tomoyo_dump_page(struct linux_binprm *bprm, unsigned long pos,
 	 * (represented by bprm).  'current' is the process doing
 	 * the execve().
 	 */
-	if (get_user_pages_remote(bprm->mm, pos, 1,
+	if (get_user_pages_remote(current, bprm->mm, pos, 1,
 				FOLL_FORCE, &page, NULL, NULL) <= 0)
 		return false;
 #else

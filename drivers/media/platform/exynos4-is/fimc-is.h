@@ -174,7 +174,7 @@ struct is_af_info {
 struct fimc_is_firmware {
 	const struct firmware *f_w;
 
-	dma_addr_t addr;
+	dma_addr_t paddr;
 	void *vaddr;
 	unsigned int size;
 
@@ -185,8 +185,8 @@ struct fimc_is_firmware {
 };
 
 struct fimc_is_memory {
-	/* DMA base address */
-	dma_addr_t addr;
+	/* physical base address */
+	dma_addr_t paddr;
 	/* virtual base address */
 	void *vaddr;
 	/* total length */

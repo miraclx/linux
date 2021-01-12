@@ -11,7 +11,7 @@
 #include <linux/kref.h>
 #include <linux/spinlock.h>
 #include <linux/mutex.h>
-#include <linux/iio/buffer_impl.h>
+#include <linux/iio/buffer.h>
 
 struct iio_dma_buffer_queue;
 struct iio_dma_buffer_ops;

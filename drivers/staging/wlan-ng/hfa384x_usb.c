@@ -191,9 +191,9 @@ static void hfa384x_usbctlx_resptimerfn(struct timer_list *t);
 
 static void hfa384x_usb_throttlefn(struct timer_list *t);
 
-static void hfa384x_usbctlx_completion_task(struct tasklet_struct *t);
+static void hfa384x_usbctlx_completion_task(unsigned long data);
 
-static void hfa384x_usbctlx_reaper_task(struct tasklet_struct *t);
+static void hfa384x_usbctlx_reaper_task(unsigned long data);
 
 static int hfa384x_usbctlx_submit(struct hfa384x *hw,
 				  struct hfa384x_usbctlx *ctlx);
@@ -524,7 +524,12 @@ static void hfa384x_usb_defer(struct work_struct *data)
  */
 void hfa384x_create(struct hfa384x *hw, struct usb_device *usb)
 {
+	memset(hw, 0, sizeof(*hw));
 	hw->usb = usb;
+
+	/* set up the endpoints */
+	hw->endp_in = usb_rcvbulkpipe(usb, 1);
+	hw->endp_out = usb_sndbulkpipe(usb, 2);
 
 	/* Set up the waitq */
 	init_waitqueue_head(&hw->cmdq);
@@ -539,8 +544,10 @@ void hfa384x_create(struct hfa384x *hw, struct usb_device *usb)
 	/* Initialize the authentication queue */
 	skb_queue_head_init(&hw->authq);
 
-	tasklet_setup(&hw->reaper_bh, hfa384x_usbctlx_reaper_task);
-	tasklet_setup(&hw->completion_bh, hfa384x_usbctlx_completion_task);
+	tasklet_init(&hw->reaper_bh,
+		     hfa384x_usbctlx_reaper_task, (unsigned long)hw);
+	tasklet_init(&hw->completion_bh,
+		     hfa384x_usbctlx_completion_task, (unsigned long)hw);
 	INIT_WORK(&hw->link_bh, prism2sta_processing_defer);
 	INIT_WORK(&hw->usb_work, hfa384x_usb_defer);
 
@@ -2597,9 +2604,9 @@ void hfa384x_tx_timeout(struct wlandevice *wlandev)
  *	Interrupt
  *----------------------------------------------------------------
  */
-static void hfa384x_usbctlx_reaper_task(struct tasklet_struct *t)
+static void hfa384x_usbctlx_reaper_task(unsigned long data)
 {
-	struct hfa384x *hw = from_tasklet(hw, t, reaper_bh);
+	struct hfa384x *hw = (struct hfa384x *)data;
 	struct hfa384x_usbctlx *ctlx, *temp;
 	unsigned long flags;
 
@@ -2631,9 +2638,9 @@ static void hfa384x_usbctlx_reaper_task(struct tasklet_struct *t)
  *	Interrupt
  *----------------------------------------------------------------
  */
-static void hfa384x_usbctlx_completion_task(struct tasklet_struct *t)
+static void hfa384x_usbctlx_completion_task(unsigned long data)
 {
-	struct hfa384x *hw = from_tasklet(hw, t, completion_bh);
+	struct hfa384x *hw = (struct hfa384x *)data;
 	struct hfa384x_usbctlx *ctlx, *temp;
 	unsigned long flags;
 

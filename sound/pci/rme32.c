@@ -468,6 +468,7 @@ static int snd_rme32_capture_getrate(struct rme32 * rme32, int *is_adat)
 			return 32000;
 		default:
 			return -1;
+			break;
 		} 
 	else
 		switch (n) {	/* supporting the CS8412 */

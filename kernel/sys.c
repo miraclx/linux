@@ -42,7 +42,6 @@
 #include <linux/syscore_ops.h>
 #include <linux/version.h>
 #include <linux/ctype.h>
-#include <linux/syscall_user_dispatch.h>
 
 #include <linux/compat.h>
 #include <linux/syscalls.h>
@@ -374,7 +373,7 @@ long __sys_setregid(gid_t rgid, gid_t egid)
 	if (rgid != (gid_t) -1) {
 		if (gid_eq(old->gid, krgid) ||
 		    gid_eq(old->egid, krgid) ||
-		    ns_capable_setid(old->user_ns, CAP_SETGID))
+		    ns_capable(old->user_ns, CAP_SETGID))
 			new->gid = krgid;
 		else
 			goto error;
@@ -383,7 +382,7 @@ long __sys_setregid(gid_t rgid, gid_t egid)
 		if (gid_eq(old->gid, kegid) ||
 		    gid_eq(old->egid, kegid) ||
 		    gid_eq(old->sgid, kegid) ||
-		    ns_capable_setid(old->user_ns, CAP_SETGID))
+		    ns_capable(old->user_ns, CAP_SETGID))
 			new->egid = kegid;
 		else
 			goto error;
@@ -393,10 +392,6 @@ long __sys_setregid(gid_t rgid, gid_t egid)
 	    (egid != (gid_t) -1 && !gid_eq(kegid, old->gid)))
 		new->sgid = new->egid;
 	new->fsgid = new->egid;
-
-	retval = security_task_fix_setgid(new, old, LSM_SETID_RE);
-	if (retval < 0)
-		goto error;
 
 	return commit_creds(new);
 
@@ -433,15 +428,11 @@ long __sys_setgid(gid_t gid)
 	old = current_cred();
 
 	retval = -EPERM;
-	if (ns_capable_setid(old->user_ns, CAP_SETGID))
+	if (ns_capable(old->user_ns, CAP_SETGID))
 		new->gid = new->egid = new->sgid = new->fsgid = kgid;
 	else if (gid_eq(kgid, old->gid) || gid_eq(kgid, old->sgid))
 		new->egid = new->fsgid = kgid;
 	else
-		goto error;
-
-	retval = security_task_fix_setgid(new, old, LSM_SETID_ID);
-	if (retval < 0)
 		goto error;
 
 	return commit_creds(new);
@@ -745,7 +736,7 @@ long __sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 	old = current_cred();
 
 	retval = -EPERM;
-	if (!ns_capable_setid(old->user_ns, CAP_SETGID)) {
+	if (!ns_capable(old->user_ns, CAP_SETGID)) {
 		if (rgid != (gid_t) -1        && !gid_eq(krgid, old->gid) &&
 		    !gid_eq(krgid, old->egid) && !gid_eq(krgid, old->sgid))
 			goto error;
@@ -764,10 +755,6 @@ long __sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 	if (sgid != (gid_t) -1)
 		new->sgid = ksgid;
 	new->fsgid = new->egid;
-
-	retval = security_task_fix_setgid(new, old, LSM_SETID_RES);
-	if (retval < 0)
-		goto error;
 
 	return commit_creds(new);
 
@@ -872,11 +859,10 @@ long __sys_setfsgid(gid_t gid)
 
 	if (gid_eq(kgid, old->gid)  || gid_eq(kgid, old->egid)  ||
 	    gid_eq(kgid, old->sgid) || gid_eq(kgid, old->fsgid) ||
-	    ns_capable_setid(old->user_ns, CAP_SETGID)) {
+	    ns_capable(old->user_ns, CAP_SETGID)) {
 		if (!gid_eq(kgid, old->fsgid)) {
 			new->fsgid = kgid;
-			if (security_task_fix_setgid(new,old,LSM_SETID_FS) == 0)
-				goto change_okay;
+			goto change_okay;
 		}
 	}
 
@@ -1754,7 +1740,7 @@ void getrusage(struct task_struct *p, int who, struct rusage *r)
 
 		if (who == RUSAGE_CHILDREN)
 			break;
-		fallthrough;
+		/* fall through */
 
 	case RUSAGE_SELF:
 		thread_group_cputime_adjusted(p, &tgutime, &tgstime);
@@ -1860,7 +1846,7 @@ static int prctl_set_mm_exe_file(struct mm_struct *mm, unsigned int fd)
 	if (exe_file) {
 		struct vm_area_struct *vma;
 
-		mmap_read_lock(mm);
+		down_read(&mm->mmap_sem);
 		for (vma = mm->mmap; vma; vma = vma->vm_next) {
 			if (!vma->vm_file)
 				continue;
@@ -1869,7 +1855,7 @@ static int prctl_set_mm_exe_file(struct mm_struct *mm, unsigned int fd)
 				goto exit_err;
 		}
 
-		mmap_read_unlock(mm);
+		up_read(&mm->mmap_sem);
 		fput(exe_file);
 	}
 
@@ -1883,7 +1869,7 @@ exit:
 	fdput(exe);
 	return err;
 exit_err:
-	mmap_read_unlock(mm);
+	up_read(&mm->mmap_sem);
 	fput(exe_file);
 	goto exit;
 }
@@ -2008,15 +1994,12 @@ static int prctl_set_mm_map(int opt, const void __user *addr, unsigned long data
 
 	if (prctl_map.exe_fd != (u32)-1) {
 		/*
-		 * Check if the current user is checkpoint/restore capable.
-		 * At the time of this writing, it checks for CAP_SYS_ADMIN
-		 * or CAP_CHECKPOINT_RESTORE.
-		 * Note that a user with access to ptrace can masquerade an
-		 * arbitrary program as any executable, even setuid ones.
-		 * This may have implications in the tomoyo subsystem.
+		 * Make sure the caller has the rights to
+		 * change /proc/pid/exe link: only local sys admin should
+		 * be allowed to.
 		 */
-		if (!checkpoint_restore_ns_capable(current_user_ns()))
-			return -EPERM;
+		if (!ns_capable(current_user_ns(), CAP_SYS_ADMIN))
+			return -EINVAL;
 
 		error = prctl_set_mm_exe_file(mm, prctl_map.exe_fd);
 		if (error)
@@ -2024,10 +2007,10 @@ static int prctl_set_mm_map(int opt, const void __user *addr, unsigned long data
 	}
 
 	/*
-	 * arg_lock protects concurent updates but we still need mmap_lock for
+	 * arg_lock protects concurent updates but we still need mmap_sem for
 	 * read to exclude races with sys_brk.
 	 */
-	mmap_read_lock(mm);
+	down_read(&mm->mmap_sem);
 
 	/*
 	 * We don't validate if these members are pointing to
@@ -2035,7 +2018,7 @@ static int prctl_set_mm_map(int opt, const void __user *addr, unsigned long data
 	 * VMAs already unmapped and kernel uses these members for statistics
 	 * output in procfs mostly, except
 	 *
-	 *  - @start_brk/@brk which are used in do_brk_flags but kernel lookups
+	 *  - @start_brk/@brk which are used in do_brk but kernel lookups
 	 *    for VMAs when updating these memvers so anything wrong written
 	 *    here cause kernel to swear at userspace program but won't lead
 	 *    to any problem in kernel itself
@@ -2066,7 +2049,7 @@ static int prctl_set_mm_map(int opt, const void __user *addr, unsigned long data
 	if (prctl_map.auxv_size)
 		memcpy(mm->saved_auxv, user_auxv, sizeof(user_auxv));
 
-	mmap_read_unlock(mm);
+	up_read(&mm->mmap_sem);
 	return 0;
 }
 #endif /* CONFIG_CHECKPOINT_RESTORE */
@@ -2139,10 +2122,10 @@ static int prctl_set_mm(int opt, unsigned long addr,
 
 	/*
 	 * arg_lock protects concurent updates of arg boundaries, we need
-	 * mmap_lock for a) concurrent sys_brk, b) finding VMA for addr
+	 * mmap_sem for a) concurrent sys_brk, b) finding VMA for addr
 	 * validation.
 	 */
-	mmap_read_lock(mm);
+	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, addr);
 
 	spin_lock(&mm->arg_lock);
@@ -2234,17 +2217,17 @@ static int prctl_set_mm(int opt, unsigned long addr,
 	error = 0;
 out:
 	spin_unlock(&mm->arg_lock);
-	mmap_read_unlock(mm);
+	up_read(&mm->mmap_sem);
 	return error;
 }
 
 #ifdef CONFIG_CHECKPOINT_RESTORE
-static int prctl_get_tid_address(struct task_struct *me, int __user * __user *tid_addr)
+static int prctl_get_tid_address(struct task_struct *me, int __user **tid_addr)
 {
 	return put_user(me->clear_child_tid, tid_addr);
 }
 #else
-static int prctl_get_tid_address(struct task_struct *me, int __user * __user *tid_addr)
+static int prctl_get_tid_address(struct task_struct *me, int __user **tid_addr)
 {
 	return -EINVAL;
 }
@@ -2279,7 +2262,7 @@ int __weak arch_prctl_spec_ctrl_set(struct task_struct *t, unsigned long which,
 	return -EINVAL;
 }
 
-#define PR_IO_FLUSHER (PF_MEMALLOC_NOIO | PF_LOCAL_THROTTLE)
+#define PR_IO_FLUSHER (PF_MEMALLOC_NOIO | PF_LESS_THROTTLE)
 
 SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		unsigned long, arg4, unsigned long, arg5)
@@ -2428,7 +2411,7 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		error = prctl_set_mm(arg2, arg3, arg4, arg5);
 		break;
 	case PR_GET_TID_ADDRESS:
-		error = prctl_get_tid_address(me, (int __user * __user *)arg2);
+		error = prctl_get_tid_address(me, (int __user **)arg2);
 		break;
 	case PR_SET_CHILD_SUBREAPER:
 		me->signal->is_child_subreaper = !!arg2;
@@ -2459,13 +2442,13 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 	case PR_SET_THP_DISABLE:
 		if (arg3 || arg4 || arg5)
 			return -EINVAL;
-		if (mmap_write_lock_killable(me->mm))
+		if (down_write_killable(&me->mm->mmap_sem))
 			return -EINTR;
 		if (arg2)
 			set_bit(MMF_DISABLE_THP, &me->mm->flags);
 		else
 			clear_bit(MMF_DISABLE_THP, &me->mm->flags);
-		mmap_write_unlock(me->mm);
+		up_write(&me->mm->mmap_sem);
 		break;
 	case PR_MPX_ENABLE_MANAGEMENT:
 	case PR_MPX_DISABLE_MANAGEMENT:
@@ -2530,10 +2513,6 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			return -EINVAL;
 
 		error = (current->flags & PR_IO_FLUSHER) == PR_IO_FLUSHER;
-		break;
-	case PR_SET_SYSCALL_USER_DISPATCH:
-		error = set_syscall_user_dispatch(arg2, arg3, arg4,
-						  (char __user *) arg5);
 		break;
 	default:
 		error = -EINVAL;
@@ -2655,7 +2634,6 @@ struct compat_sysinfo {
 COMPAT_SYSCALL_DEFINE1(sysinfo, struct compat_sysinfo __user *, info)
 {
 	struct sysinfo s;
-	struct compat_sysinfo s_32;
 
 	do_sysinfo(&s);
 
@@ -2680,23 +2658,23 @@ COMPAT_SYSCALL_DEFINE1(sysinfo, struct compat_sysinfo __user *, info)
 		s.freehigh >>= bitcount;
 	}
 
-	memset(&s_32, 0, sizeof(s_32));
-	s_32.uptime = s.uptime;
-	s_32.loads[0] = s.loads[0];
-	s_32.loads[1] = s.loads[1];
-	s_32.loads[2] = s.loads[2];
-	s_32.totalram = s.totalram;
-	s_32.freeram = s.freeram;
-	s_32.sharedram = s.sharedram;
-	s_32.bufferram = s.bufferram;
-	s_32.totalswap = s.totalswap;
-	s_32.freeswap = s.freeswap;
-	s_32.procs = s.procs;
-	s_32.totalhigh = s.totalhigh;
-	s_32.freehigh = s.freehigh;
-	s_32.mem_unit = s.mem_unit;
-	if (copy_to_user(info, &s_32, sizeof(s_32)))
+	if (!access_ok(info, sizeof(struct compat_sysinfo)) ||
+	    __put_user(s.uptime, &info->uptime) ||
+	    __put_user(s.loads[0], &info->loads[0]) ||
+	    __put_user(s.loads[1], &info->loads[1]) ||
+	    __put_user(s.loads[2], &info->loads[2]) ||
+	    __put_user(s.totalram, &info->totalram) ||
+	    __put_user(s.freeram, &info->freeram) ||
+	    __put_user(s.sharedram, &info->sharedram) ||
+	    __put_user(s.bufferram, &info->bufferram) ||
+	    __put_user(s.totalswap, &info->totalswap) ||
+	    __put_user(s.freeswap, &info->freeswap) ||
+	    __put_user(s.procs, &info->procs) ||
+	    __put_user(s.totalhigh, &info->totalhigh) ||
+	    __put_user(s.freehigh, &info->freehigh) ||
+	    __put_user(s.mem_unit, &info->mem_unit))
 		return -EFAULT;
+
 	return 0;
 }
 #endif /* CONFIG_COMPAT */

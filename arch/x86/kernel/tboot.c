@@ -23,6 +23,7 @@
 #include <asm/realmode.h>
 #include <asm/processor.h>
 #include <asm/bootparam.h>
+#include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/swiotlb.h>
 #include <asm/fixmap.h>
@@ -34,7 +35,8 @@
 #include "../realmode/rm/wakeup.h"
 
 /* Global pointer to shared data; NULL means no measured launch. */
-static struct tboot *tboot __read_mostly;
+struct tboot *tboot __read_mostly;
+EXPORT_SYMBOL(tboot);
 
 /* timeout for APs (in secs) to enter wait-for-SIPI state during shutdown */
 #define AP_WAIT_TIMEOUT		1
@@ -43,11 +45,6 @@ static struct tboot *tboot __read_mostly;
 #define pr_fmt(fmt)	"tboot: " fmt
 
 static u8 tboot_uuid[16] __initdata = TBOOT_UUID;
-
-bool tboot_enabled(void)
-{
-	return tboot != NULL;
-}
 
 void __init tboot_probe(void)
 {
@@ -93,8 +90,7 @@ static struct mm_struct tboot_mm = {
 	.pgd            = swapper_pg_dir,
 	.mm_users       = ATOMIC_INIT(2),
 	.mm_count       = ATOMIC_INIT(1),
-	.write_protect_seq = SEQCNT_ZERO(tboot_mm.write_protect_seq),
-	MMAP_LOCK_INITIALIZER(init_mm)
+	.mmap_sem       = __RWSEM_INITIALIZER(init_mm.mmap_sem),
 	.page_table_lock =  __SPIN_LOCK_UNLOCKED(init_mm.page_table_lock),
 	.mmlist         = LIST_HEAD_INIT(init_mm.mmlist),
 };
@@ -515,10 +511,16 @@ int tboot_force_iommu(void)
 	if (!tboot_enabled())
 		return 0;
 
-	if (no_iommu || dmar_disabled)
+	if (intel_iommu_tboot_noforce)
+		return 1;
+
+	if (no_iommu || swiotlb || dmar_disabled)
 		pr_warn("Forcing Intel-IOMMU to enabled\n");
 
 	dmar_disabled = 0;
+#ifdef CONFIG_SWIOTLB
+	swiotlb = 0;
+#endif
 	no_iommu = 0;
 
 	return 1;

@@ -53,4 +53,6 @@ extern void paging_init(void);
 #define	KMAP_START	0
 #define	KMAP_END	0xffffffff
 
+#include <asm-generic/pgtable.h>
+
 #endif /* _M68KNOMMU_PGTABLE_H */

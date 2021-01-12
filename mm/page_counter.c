@@ -72,13 +72,13 @@ void page_counter_charge(struct page_counter *counter, unsigned long nr_pages)
 		long new;
 
 		new = atomic_long_add_return(nr_pages, &c->usage);
-		propagate_protected_usage(c, new);
+		propagate_protected_usage(counter, new);
 		/*
 		 * This is indeed racy, but we can live with some
 		 * inaccuracy in the watermark.
 		 */
-		if (new > READ_ONCE(c->watermark))
-			WRITE_ONCE(c->watermark, new);
+		if (new > c->watermark)
+			c->watermark = new;
 	}
 }
 
@@ -109,30 +109,29 @@ bool page_counter_try_charge(struct page_counter *counter,
 		 *
 		 * The atomic_long_add_return() implies a full memory
 		 * barrier between incrementing the count and reading
-		 * the limit.  When racing with page_counter_set_max(),
+		 * the limit.  When racing with page_counter_limit(),
 		 * we either see the new limit or the setter sees the
 		 * counter has changed and retries.
 		 */
 		new = atomic_long_add_return(nr_pages, &c->usage);
 		if (new > c->max) {
 			atomic_long_sub(nr_pages, &c->usage);
-			propagate_protected_usage(c, new);
+			propagate_protected_usage(counter, new);
 			/*
 			 * This is racy, but we can live with some
-			 * inaccuracy in the failcnt which is only used
-			 * to report stats.
+			 * inaccuracy in the failcnt.
 			 */
-			data_race(c->failcnt++);
+			c->failcnt++;
 			*fail = c;
 			goto failed;
 		}
-		propagate_protected_usage(c, new);
+		propagate_protected_usage(counter, new);
 		/*
 		 * Just like with failcnt, we can live with some
 		 * inaccuracy in the watermark.
 		 */
-		if (new > READ_ONCE(c->watermark))
-			WRITE_ONCE(c->watermark, new);
+		if (new > c->watermark)
+			c->watermark = new;
 	}
 	return true;
 
@@ -183,14 +182,14 @@ int page_counter_set_max(struct page_counter *counter, unsigned long nr_pages)
 		 * the limit, so if it sees the old limit, we see the
 		 * modified counter and retry.
 		 */
-		usage = page_counter_read(counter);
+		usage = atomic_long_read(&counter->usage);
 
 		if (usage > nr_pages)
 			return -EBUSY;
 
 		old = xchg(&counter->max, nr_pages);
 
-		if (page_counter_read(counter) <= usage)
+		if (atomic_long_read(&counter->usage) <= usage)
 			return 0;
 
 		counter->max = old;

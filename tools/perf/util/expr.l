@@ -10,12 +10,12 @@
 char *expr_get_text(yyscan_t yyscanner);
 YYSTYPE *expr_get_lval(yyscan_t yyscanner);
 
-static double __value(YYSTYPE *yylval, char *str, int token)
+static int __value(YYSTYPE *yylval, char *str, int base, int token)
 {
-	double num;
+	u64 num;
 
 	errno = 0;
-	num = strtod(str, NULL);
+	num = strtoull(str, NULL, base);
 	if (errno)
 		return EXPR_ERROR;
 
@@ -23,19 +23,19 @@ static double __value(YYSTYPE *yylval, char *str, int token)
 	return token;
 }
 
-static int value(yyscan_t scanner)
+static int value(yyscan_t scanner, int base)
 {
 	YYSTYPE *yylval = expr_get_lval(scanner);
 	char *text = expr_get_text(scanner);
 
-	return __value(yylval, text, NUMBER);
+	return __value(yylval, text, base, NUMBER);
 }
 
 /*
  * Allow @ instead of / to be able to specify pmu/event/ without
  * conflicts with normal division.
  */
-static char *normalize(char *str, int runtime)
+static char *normalize(char *str)
 {
 	char *ret = str;
 	char *dst = str;
@@ -45,19 +45,6 @@ static char *normalize(char *str, int runtime)
 			*dst++ = '/';
 		else if (*str == '\\')
 			*dst++ = *++str;
-		 else if (*str == '?') {
-			char *paramval;
-			int i = 0;
-			int size = asprintf(&paramval, "%d", runtime);
-
-			if (size < 0)
-				*dst++ = '0';
-			else {
-				while (i < size)
-					*dst++ = paramval[i++];
-				free(paramval);
-			}
-		}
 		else
 			*dst++ = *str;
 		str++;
@@ -67,52 +54,49 @@ static char *normalize(char *str, int runtime)
 	return ret;
 }
 
-static int str(yyscan_t scanner, int token, int runtime)
+static int str(yyscan_t scanner, int token)
 {
 	YYSTYPE *yylval = expr_get_lval(scanner);
 	char *text = expr_get_text(scanner);
 
-	yylval->str = normalize(strdup(text), runtime);
+	yylval->str = normalize(strdup(text));
 	if (!yylval->str)
 		return EXPR_ERROR;
 
-	yylval->str = normalize(yylval->str, runtime);
+	yylval->str = normalize(yylval->str);
 	return token;
 }
 %}
 
-number		([0-9]+\.?[0-9]*|[0-9]*\.?[0-9]+)
+number		[0-9]+
 
 sch		[-,=]
 spec		\\{sch}
-sym		[0-9a-zA-Z_\.:@?]+
-symbol		({spec}|{sym})+
+sym		[0-9a-zA-Z_\.:@]+
+symbol		{spec}*{sym}*{spec}*{sym}*
 
 %%
-	struct expr_scanner_ctx *sctx = expr_get_extra(yyscanner);
-
 	{
-		int start_token = sctx->start_token;
+		int start_token;
 
-		if (sctx->start_token) {
-			sctx->start_token = 0;
+		start_token = expr_get_extra(yyscanner);
+
+		if (start_token) {
+			expr_set_extra(NULL, yyscanner);
 			return start_token;
 		}
 	}
 
-d_ratio		{ return D_RATIO; }
 max		{ return MAX; }
 min		{ return MIN; }
 if		{ return IF; }
 else		{ return ELSE; }
 #smt_on		{ return SMT_ON; }
-{number}	{ return value(yyscanner); }
-{symbol}	{ return str(yyscanner, ID, sctx->runtime); }
+{number}	{ return value(yyscanner, 10); }
+{symbol}	{ return str(yyscanner, ID); }
 "|"		{ return '|'; }
 "^"		{ return '^'; }
 "&"		{ return '&'; }
-"<"		{ return '<'; }
-">"		{ return '>'; }
 "-"		{ return '-'; }
 "+"		{ return '+'; }
 "*"		{ return '*'; }

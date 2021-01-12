@@ -1,7 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0
 # description: Kprobe event auto/manual naming
-# requires: kprobe_events
+
+[ -f kprobe_events ] || exit_unsupported # this is configurable
 
 :;: "Add an event on function without name" ;:
 

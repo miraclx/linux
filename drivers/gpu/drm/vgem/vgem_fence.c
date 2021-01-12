@@ -182,7 +182,7 @@ err_fence:
 		dma_fence_put(fence);
 	}
 err:
-	drm_gem_object_put(obj);
+	drm_gem_object_put_unlocked(obj);
 	return ret;
 }
 
@@ -233,7 +233,7 @@ int vgem_fence_signal_ioctl(struct drm_device *dev,
 int vgem_fence_open(struct vgem_file *vfile)
 {
 	mutex_init(&vfile->fence_mutex);
-	idr_init_base(&vfile->fence_idr, 1);
+	idr_init(&vfile->fence_idr);
 
 	return 0;
 }

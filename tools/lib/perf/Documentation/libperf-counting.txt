@@ -7,13 +7,13 @@ libperf-counting - counting interface
 
 DESCRIPTION
 -----------
-The counting interface provides API to measure and get count for specific perf events.
+The counting interface provides API to meassure and get count for specific perf events.
 
 The following test tries to explain count on `counting.c` example.
 
 It is by no means complete guide to counting, but shows libperf basic API for counting.
 
-The `counting.c` comes with libperf package and can be compiled and run like:
+The `counting.c` comes with libbperf package and can be compiled and run like:
 
 [source,bash]
 --
@@ -26,8 +26,7 @@ count 176242, enabled 176242, run 176242
 It requires root access, because of the `PERF_COUNT_SW_CPU_CLOCK` event,
 which is available only for root.
 
-The `counting.c` example monitors two events on the current process and displays
-their count, in a nutshell it:
+The `counting.c` example monitors two events on the current process and displays their count, in a nutshel it:
 
 * creates events
 * adds them to the event list
@@ -153,7 +152,7 @@ Configure event list with the thread map and open events:
 --
 
 Both events are created as disabled (note the `disabled = 1` assignment above),
-so we need to enable the whole list explicitly (both events).
+so we need to enable the whole list explicitely (both events).
 
 From this moment events are counting and we can do our workload.
 
@@ -168,8 +167,7 @@ When we are done we disable the events list.
  79         perf_evlist__disable(evlist);
 --
 
-Now we need to get the counts from events, following code iterates through the
-events list and read counts:
+Now we need to get the counts from events, following code iterates throught the events list and read counts:
 
 [source,c]
 --
@@ -180,7 +178,7 @@ events list and read counts:
  85         }
 --
 
-And finally cleanup.
+And finaly cleanup.
 
 We close the whole events list (both events) and remove it together with the threads map:
 

@@ -33,6 +33,7 @@
 #include <linux/hugetlb.h>
 #include <asm/asm-offsets.h>
 #include <asm/diag.h>
+#include <asm/pgtable.h>
 #include <asm/gmap.h>
 #include <asm/irq.h>
 #include <asm/mmu_context.h>
@@ -53,6 +54,7 @@
 enum fault_type {
 	KERNEL_FAULT,
 	USER_FAULT,
+	VDSO_FAULT,
 	GMAP_FAULT,
 };
 
@@ -76,16 +78,22 @@ static enum fault_type get_fault_type(struct pt_regs *regs)
 	trans_exc_code = regs->int_parm_long & 3;
 	if (likely(trans_exc_code == 0)) {
 		/* primary space exception */
-		if (user_mode(regs))
-			return USER_FAULT;
-		if (!IS_ENABLED(CONFIG_PGSTE))
-			return KERNEL_FAULT;
-		if (test_pt_regs_flag(regs, PIF_GUEST_FAULT))
+		if (IS_ENABLED(CONFIG_PGSTE) &&
+		    test_pt_regs_flag(regs, PIF_GUEST_FAULT))
 			return GMAP_FAULT;
+		if (current->thread.mm_segment == USER_DS)
+			return USER_FAULT;
 		return KERNEL_FAULT;
 	}
-	if (trans_exc_code == 2)
-		return USER_FAULT;
+	if (trans_exc_code == 2) {
+		/* secondary space exception */
+		if (current->thread.mm_segment & 1) {
+			if (current->thread.mm_segment == USER_DS_SACF)
+				return USER_FAULT;
+			return KERNEL_FAULT;
+		}
+		return VDSO_FAULT;
+	}
 	if (trans_exc_code == 1) {
 		/* access register mode, not used in the kernel */
 		return USER_FAULT;
@@ -98,7 +106,7 @@ static int bad_address(void *p)
 {
 	unsigned long dummy;
 
-	return get_kernel_nofault(dummy, (unsigned long *)p);
+	return probe_kernel_address((unsigned long *)p, dummy);
 }
 
 static void dump_pagetable(unsigned long asce, unsigned long address)
@@ -181,6 +189,10 @@ static void dump_fault_info(struct pt_regs *regs)
 		asce = S390_lowcore.user_asce;
 		pr_cont("user ");
 		break;
+	case VDSO_FAULT:
+		asce = S390_lowcore.vdso_asce;
+		pr_cont("vdso ");
+		break;
 	case GMAP_FAULT:
 		asce = ((struct gmap *) S390_lowcore.gmap)->asce;
 		pr_cont("gmap ");
@@ -244,8 +256,10 @@ static noinline void do_no_context(struct pt_regs *regs)
 
 	/* Are we prepared to handle this kernel fault?  */
 	fixup = s390_search_extables(regs->psw.addr);
-	if (fixup && ex_handle(fixup, regs))
+	if (fixup) {
+		regs->psw.addr = extable_fixup(fixup);
 		return;
+	}
 
 	/*
 	 * Oops. The kernel tried to access some bad page. We'll have to
@@ -363,7 +377,7 @@ static noinline void do_fault_error(struct pt_regs *regs, int access,
  * routines.
  *
  * interruption code (int_code):
- *   04       Protection           ->  Write-Protection  (suppression)
+ *   04       Protection           ->  Write-Protection  (suprression)
  *   10       Segment translation  ->  Not present       (nullification)
  *   11       Page translation     ->  Not present       (nullification)
  *   3b       Region third trans.  ->  Not present       (nullification)
@@ -403,6 +417,9 @@ static inline vm_fault_t do_exception(struct pt_regs *regs, int access)
 	switch (type) {
 	case KERNEL_FAULT:
 		goto out;
+	case VDSO_FAULT:
+		fault = VM_FAULT_BADMAP;
+		goto out;
 	case USER_FAULT:
 	case GMAP_FAULT:
 		if (faulthandler_disabled() || !mm)
@@ -417,7 +434,7 @@ static inline vm_fault_t do_exception(struct pt_regs *regs, int access)
 		flags |= FAULT_FLAG_USER;
 	if (access == VM_WRITE || (trans_exc_code & store_indication) == 0x400)
 		flags |= FAULT_FLAG_WRITE;
-	mmap_read_lock(mm);
+	down_read(&mm->mmap_sem);
 
 	gmap = NULL;
 	if (IS_ENABLED(CONFIG_PGSTE) && type == GMAP_FAULT) {
@@ -462,7 +479,7 @@ retry:
 	 * make sure we exit gracefully rather than endlessly redo
 	 * the fault.
 	 */
-	fault = handle_mm_fault(vma, address, flags, regs);
+	fault = handle_mm_fault(vma, address, flags);
 	if (fault_signal_pending(fault, regs)) {
 		fault = VM_FAULT_SIGNAL;
 		if (flags & FAULT_FLAG_RETRY_NOWAIT)
@@ -472,19 +489,33 @@ retry:
 	if (unlikely(fault & VM_FAULT_ERROR))
 		goto out_up;
 
+	/*
+	 * Major/minor page fault accounting is only done on the
+	 * initial attempt. If we go through a retry, it is extremely
+	 * likely that the page will be found in page cache at that point.
+	 */
 	if (flags & FAULT_FLAG_ALLOW_RETRY) {
+		if (fault & VM_FAULT_MAJOR) {
+			tsk->maj_flt++;
+			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1,
+				      regs, address);
+		} else {
+			tsk->min_flt++;
+			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1,
+				      regs, address);
+		}
 		if (fault & VM_FAULT_RETRY) {
 			if (IS_ENABLED(CONFIG_PGSTE) && gmap &&
 			    (flags & FAULT_FLAG_RETRY_NOWAIT)) {
 				/* FAULT_FLAG_RETRY_NOWAIT has been set,
-				 * mmap_lock has not been released */
+				 * mmap_sem has not been released */
 				current->thread.gmap_pfault = 1;
 				fault = VM_FAULT_PFAULT;
 				goto out_up;
 			}
 			flags &= ~FAULT_FLAG_RETRY_NOWAIT;
 			flags |= FAULT_FLAG_TRIED;
-			mmap_read_lock(mm);
+			down_read(&mm->mmap_sem);
 			goto retry;
 		}
 	}
@@ -502,7 +533,7 @@ retry:
 	}
 	fault = 0;
 out_up:
-	mmap_read_unlock(mm);
+	up_read(&mm->mmap_sem);
 out:
 	return fault;
 }
@@ -794,22 +825,22 @@ void do_secure_storage_access(struct pt_regs *regs)
 	switch (get_fault_type(regs)) {
 	case USER_FAULT:
 		mm = current->mm;
-		mmap_read_lock(mm);
+		down_read(&mm->mmap_sem);
 		vma = find_vma(mm, addr);
 		if (!vma) {
-			mmap_read_unlock(mm);
+			up_read(&mm->mmap_sem);
 			do_fault_error(regs, VM_READ | VM_WRITE, VM_FAULT_BADMAP);
 			break;
 		}
 		page = follow_page(vma, addr, FOLL_WRITE | FOLL_GET);
 		if (IS_ERR_OR_NULL(page)) {
-			mmap_read_unlock(mm);
+			up_read(&mm->mmap_sem);
 			break;
 		}
 		if (arch_make_page_accessible(page))
 			send_sig(SIGSEGV, current, 0);
 		put_page(page);
-		mmap_read_unlock(mm);
+		up_read(&mm->mmap_sem);
 		break;
 	case KERNEL_FAULT:
 		page = phys_to_page(addr);
@@ -820,6 +851,7 @@ void do_secure_storage_access(struct pt_regs *regs)
 		if (rc)
 			BUG();
 		break;
+	case VDSO_FAULT:
 	case GMAP_FAULT:
 	default:
 		do_fault_error(regs, VM_READ | VM_WRITE, VM_FAULT_BADMAP);
@@ -844,21 +876,6 @@ void do_non_secure_storage_access(struct pt_regs *regs)
 }
 NOKPROBE_SYMBOL(do_non_secure_storage_access);
 
-void do_secure_storage_violation(struct pt_regs *regs)
-{
-	/*
-	 * Either KVM messed up the secure guest mapping or the same
-	 * page is mapped into multiple secure guests.
-	 *
-	 * This exception is only triggered when a guest 2 is running
-	 * and can therefore never occur in kernel context.
-	 */
-	printk_ratelimited(KERN_WARNING
-			   "Secure storage violation in task: %s, pid %d\n",
-			   current->comm, current->pid);
-	send_sig(SIGSEGV, current, 0);
-}
-
 #else
 void do_secure_storage_access(struct pt_regs *regs)
 {
@@ -866,11 +883,6 @@ void do_secure_storage_access(struct pt_regs *regs)
 }
 
 void do_non_secure_storage_access(struct pt_regs *regs)
-{
-	default_trap_handler(regs);
-}
-
-void do_secure_storage_violation(struct pt_regs *regs)
 {
 	default_trap_handler(regs);
 }

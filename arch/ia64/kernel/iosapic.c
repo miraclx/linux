@@ -95,7 +95,6 @@
 #include <asm/iosapic.h>
 #include <asm/processor.h>
 #include <asm/ptrace.h>
-#include <asm/xtp.h>
 
 #undef DEBUG_INTERRUPT_ROUTING
 

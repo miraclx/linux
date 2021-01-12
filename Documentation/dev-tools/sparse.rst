@@ -9,8 +9,6 @@ Sparse is a semantic checker for C programs; it can be used to find a
 number of potential problems with kernel code.  See
 https://lwn.net/Articles/689907/ for an overview of sparse; this document
 contains some kernel-specific sparse information.
-More information on sparse, mainly about its internals, can be found in
-its official pages at https://sparse.docs.kernel.org.
 
 
 Using sparse for typechecking
@@ -75,8 +73,8 @@ sparse would otherwise report a context imbalance.
 Getting sparse
 --------------
 
-You can get tarballs of the latest released versions from:
-https://www.kernel.org/pub/software/devel/sparse/dist/
+You can get latest released versions from the Sparse homepage at
+https://sparse.wiki.kernel.org/index.php/Main_Page
 
 Alternatively, you can get snapshots of the latest development version
 of sparse using git to clone::

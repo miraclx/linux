@@ -388,4 +388,3 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Fernando Fernandez <ffmancera@riseup.net>");
 MODULE_ALIAS_NFT_EXPR("synproxy");
 MODULE_ALIAS_NFT_OBJ(NFT_OBJECT_SYNPROXY);
-MODULE_DESCRIPTION("nftables SYNPROXY expression support");

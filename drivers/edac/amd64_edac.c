@@ -4,6 +4,9 @@
 
 static struct edac_pci_ctl_info *pci_ctl;
 
+static int report_gart_errors;
+module_param(report_gart_errors, int, 0644);
+
 /*
  * Set by command line parameter. If BIOS has enabled the ECC, this override is
  * cleared to prevent re-enabling the hardware by this driver.
@@ -17,9 +20,6 @@ static struct amd64_family_type *fam_type;
 
 /* Per-node stuff */
 static struct ecc_settings **ecc_stngs;
-
-/* Device for the PCI component */
-static struct device *pci_ctl_dev;
 
 /*
  * Valid scrub rates for the K8 hardware memory scrubber. We map the scrubbing
@@ -272,8 +272,6 @@ static int get_scrub_rate(struct mem_ctl_info *mci)
 
 		if (pvt->model == 0x60)
 			amd64_read_pci_cfg(pvt->F2, F15H_M60H_SCRCTRL, &scrubval);
-		else
-			amd64_read_pci_cfg(pvt->F3, SCRCTRL, &scrubval);
 	} else {
 		amd64_read_pci_cfg(pvt->F3, SCRCTRL, &scrubval);
 	}
@@ -1136,7 +1134,7 @@ static int k8_early_channel_count(struct amd64_pvt *pvt)
 /* On F10h and later ErrAddr is MC4_ADDR[47:1] */
 static u64 get_error_address(struct amd64_pvt *pvt, struct mce *m)
 {
-	u16 mce_nid = topology_die_id(m->extcpu);
+	u16 mce_nid = amd_get_nb_id(m->extcpu);
 	struct mem_ctl_info *mci;
 	u8 start_bit = 1;
 	u8 end_bit   = 47;
@@ -2321,16 +2319,6 @@ static struct amd64_family_type family_types[] = {
 			.dbam_to_cs		= f17_addr_mask_to_cs_size,
 		}
 	},
-	[F17_M60H_CPUS] = {
-		.ctl_name = "F17h_M60h",
-		.f0_id = PCI_DEVICE_ID_AMD_17H_M60H_DF_F0,
-		.f6_id = PCI_DEVICE_ID_AMD_17H_M60H_DF_F6,
-		.max_mcs = 2,
-		.ops = {
-			.early_channel_count	= f17_early_channel_count,
-			.dbam_to_cs		= f17_addr_mask_to_cs_size,
-		}
-	},
 	[F17_M70H_CPUS] = {
 		.ctl_name = "F17h_M70h",
 		.f0_id = PCI_DEVICE_ID_AMD_17H_M70H_DF_F0,
@@ -2464,11 +2452,14 @@ static int map_err_sym_to_channel(int err_sym, int sym_size)
 		case 0x20:
 		case 0x21:
 			return 0;
+			break;
 		case 0x22:
 		case 0x23:
 			return 1;
+			break;
 		default:
 			return err_sym >> 4;
+			break;
 		}
 	/* x8 symbols */
 	else
@@ -2478,12 +2469,17 @@ static int map_err_sym_to_channel(int err_sym, int sym_size)
 			WARN(1, KERN_ERR "Invalid error symbol: 0x%x\n",
 					  err_sym);
 			return -1;
+			break;
+
 		case 0x11:
 			return 0;
+			break;
 		case 0x12:
 			return 1;
+			break;
 		default:
 			return err_sym >> 3;
+			break;
 		}
 	return -1;
 }
@@ -2678,9 +2674,6 @@ reserve_mc_sibling_devs(struct amd64_pvt *pvt, u16 pci_id1, u16 pci_id2)
 			return -ENODEV;
 		}
 
-		if (!pci_ctl_dev)
-			pci_ctl_dev = &pvt->F0->dev;
-
 		edac_dbg(1, "F0: %s\n", pci_name(pvt->F0));
 		edac_dbg(1, "F3: %s\n", pci_name(pvt->F3));
 		edac_dbg(1, "F6: %s\n", pci_name(pvt->F6));
@@ -2704,9 +2697,6 @@ reserve_mc_sibling_devs(struct amd64_pvt *pvt, u16 pci_id1, u16 pci_id2)
 		amd64_err("F2 not found: device 0x%x (broken BIOS?)\n", pci_id2);
 		return -ENODEV;
 	}
-
-	if (!pci_ctl_dev)
-		pci_ctl_dev = &pvt->F2->dev;
 
 	edac_dbg(1, "F1: %s\n", pci_name(pvt->F1));
 	edac_dbg(1, "F2: %s\n", pci_name(pvt->F2));
@@ -3047,7 +3037,7 @@ static void get_cpus_on_this_dct_cpumask(struct cpumask *mask, u16 nid)
 	int cpu;
 
 	for_each_online_cpu(cpu)
-		if (topology_die_id(cpu) == nid)
+		if (amd_get_nb_id(cpu) == nid)
 			cpumask_set_cpu(cpu, mask);
 }
 
@@ -3367,16 +3357,12 @@ static struct amd64_family_type *per_family_init(struct amd64_pvt *pvt)
 			fam_type = &family_types[F17_M30H_CPUS];
 			pvt->ops = &family_types[F17_M30H_CPUS].ops;
 			break;
-		} else if (pvt->model >= 0x60 && pvt->model <= 0x6f) {
-			fam_type = &family_types[F17_M60H_CPUS];
-			pvt->ops = &family_types[F17_M60H_CPUS].ops;
-			break;
 		} else if (pvt->model >= 0x70 && pvt->model <= 0x7f) {
 			fam_type = &family_types[F17_M70H_CPUS];
 			pvt->ops = &family_types[F17_M70H_CPUS].ops;
 			break;
 		}
-		fallthrough;
+		/* fall through */
 	case 0x18:
 		fam_type	= &family_types[F17_CPUS];
 		pvt->ops	= &family_types[F17_CPUS].ops;
@@ -3386,12 +3372,6 @@ static struct amd64_family_type *per_family_init(struct amd64_pvt *pvt)
 		break;
 
 	case 0x19:
-		if (pvt->model >= 0x20 && pvt->model <= 0x2f) {
-			fam_type = &family_types[F17_M70H_CPUS];
-			pvt->ops = &family_types[F17_M70H_CPUS].ops;
-			fam_type->ctl_name = "F19h_M20h";
-			break;
-		}
 		fam_type	= &family_types[F19_CPUS];
 		pvt->ops	= &family_types[F19_CPUS].ops;
 		family_types[F19_CPUS].ctl_name = "F19h";
@@ -3423,7 +3403,7 @@ static const struct attribute_group *amd64_edac_attr_groups[] = {
 static int hw_info_get(struct amd64_pvt *pvt)
 {
 	u16 pci_id1, pci_id2;
-	int ret;
+	int ret = -EINVAL;
 
 	if (pvt->fam >= 0x17) {
 		pvt->umc = kcalloc(fam_type->max_mcs, sizeof(struct amd64_umc), GFP_KERNEL);
@@ -3624,10 +3604,21 @@ static void remove_one_instance(unsigned int nid)
 
 static void setup_pci_device(void)
 {
+	struct mem_ctl_info *mci;
+	struct amd64_pvt *pvt;
+
 	if (pci_ctl)
 		return;
 
-	pci_ctl = edac_pci_create_generic_ctl(pci_ctl_dev, EDAC_MOD_STR);
+	mci = edac_mc_find(0);
+	if (!mci)
+		return;
+
+	pvt = mci->pvt_info;
+	if (pvt->umc)
+		pci_ctl = edac_pci_create_generic_ctl(&pvt->F0->dev, EDAC_MOD_STR);
+	else
+		pci_ctl = edac_pci_create_generic_ctl(&pvt->F2->dev, EDAC_MOD_STR);
 	if (!pci_ctl) {
 		pr_warn("%s(): Unable to create PCI control\n", __func__);
 		pr_warn("%s(): PCI error report via EDAC not set\n", __func__);
@@ -3690,6 +3681,9 @@ static int __init amd64_edac_init(void)
 	}
 
 	/* register stuff with EDAC MCE */
+	if (report_gart_errors)
+		amd_report_gart_errors(true);
+
 	if (boot_cpu_data.x86 >= 0x17)
 		amd_register_ecc_decoder(decode_umc_error);
 	else
@@ -3706,8 +3700,6 @@ static int __init amd64_edac_init(void)
 	return 0;
 
 err_pci:
-	pci_ctl_dev = NULL;
-
 	msrs_free(msrs);
 	msrs = NULL;
 
@@ -3726,6 +3718,8 @@ static void __exit amd64_edac_exit(void)
 		edac_pci_release_generic_ctl(pci_ctl);
 
 	/* unregister from EDAC MCE */
+	amd_report_gart_errors(false);
+
 	if (boot_cpu_data.x86 >= 0x17)
 		amd_unregister_ecc_decoder(decode_umc_error);
 	else
@@ -3736,8 +3730,6 @@ static void __exit amd64_edac_exit(void)
 
 	kfree(ecc_stngs);
 	ecc_stngs = NULL;
-
-	pci_ctl_dev = NULL;
 
 	msrs_free(msrs);
 	msrs = NULL;

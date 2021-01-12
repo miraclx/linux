@@ -58,7 +58,7 @@ __cmdline_find_option_bool(const char *cmdline, int max_cmdline_size,
 			state = st_wordcmp;
 			opptr = option;
 			wstart = pos;
-			fallthrough;
+			/* fall through */
 
 		case st_wordcmp:
 			if (!*opptr) {
@@ -89,7 +89,7 @@ __cmdline_find_option_bool(const char *cmdline, int max_cmdline_size,
 				break;
 			}
 			state = st_wordskip;
-			fallthrough;
+			/* fall through */
 
 		case st_wordskip:
 			if (!c)
@@ -151,7 +151,7 @@ __cmdline_find_option(const char *cmdline, int max_cmdline_size,
 
 			state = st_wordcmp;
 			opptr = option;
-			fallthrough;
+			/* fall through */
 
 		case st_wordcmp:
 			if ((c == '=') && !*opptr) {
@@ -172,7 +172,7 @@ __cmdline_find_option(const char *cmdline, int max_cmdline_size,
 				break;
 			}
 			state = st_wordskip;
-			fallthrough;
+			/* fall through */
 
 		case st_wordskip:
 			if (myisspace(c))

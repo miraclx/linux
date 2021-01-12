@@ -26,7 +26,7 @@
 #ifndef _DMUB_REG_H_
 #define _DMUB_REG_H_
 
-#include "../inc/dmub_cmd.h"
+#include "../inc/dmub_types.h"
 
 struct dmub_srv;
 

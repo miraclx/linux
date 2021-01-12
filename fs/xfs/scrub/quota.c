@@ -18,17 +18,17 @@
 #include "scrub/common.h"
 
 /* Convert a scrub type code to a DQ flag, or return 0 if error. */
-static inline xfs_dqtype_t
+static inline uint
 xchk_quota_to_dqtype(
 	struct xfs_scrub	*sc)
 {
 	switch (sc->sm->sm_type) {
 	case XFS_SCRUB_TYPE_UQUOTA:
-		return XFS_DQTYPE_USER;
+		return XFS_DQ_USER;
 	case XFS_SCRUB_TYPE_GQUOTA:
-		return XFS_DQTYPE_GROUP;
+		return XFS_DQ_GROUP;
 	case XFS_SCRUB_TYPE_PQUOTA:
-		return XFS_DQTYPE_PROJ;
+		return XFS_DQ_PROJ;
 	default:
 		return 0;
 	}
@@ -40,7 +40,7 @@ xchk_setup_quota(
 	struct xfs_scrub	*sc,
 	struct xfs_inode	*ip)
 {
-	xfs_dqtype_t		dqtype;
+	uint			dqtype;
 	int			error;
 
 	if (!XFS_IS_QUOTA_RUNNING(sc->mp) || !XFS_IS_QUOTA_ON(sc->mp))
@@ -73,15 +73,26 @@ struct xchk_quota_info {
 STATIC int
 xchk_quota_item(
 	struct xfs_dquot	*dq,
-	xfs_dqtype_t		dqtype,
+	uint			dqtype,
 	void			*priv)
 {
 	struct xchk_quota_info	*sqi = priv;
 	struct xfs_scrub	*sc = sqi->sc;
 	struct xfs_mount	*mp = sc->mp;
+	struct xfs_disk_dquot	*d = &dq->q_core;
 	struct xfs_quotainfo	*qi = mp->m_quotainfo;
 	xfs_fileoff_t		offset;
+	unsigned long long	bsoft;
+	unsigned long long	isoft;
+	unsigned long long	rsoft;
+	unsigned long long	bhard;
+	unsigned long long	ihard;
+	unsigned long long	rhard;
+	unsigned long long	bcount;
+	unsigned long long	icount;
+	unsigned long long	rcount;
 	xfs_ino_t		fs_icount;
+	xfs_dqid_t		id = be32_to_cpu(d->d_id);
 	int			error = 0;
 
 	if (xchk_should_terminate(sc, &error))
@@ -91,11 +102,27 @@ xchk_quota_item(
 	 * Except for the root dquot, the actual dquot we got must either have
 	 * the same or higher id as we saw before.
 	 */
-	offset = dq->q_id / qi->qi_dqperchunk;
-	if (dq->q_id && dq->q_id <= sqi->last_id)
+	offset = id / qi->qi_dqperchunk;
+	if (id && id <= sqi->last_id)
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
 
-	sqi->last_id = dq->q_id;
+	sqi->last_id = id;
+
+	/* Did we get the dquot type we wanted? */
+	if (dqtype != (d->d_flags & XFS_DQ_ALLTYPES))
+		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
+
+	if (d->d_pad0 != cpu_to_be32(0) || d->d_pad != cpu_to_be16(0))
+		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
+
+	/* Check the limits. */
+	bhard = be64_to_cpu(d->d_blk_hardlimit);
+	ihard = be64_to_cpu(d->d_ino_hardlimit);
+	rhard = be64_to_cpu(d->d_rtb_hardlimit);
+
+	bsoft = be64_to_cpu(d->d_blk_softlimit);
+	isoft = be64_to_cpu(d->d_ino_softlimit);
+	rsoft = be64_to_cpu(d->d_rtb_softlimit);
 
 	/*
 	 * Warn if the hard limits are larger than the fs.
@@ -105,22 +132,25 @@ xchk_quota_item(
 	 * Complain about corruption if the soft limit is greater than
 	 * the hard limit.
 	 */
-	if (dq->q_blk.hardlimit > mp->m_sb.sb_dblocks)
+	if (bhard > mp->m_sb.sb_dblocks)
 		xchk_fblock_set_warning(sc, XFS_DATA_FORK, offset);
-	if (dq->q_blk.softlimit > dq->q_blk.hardlimit)
+	if (bsoft > bhard)
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
 
-	if (dq->q_ino.hardlimit > M_IGEO(mp)->maxicount)
+	if (ihard > M_IGEO(mp)->maxicount)
 		xchk_fblock_set_warning(sc, XFS_DATA_FORK, offset);
-	if (dq->q_ino.softlimit > dq->q_ino.hardlimit)
+	if (isoft > ihard)
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
 
-	if (dq->q_rtb.hardlimit > mp->m_sb.sb_rblocks)
+	if (rhard > mp->m_sb.sb_rblocks)
 		xchk_fblock_set_warning(sc, XFS_DATA_FORK, offset);
-	if (dq->q_rtb.softlimit > dq->q_rtb.hardlimit)
+	if (rsoft > rhard)
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
 
 	/* Check the resource counts. */
+	bcount = be64_to_cpu(d->d_bcount);
+	icount = be64_to_cpu(d->d_icount);
+	rcount = be64_to_cpu(d->d_rtbcount);
 	fs_icount = percpu_counter_sum(&mp->m_icount);
 
 	/*
@@ -129,15 +159,15 @@ xchk_quota_item(
 	 * if there are no quota limits.
 	 */
 	if (xfs_sb_version_hasreflink(&mp->m_sb)) {
-		if (mp->m_sb.sb_dblocks < dq->q_blk.count)
+		if (mp->m_sb.sb_dblocks < bcount)
 			xchk_fblock_set_warning(sc, XFS_DATA_FORK,
 					offset);
 	} else {
-		if (mp->m_sb.sb_dblocks < dq->q_blk.count)
+		if (mp->m_sb.sb_dblocks < bcount)
 			xchk_fblock_set_corrupt(sc, XFS_DATA_FORK,
 					offset);
 	}
-	if (dq->q_ino.count > fs_icount || dq->q_rtb.count > mp->m_sb.sb_rblocks)
+	if (icount > fs_icount || rcount > mp->m_sb.sb_rblocks)
 		xchk_fblock_set_corrupt(sc, XFS_DATA_FORK, offset);
 
 	/*
@@ -145,22 +175,13 @@ xchk_quota_item(
 	 * lower limit than the actual usage.  However, we flag it for
 	 * admin review.
 	 */
-	if (dq->q_id == 0)
-		goto out;
-
-	if (dq->q_blk.hardlimit != 0 &&
-	    dq->q_blk.count > dq->q_blk.hardlimit)
+	if (id != 0 && bhard != 0 && bcount > bhard)
+		xchk_fblock_set_warning(sc, XFS_DATA_FORK, offset);
+	if (id != 0 && ihard != 0 && icount > ihard)
+		xchk_fblock_set_warning(sc, XFS_DATA_FORK, offset);
+	if (id != 0 && rhard != 0 && rcount > rhard)
 		xchk_fblock_set_warning(sc, XFS_DATA_FORK, offset);
 
-	if (dq->q_ino.hardlimit != 0 &&
-	    dq->q_ino.count > dq->q_ino.hardlimit)
-		xchk_fblock_set_warning(sc, XFS_DATA_FORK, offset);
-
-	if (dq->q_rtb.hardlimit != 0 &&
-	    dq->q_rtb.count > dq->q_rtb.hardlimit)
-		xchk_fblock_set_warning(sc, XFS_DATA_FORK, offset);
-
-out:
 	if (sc->sm->sm_flags & XFS_SCRUB_OFLAG_CORRUPT)
 		return -EFSCORRUPTED;
 
@@ -214,7 +235,7 @@ xchk_quota(
 	struct xchk_quota_info	sqi;
 	struct xfs_mount	*mp = sc->mp;
 	struct xfs_quotainfo	*qi = mp->m_quotainfo;
-	xfs_dqtype_t		dqtype;
+	uint			dqtype;
 	int			error = 0;
 
 	dqtype = xchk_quota_to_dqtype(sc);

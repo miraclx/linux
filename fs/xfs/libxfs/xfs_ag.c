@@ -333,11 +333,6 @@ xfs_agiblock_init(
 	}
 	for (bucket = 0; bucket < XFS_AGI_UNLINKED_BUCKETS; bucket++)
 		agi->agi_unlinked[bucket] = cpu_to_be32(NULLAGINO);
-	if (xfs_sb_version_hasinobtcounts(&mp->m_sb)) {
-		agi->agi_iblocks = cpu_to_be32(1);
-		if (xfs_sb_version_hasfinobt(&mp->m_sb))
-			agi->agi_fblocks = cpu_to_be32(1);
-	}
 }
 
 typedef void (*aghdr_init_work_f)(struct xfs_mount *mp, struct xfs_buf *bp,
@@ -568,8 +563,7 @@ xfs_ag_get_geometry(
 	error = xfs_alloc_read_agf(mp, NULL, agno, 0, &agf_bp);
 	if (error)
 		goto out_agi;
-
-	pag = agi_bp->b_pag;
+	pag = xfs_perag_get(mp, agno);
 
 	/* Fill out form. */
 	memset(ageo, 0, sizeof(*ageo));
@@ -589,6 +583,7 @@ xfs_ag_get_geometry(
 	xfs_ag_geom_health(pag, ageo);
 
 	/* Release resources. */
+	xfs_perag_put(pag);
 	xfs_buf_relse(agf_bp);
 out_agi:
 	xfs_buf_relse(agi_bp);

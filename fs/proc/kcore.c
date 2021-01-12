@@ -193,6 +193,8 @@ kclist_add_private(unsigned long pfn, unsigned long nr_pages, void *arg)
 		return 1;
 
 	p = pfn_to_page(pfn);
+	if (!memmap_valid_within(pfn, p, page_zone(p)))
+		return 1;
 
 	ent = kmalloc(sizeof(*ent), GFP_KERNEL);
 	if (!ent)
@@ -510,8 +512,7 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 				 * Using bounce buffer to bypass the
 				 * hardened user copy kernel text checks.
 				 */
-				if (copy_from_kernel_nofault(buf, (void *)start,
-						tsz)) {
+				if (probe_kernel_read(buf, (void *) start, tsz)) {
 					if (clear_user(buffer, tsz)) {
 						ret = -EFAULT;
 						goto out;

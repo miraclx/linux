@@ -45,7 +45,7 @@ struct perf_evlist_mmap_ops {
 
 int perf_evlist__alloc_pollfd(struct perf_evlist *evlist);
 int perf_evlist__add_pollfd(struct perf_evlist *evlist, int fd,
-			    void *ptr, short revent, enum fdarray_flags flags);
+			    void *ptr, short revent);
 
 int perf_evlist__mmap_ops(struct perf_evlist *evlist,
 			  struct perf_evlist_mmap_ops *ops,

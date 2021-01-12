@@ -36,9 +36,9 @@
 	leds: user-leds {
 		compatible = "gpio-leds";
 		pinctrl-names = "default";
-		pinctrl-0 = <&user_led_pin>;
+		pinctrl-0 = <&user_led>;
 
-		user_led: led-0 {
+		user {
 			label = "green_led";
 			gpios = <&gpio7 2 GPIO_ACTIVE_HIGH>;
 			linux,default-trigger = "heartbeat";
@@ -372,7 +372,7 @@
 	};
 
 	leds {
-		user_led_pin: user-led-pin {
+		user_led: user-led {
 			rockchip,pins = <7 RK_PA2 RK_FUNC_GPIO &pcfg_output_high>;
 		};
 	};

@@ -52,10 +52,8 @@
 /**
  * amdgpu_ib_get - request an IB (Indirect Buffer)
  *
- * @adev: amdgpu_device pointer
- * @vm: amdgpu_vm pointer
+ * @ring: ring index the IB is associated with
  * @size: requested IB size
- * @pool_type: IB pool type (delayed, immediate, direct)
  * @ib: IB object returned
  *
  * Request an IB (all asics).  IBs are allocated using the
@@ -63,13 +61,12 @@
  * Returns 0 on success, error on failure.
  */
 int amdgpu_ib_get(struct amdgpu_device *adev, struct amdgpu_vm *vm,
-		  unsigned size, enum amdgpu_ib_pool_type pool_type,
-		  struct amdgpu_ib *ib)
+		  unsigned size, struct amdgpu_ib *ib)
 {
 	int r;
 
 	if (size) {
-		r = amdgpu_sa_bo_new(&adev->ib_pools[pool_type],
+		r = amdgpu_sa_bo_new(&adev->ring_tmp_bo,
 				      &ib->sa_bo, size, 256);
 		if (r) {
 			dev_err(adev->dev, "failed to get a new IB (%d)\n", r);
@@ -103,10 +100,9 @@ void amdgpu_ib_free(struct amdgpu_device *adev, struct amdgpu_ib *ib,
 /**
  * amdgpu_ib_schedule - schedule an IB (Indirect Buffer) on the ring
  *
- * @ring: ring index the IB is associated with
+ * @adev: amdgpu_device pointer
  * @num_ibs: number of IBs to schedule
  * @ibs: IB objects to schedule
- * @job: job to schedule
  * @f: fence created during this submission
  *
  * Schedule an IB on the associated ring (all asics).
@@ -135,7 +131,6 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 	uint64_t fence_ctx;
 	uint32_t status = 0, alloc_size;
 	unsigned fence_flags = 0;
-	bool secure;
 
 	unsigned i;
 	int r = 0;
@@ -164,12 +159,6 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 		return -EINVAL;
 	}
 
-	if ((ib->flags & AMDGPU_IB_FLAGS_SECURE) &&
-	    (ring->funcs->type == AMDGPU_RING_TYPE_COMPUTE)) {
-		dev_err(adev->dev, "secure submissions not supported on compute rings\n");
-		return -EINVAL;
-	}
-
 	alloc_size = ring->funcs->emit_frame_size + num_ibs *
 		ring->funcs->emit_ib_size;
 
@@ -181,7 +170,7 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 
 	need_ctx_switch = ring->current_ctx != fence_ctx;
 	if (ring->funcs->emit_pipeline_sync && job &&
-	    ((tmp = amdgpu_sync_get_fence(&job->sched_sync)) ||
+	    ((tmp = amdgpu_sync_get_fence(&job->sched_sync, NULL)) ||
 	     (amdgpu_sriov_vf(adev) && need_ctx_switch) ||
 	     amdgpu_vm_need_pipeline_sync(ring, job))) {
 		need_pipe_sync = true;
@@ -191,9 +180,6 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 
 		dma_fence_put(tmp);
 	}
-
-	if ((ib->flags & AMDGPU_IB_FLAG_EMIT_MEM_SYNC) && ring->funcs->emit_mem_sync)
-		ring->funcs->emit_mem_sync(ring);
 
 	if (ring->funcs->insert_start)
 		ring->funcs->insert_start(ring);
@@ -229,14 +215,6 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 		amdgpu_ring_emit_cntxcntl(ring, status);
 	}
 
-	/* Setup initial TMZiness and send it off.
-	 */
-	secure = false;
-	if (job && ring->funcs->emit_frame_cntl) {
-		secure = ib->flags & AMDGPU_IB_FLAGS_SECURE;
-		amdgpu_ring_emit_frame_cntl(ring, true, secure);
-	}
-
 	for (i = 0; i < num_ibs; ++i) {
 		ib = &ibs[i];
 
@@ -248,20 +226,12 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 		    !amdgpu_sriov_vf(adev)) /* for SRIOV preemption, Preamble CE ib must be inserted anyway */
 			continue;
 
-		if (job && ring->funcs->emit_frame_cntl) {
-			if (secure != !!(ib->flags & AMDGPU_IB_FLAGS_SECURE)) {
-				amdgpu_ring_emit_frame_cntl(ring, false, secure);
-				secure = !secure;
-				amdgpu_ring_emit_frame_cntl(ring, true, secure);
-			}
-		}
-
 		amdgpu_ring_emit_ib(ring, job, ib, status);
 		status &= ~AMDGPU_HAVE_CTX_SWITCH;
 	}
 
-	if (job && ring->funcs->emit_frame_cntl)
-		amdgpu_ring_emit_frame_cntl(ring, false, secure);
+	if (ring->funcs->emit_tmz)
+		amdgpu_ring_emit_tmz(ring, false);
 
 #ifdef CONFIG_X86_64
 	if (!(adev->flags & AMD_IS_APU))
@@ -310,32 +280,22 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
  */
 int amdgpu_ib_pool_init(struct amdgpu_device *adev)
 {
-	unsigned size;
-	int r, i;
+	int r;
 
-	if (adev->ib_pool_ready)
+	if (adev->ib_pool_ready) {
 		return 0;
-
-	for (i = 0; i < AMDGPU_IB_POOL_MAX; i++) {
-		if (i == AMDGPU_IB_POOL_DIRECT)
-			size = PAGE_SIZE * 2;
-		else
-			size = AMDGPU_IB_POOL_SIZE;
-
-		r = amdgpu_sa_bo_manager_init(adev, &adev->ib_pools[i],
-					      size, AMDGPU_GPU_PAGE_SIZE,
-					      AMDGPU_GEM_DOMAIN_GTT);
-		if (r)
-			goto error;
 	}
+	r = amdgpu_sa_bo_manager_init(adev, &adev->ring_tmp_bo,
+				      AMDGPU_IB_POOL_SIZE*64*1024,
+				      AMDGPU_GPU_PAGE_SIZE,
+				      AMDGPU_GEM_DOMAIN_GTT);
+	if (r) {
+		return r;
+	}
+
 	adev->ib_pool_ready = true;
 
 	return 0;
-
-error:
-	while (i--)
-		amdgpu_sa_bo_manager_fini(adev, &adev->ib_pools[i]);
-	return r;
 }
 
 /**
@@ -348,14 +308,10 @@ error:
  */
 void amdgpu_ib_pool_fini(struct amdgpu_device *adev)
 {
-	int i;
-
-	if (!adev->ib_pool_ready)
-		return;
-
-	for (i = 0; i < AMDGPU_IB_POOL_MAX; i++)
-		amdgpu_sa_bo_manager_fini(adev, &adev->ib_pools[i]);
-	adev->ib_pool_ready = false;
+	if (adev->ib_pool_ready) {
+		amdgpu_sa_bo_manager_fini(adev, &adev->ring_tmp_bo);
+		adev->ib_pool_ready = false;
+	}
 }
 
 /**
@@ -370,9 +326,9 @@ void amdgpu_ib_pool_fini(struct amdgpu_device *adev)
  */
 int amdgpu_ib_ring_tests(struct amdgpu_device *adev)
 {
-	long tmo_gfx, tmo_mm;
-	int r, ret = 0;
 	unsigned i;
+	int r, ret = 0;
+	long tmo_gfx, tmo_mm;
 
 	tmo_mm = tmo_gfx = AMDGPU_IB_TEST_TIMEOUT;
 	if (amdgpu_sriov_vf(adev)) {
@@ -448,18 +404,12 @@ static int amdgpu_debugfs_sa_info(struct seq_file *m, void *data)
 {
 	struct drm_info_node *node = (struct drm_info_node *) m->private;
 	struct drm_device *dev = node->minor->dev;
-	struct amdgpu_device *adev = drm_to_adev(dev);
+	struct amdgpu_device *adev = dev->dev_private;
 
-	seq_printf(m, "--------------------- DELAYED --------------------- \n");
-	amdgpu_sa_bo_dump_debug_info(&adev->ib_pools[AMDGPU_IB_POOL_DELAYED],
-				     m);
-	seq_printf(m, "-------------------- IMMEDIATE -------------------- \n");
-	amdgpu_sa_bo_dump_debug_info(&adev->ib_pools[AMDGPU_IB_POOL_IMMEDIATE],
-				     m);
-	seq_printf(m, "--------------------- DIRECT ---------------------- \n");
-	amdgpu_sa_bo_dump_debug_info(&adev->ib_pools[AMDGPU_IB_POOL_DIRECT], m);
+	amdgpu_sa_bo_dump_debug_info(&adev->ring_tmp_bo, m);
 
 	return 0;
+
 }
 
 static const struct drm_info_list amdgpu_debugfs_sa_list[] = {
@@ -471,8 +421,7 @@ static const struct drm_info_list amdgpu_debugfs_sa_list[] = {
 int amdgpu_debugfs_sa_init(struct amdgpu_device *adev)
 {
 #if defined(CONFIG_DEBUG_FS)
-	return amdgpu_debugfs_add_files(adev, amdgpu_debugfs_sa_list,
-					ARRAY_SIZE(amdgpu_debugfs_sa_list));
+	return amdgpu_debugfs_add_files(adev, amdgpu_debugfs_sa_list, 1);
 #else
 	return 0;
 #endif

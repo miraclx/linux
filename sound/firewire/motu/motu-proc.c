@@ -28,12 +28,13 @@ static void proc_read_clock(struct snd_info_entry *entry,
 {
 
 	struct snd_motu *motu = entry->private_data;
+	const struct snd_motu_protocol *const protocol = motu->spec->protocol;
 	unsigned int rate;
 	enum snd_motu_clock_source source;
 
-	if (snd_motu_protocol_get_clock_rate(motu, &rate) < 0)
+	if (protocol->get_clock_rate(motu, &rate) < 0)
 		return;
-	if (snd_motu_protocol_get_clock_source(motu, &source) < 0)
+	if (protocol->get_clock_source(motu, &source) < 0)
 		return;
 
 	snd_iprintf(buffer, "Rate:\t%d\n", rate);
@@ -44,14 +45,15 @@ static void proc_read_format(struct snd_info_entry *entry,
 			     struct snd_info_buffer *buffer)
 {
 	struct snd_motu *motu = entry->private_data;
+	const struct snd_motu_protocol *const protocol = motu->spec->protocol;
 	unsigned int mode;
 	struct snd_motu_packet_format *formats;
 	int i;
 
-	if (snd_motu_protocol_cache_packet_formats(motu) < 0)
+	if (protocol->cache_packet_formats(motu) < 0)
 		return;
 
-	snd_iprintf(buffer, "tx:\tmsg\tfixed\ttotal\n");
+	snd_iprintf(buffer, "tx:\tmsg\tfixed\tdiffered\n");
 	for (i = 0; i < SND_MOTU_CLOCK_RATE_COUNT; ++i) {
 		mode = i >> 1;
 
@@ -60,11 +62,11 @@ static void proc_read_format(struct snd_info_entry *entry,
 			    "%u:\t%u\t%u\t%u\n",
 			    snd_motu_clock_rates[i],
 			    formats->msg_chunks,
-			    motu->spec->tx_fixed_pcm_chunks[mode],
-			    formats->pcm_chunks[mode]);
+			    formats->fixed_part_pcm_chunks[mode],
+			    formats->differed_part_pcm_chunks[mode]);
 	}
 
-	snd_iprintf(buffer, "rx:\tmsg\tfixed\ttotal\n");
+	snd_iprintf(buffer, "rx:\tmsg\tfixed\tdiffered\n");
 	for (i = 0; i < SND_MOTU_CLOCK_RATE_COUNT; ++i) {
 		mode = i >> 1;
 
@@ -73,8 +75,8 @@ static void proc_read_format(struct snd_info_entry *entry,
 			    "%u:\t%u\t%u\t%u\n",
 			    snd_motu_clock_rates[i],
 			    formats->msg_chunks,
-			    motu->spec->rx_fixed_pcm_chunks[mode],
-			    formats->pcm_chunks[mode]);
+			    formats->fixed_part_pcm_chunks[mode],
+			    formats->differed_part_pcm_chunks[mode]);
 	}
 }
 

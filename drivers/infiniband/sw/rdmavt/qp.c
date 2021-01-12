@@ -1,5 +1,5 @@
 /*
- * Copyright(c) 2016 - 2020 Intel Corporation.
+ * Copyright(c) 2016 - 2019 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
@@ -525,18 +525,15 @@ static inline unsigned mk_qpn(struct rvt_qpn_table *qpt,
  * @rdi: rvt device info structure
  * @qpt: queue pair number table pointer
  * @port_num: IB port number, 1 based, comes from core
- * @exclude_prefix: prefix of special queue pair number being allocated
  *
  * Return: The queue pair number
  */
 static int alloc_qpn(struct rvt_dev_info *rdi, struct rvt_qpn_table *qpt,
-		     enum ib_qp_type type, u8 port_num, u8 exclude_prefix)
+		     enum ib_qp_type type, u8 port_num)
 {
 	u32 i, offset, max_scan, qpn;
 	struct rvt_qpn_map *map;
 	u32 ret;
-	u32 max_qpn = exclude_prefix == RVT_AIP_QP_PREFIX ?
-		RVT_AIP_QPN_MAX : RVT_QPN_MAX;
 
 	if (rdi->driver_f.alloc_qpn)
 		return rdi->driver_f.alloc_qpn(rdi, qpt, type, port_num);
@@ -556,7 +553,7 @@ static int alloc_qpn(struct rvt_dev_info *rdi, struct rvt_qpn_table *qpt,
 	}
 
 	qpn = qpt->last + qpt->incr;
-	if (qpn >= max_qpn)
+	if (qpn >= RVT_QPN_MAX)
 		qpn = qpt->incr | ((qpt->last & 1) ^ 1);
 	/* offset carries bit 0 */
 	offset = qpn & RVT_BITS_PER_PAGE_MASK;
@@ -901,6 +898,8 @@ static void rvt_init_qp(struct rvt_dev_info *rdi, struct rvt_qp *qp,
 	qp->s_tail_ack_queue = 0;
 	qp->s_acked_ack_queue = 0;
 	qp->s_num_rd_atomic = 0;
+	if (qp->r_rq.kwq)
+		qp->r_rq.kwq->count = qp->r_rq.size;
 	qp->r_sge.num_sge = 0;
 	atomic_set(&qp->s_reserved_used, 0);
 }
@@ -987,9 +986,6 @@ static void rvt_reset_qp(struct rvt_dev_info *rdi, struct rvt_qp *qp,
 static void rvt_free_qpn(struct rvt_qpn_table *qpt, u32 qpn)
 {
 	struct rvt_qpn_map *map;
-
-	if ((qpn & RVT_AIP_QP_PREFIX_MASK) == RVT_AIP_QP_BASE)
-		qpn &= RVT_AIP_QP_SUFFIX;
 
 	map = qpt->map + (qpn & RVT_QPN_MASK) / RVT_BITS_PER_PAGE;
 	if (map->page)
@@ -1078,16 +1074,13 @@ struct ib_qp *rvt_create_qp(struct ib_pd *ibpd,
 	struct rvt_dev_info *rdi = ib_to_rvt(ibpd->device);
 	void *priv = NULL;
 	size_t sqsize;
-	u8 exclude_prefix = 0;
 
 	if (!rdi)
 		return ERR_PTR(-EINVAL);
 
-	if (init_attr->create_flags & ~IB_QP_CREATE_NETDEV_USE)
-		return ERR_PTR(-EOPNOTSUPP);
-
 	if (init_attr->cap.max_send_sge > rdi->dparms.props.max_send_sge ||
-	    init_attr->cap.max_send_wr > rdi->dparms.props.max_qp_wr)
+	    init_attr->cap.max_send_wr > rdi->dparms.props.max_qp_wr ||
+	    init_attr->create_flags)
 		return ERR_PTR(-EINVAL);
 
 	/* Check receive queue parameters if no SRQ is specified. */
@@ -1112,7 +1105,7 @@ struct ib_qp *rvt_create_qp(struct ib_pd *ibpd,
 		if (init_attr->port_num == 0 ||
 		    init_attr->port_num > ibpd->device->phys_port_cnt)
 			return ERR_PTR(-EINVAL);
-		fallthrough;
+		/* fall through */
 	case IB_QPT_UC:
 	case IB_QPT_RC:
 	case IB_QPT_UD:
@@ -1203,23 +1196,17 @@ struct ib_qp *rvt_create_qp(struct ib_pd *ibpd,
 		err = alloc_ud_wq_attr(qp, rdi->dparms.node);
 		if (err) {
 			ret = (ERR_PTR(err));
-			goto bail_rq_rvt;
+			goto bail_driver_priv;
 		}
-
-		if (init_attr->create_flags & IB_QP_CREATE_NETDEV_USE)
-			exclude_prefix = RVT_AIP_QP_PREFIX;
 
 		err = alloc_qpn(rdi, &rdi->qp_dev->qpn_table,
 				init_attr->qp_type,
-				init_attr->port_num,
-				exclude_prefix);
+				init_attr->port_num);
 		if (err < 0) {
 			ret = ERR_PTR(err);
 			goto bail_rq_wq;
 		}
 		qp->ibqp.qp_num = err;
-		if (init_attr->create_flags & IB_QP_CREATE_NETDEV_USE)
-			qp->ibqp.qp_num |= RVT_AIP_QP_BASE;
 		qp->port_num = init_attr->port_num;
 		rvt_init_qp(rdi, qp, init_attr->qp_type);
 		if (rdi->driver_f.qp_priv_init) {
@@ -1313,10 +1300,8 @@ bail_qpn:
 	rvt_free_qpn(&rdi->qp_dev->qpn_table, qp->ibqp.qp_num);
 
 bail_rq_wq:
-	free_ud_wq_attr(qp);
-
-bail_rq_rvt:
 	rvt_free_rq(&qp->r_rq);
+	free_ud_wq_attr(qp);
 
 bail_driver_priv:
 	rdi->driver_f.qp_priv_free(rdi, qp);
@@ -1469,9 +1454,6 @@ int rvt_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 	int mig = 0;
 	int pmtu = 0; /* for gcc warning only */
 	int opa_ah;
-
-	if (attr_mask & ~IB_QP_ATTR_STANDARD_BITS)
-		return -EOPNOTSUPP;
 
 	spin_lock_irq(&qp->r_lock);
 	spin_lock(&qp->s_hlock);
@@ -1827,7 +1809,7 @@ int rvt_query_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 }
 
 /**
- * rvt_post_recv - post a receive on a QP
+ * rvt_post_receive - post a receive on a QP
  * @ibqp: the QP to post the receive on
  * @wr: the WR to post
  * @bad_wr: the first bad WR is put here
@@ -2249,7 +2231,7 @@ bail:
 }
 
 /**
- * rvt_post_srq_recv - post a receive on a shared receive queue
+ * rvt_post_srq_receive - post a receive on a shared receive queue
  * @ibsrq: the SRQ to post the receive on
  * @wr: the list of work requests to post
  * @bad_wr: A pointer to the first WR to cause a problem is put here
@@ -2369,6 +2351,31 @@ bad_lkey:
 }
 
 /**
+ * get_count - count numbers of request work queue entries
+ * in circular buffer
+ * @rq: data structure for request queue entry
+ * @tail: tail indices of the circular buffer
+ * @head: head indices of the circular buffer
+ *
+ * Return - total number of entries in the circular buffer
+ */
+static u32 get_count(struct rvt_rq *rq, u32 tail, u32 head)
+{
+	u32 count;
+
+	count = head;
+
+	if (count >= rq->size)
+		count = 0;
+	if (count < tail)
+		count += rq->size - tail;
+	else
+		count -= tail;
+
+	return count;
+}
+
+/**
  * get_rvt_head - get head indices of the circular buffer
  * @rq: data structure for request queue entry
  * @ip: the QP
@@ -2442,7 +2449,7 @@ int rvt_get_rwqe(struct rvt_qp *qp, bool wr_id_only)
 
 	if (kwq->count < RVT_RWQ_COUNT_THRESHOLD) {
 		head = get_rvt_head(rq, ip);
-		kwq->count = rvt_get_rq_count(rq, head, tail);
+		kwq->count = get_count(rq, tail, head);
 	}
 	if (unlikely(kwq->count == 0)) {
 		ret = 0;
@@ -2477,9 +2484,7 @@ int rvt_get_rwqe(struct rvt_qp *qp, bool wr_id_only)
 		 * the number of remaining WQEs.
 		 */
 		if (kwq->count < srq->limit) {
-			kwq->count =
-				rvt_get_rq_count(rq,
-						 get_rvt_head(rq, ip), tail);
+			kwq->count = get_count(rq, tail, get_rvt_head(rq, ip));
 			if (kwq->count < srq->limit) {
 				struct ib_event ev;
 
@@ -2501,7 +2506,7 @@ bail:
 EXPORT_SYMBOL(rvt_get_rwqe);
 
 /**
- * rvt_comm_est - handle trap with QP established
+ * qp_comm_est - handle trap with QP established
  * @qp: the QP
  */
 void rvt_comm_est(struct rvt_qp *qp)
@@ -2947,7 +2952,7 @@ static enum ib_wc_status loopback_qp_drop(struct rvt_ibport *rvp,
 }
 
 /**
- * rvt_ruc_loopback - handle UC and RC loopback requests
+ * ruc_loopback - handle UC and RC loopback requests
  * @sqp: the sending QP
  *
  * This is called from rvt_do_send() to forward a WQE addressed to the same HFI

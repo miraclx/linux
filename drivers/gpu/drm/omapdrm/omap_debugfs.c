@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2011 Texas Instruments Incorporated - https://www.ti.com/
+ * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
  * Author: Rob Clark <rob.clark@linaro.org>
  */
 
@@ -80,16 +80,31 @@ static struct drm_info_list omap_dmm_debugfs_list[] = {
 	{"tiler_map", tiler_map_show, 0},
 };
 
-void omap_debugfs_init(struct drm_minor *minor)
+int omap_debugfs_init(struct drm_minor *minor)
 {
-	drm_debugfs_create_files(omap_debugfs_list,
-				 ARRAY_SIZE(omap_debugfs_list),
-				 minor->debugfs_root, minor);
+	struct drm_device *dev = minor->dev;
+	int ret;
+
+	ret = drm_debugfs_create_files(omap_debugfs_list,
+			ARRAY_SIZE(omap_debugfs_list),
+			minor->debugfs_root, minor);
+
+	if (ret) {
+		dev_err(dev->dev, "could not install omap_debugfs_list\n");
+		return ret;
+	}
 
 	if (dmm_is_available())
-		drm_debugfs_create_files(omap_dmm_debugfs_list,
-					 ARRAY_SIZE(omap_dmm_debugfs_list),
-					 minor->debugfs_root, minor);
+		ret = drm_debugfs_create_files(omap_dmm_debugfs_list,
+				ARRAY_SIZE(omap_dmm_debugfs_list),
+				minor->debugfs_root, minor);
+
+	if (ret) {
+		dev_err(dev->dev, "could not install omap_dmm_debugfs_list\n");
+		return ret;
+	}
+
+	return ret;
 }
 
 #endif

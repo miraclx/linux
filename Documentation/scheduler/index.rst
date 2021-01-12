@@ -12,7 +12,6 @@ Linux Scheduler
     sched-deadline
     sched-design-CFS
     sched-domains
-    sched-capacity
     sched-energy
     sched-nice-design
     sched-rt-group

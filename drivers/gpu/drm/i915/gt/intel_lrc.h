@@ -90,7 +90,6 @@ int intel_execlists_submission_setup(struct intel_engine_cs *engine);
 #define LRC_PPHWSP_SZ	(1)
 /* After the PPHWSP we have the logical state for the context */
 #define LRC_STATE_PN	(LRC_PPHWSP_PN + LRC_PPHWSP_SZ)
-#define LRC_STATE_OFFSET (LRC_STATE_PN * PAGE_SIZE)
 
 /* Space within PPHWSP reserved to be used as scratch */
 #define LRC_PPHWSP_SCRATCH		0x34
@@ -120,6 +119,10 @@ intel_execlists_clone_virtual(struct intel_engine_cs *src);
 int intel_virtual_engine_attach_bond(struct intel_engine_cs *engine,
 				     const struct intel_engine_cs *master,
 				     const struct intel_engine_cs *sibling);
+
+struct intel_engine_cs *
+intel_virtual_engine_get_sibling(struct intel_engine_cs *engine,
+				 unsigned int sibling);
 
 bool
 intel_engine_in_execlists_submission_mode(const struct intel_engine_cs *engine);

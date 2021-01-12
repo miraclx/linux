@@ -539,9 +539,6 @@ int dvb_register_device(struct dvb_adapter *adap, struct dvb_device **pdvbdev,
 	if (IS_ERR(clsdev)) {
 		pr_err("%s: failed to create device dvb%d.%s%d (%ld)\n",
 		       __func__, adap->num, dnames[type], id, PTR_ERR(clsdev));
-		dvb_media_device_free(dvbdev);
-		kfree(dvbdevfops);
-		kfree(dvbdev);
 		return PTR_ERR(clsdev);
 	}
 	dprintk("DVB: register adapter%d/%s%d @ minor: %i (0x%02x)\n",
@@ -710,10 +707,9 @@ int dvb_create_media_graph(struct dvb_adapter *adap,
 	}
 
 	if (ntuner && ndemod) {
-		/* NOTE: first found tuner source pad presumed correct */
-		pad_source = media_get_pad_index(tuner, false,
+		pad_source = media_get_pad_index(tuner, true,
 						 PAD_SIGNAL_ANALOG);
-		if (pad_source < 0)
+		if (pad_source)
 			return -EINVAL;
 		ret = media_create_pad_links(mdev,
 					     MEDIA_ENT_F_TUNER,

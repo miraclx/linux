@@ -9,7 +9,7 @@
  *
  *	(c) Copyright 2000 kernel concepts <nils@kernelconcepts.de>, All Rights
  *	Reserved.
- *				https://www.kernelconcepts.de
+ *				http://www.kernelconcepts.de
  *
  *	Neither kernel concepts nor Nils Faerber admit liability nor provide
  *	warranty for any of this software. This material is provided

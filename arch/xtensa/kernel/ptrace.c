@@ -12,7 +12,6 @@
  * Marc Gauthier<marc@tensilica.com> <marc@alumni.uwaterloo.ca>
  */
 
-#include <linux/audit.h>
 #include <linux/errno.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/kernel.h>
@@ -22,7 +21,6 @@
 #include <linux/regset.h>
 #include <linux/sched.h>
 #include <linux/sched/task_stack.h>
-#include <linux/seccomp.h>
 #include <linux/security.h>
 #include <linux/signal.h>
 #include <linux/smp.h>
@@ -35,11 +33,13 @@
 #include <asm/coprocessor.h>
 #include <asm/elf.h>
 #include <asm/page.h>
+#include <asm/pgtable.h>
 #include <asm/ptrace.h>
 
 static int gpr_get(struct task_struct *target,
 		   const struct user_regset *regset,
-		   struct membuf to)
+		   unsigned int pos, unsigned int count,
+		   void *kbuf, void __user *ubuf)
 {
 	struct pt_regs *regs = task_pt_regs(target);
 	struct user_pt_regs newregs = {
@@ -52,7 +52,6 @@ static int gpr_get(struct task_struct *target,
 		.threadptr = regs->threadptr,
 		.windowbase = regs->windowbase,
 		.windowstart = regs->windowstart,
-		.syscall = regs->syscall,
 	};
 
 	memcpy(newregs.a,
@@ -62,7 +61,8 @@ static int gpr_get(struct task_struct *target,
 	       regs->areg,
 	       (WSBITS - regs->windowbase) * 16);
 
-	return membuf_write(&to, &newregs, sizeof(newregs));
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				   &newregs, 0, -1);
 }
 
 static int gpr_set(struct task_struct *target,
@@ -91,9 +91,6 @@ static int gpr_set(struct task_struct *target,
 	regs->sar = newregs.sar;
 	regs->threadptr = newregs.threadptr;
 
-	if (newregs.syscall)
-		regs->syscall = newregs.syscall;
-
 	if (newregs.windowbase != regs->windowbase ||
 	    newregs.windowstart != regs->windowstart) {
 		u32 rotws, wmask;
@@ -119,7 +116,8 @@ static int gpr_set(struct task_struct *target,
 
 static int tie_get(struct task_struct *target,
 		   const struct user_regset *regset,
-		   struct membuf to)
+		   unsigned int pos, unsigned int count,
+		   void *kbuf, void __user *ubuf)
 {
 	int ret;
 	struct pt_regs *regs = task_pt_regs(target);
@@ -144,7 +142,8 @@ static int tie_get(struct task_struct *target,
 	newregs->cp6 = ti->xtregs_cp.cp6;
 	newregs->cp7 = ti->xtregs_cp.cp7;
 #endif
-	ret = membuf_write(&to, newregs, sizeof(*newregs));
+	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				  newregs, 0, -1);
 	kfree(newregs);
 	return ret;
 }
@@ -199,7 +198,7 @@ static const struct user_regset xtensa_regsets[] = {
 		.n = sizeof(struct user_pt_regs) / sizeof(u32),
 		.size = sizeof(u32),
 		.align = sizeof(u32),
-		.regset_get = gpr_get,
+		.get = gpr_get,
 		.set = gpr_set,
 	},
 	[REGSET_TIE] = {
@@ -207,7 +206,7 @@ static const struct user_regset xtensa_regsets[] = {
 		.n = sizeof(elf_xtregs_t) / sizeof(u32),
 		.size = sizeof(u32),
 		.align = sizeof(u32),
-		.regset_get = tie_get,
+		.get = tie_get,
 		.set = tie_set,
 	},
 };
@@ -556,8 +555,7 @@ int do_syscall_trace_enter(struct pt_regs *regs)
 		return 0;
 	}
 
-	if (regs->syscall == NO_SYSCALL ||
-	    secure_computing() == -1) {
+	if (regs->syscall == NO_SYSCALL) {
 		do_syscall_trace_leave(regs);
 		return 0;
 	}
@@ -565,17 +563,12 @@ int do_syscall_trace_enter(struct pt_regs *regs)
 	if (test_thread_flag(TIF_SYSCALL_TRACEPOINT))
 		trace_sys_enter(regs, syscall_get_nr(current, regs));
 
-	audit_syscall_entry(regs->syscall, regs->areg[6],
-			    regs->areg[3], regs->areg[4],
-			    regs->areg[5]);
 	return 1;
 }
 
 void do_syscall_trace_leave(struct pt_regs *regs)
 {
 	int step;
-
-	audit_syscall_exit(regs);
 
 	if (test_thread_flag(TIF_SYSCALL_TRACEPOINT))
 		trace_sys_exit(regs, regs_return_value(regs));

@@ -85,7 +85,7 @@ MODULE_PARM_DESC (rx_copybreak, "de2104x Breakpoint at which Rx packets are copi
 #define DSL			CONFIG_DE2104X_DSL
 #endif
 
-#define DE_RX_RING_SIZE		128
+#define DE_RX_RING_SIZE		64
 #define DE_TX_RING_SIZE		64
 #define DE_RING_BYTES		\
 		((sizeof(struct de_desc) * DE_RX_RING_SIZE) +	\
@@ -443,23 +443,21 @@ static void de_rx (struct de_private *de)
 		}
 
 		if (!copying_skb) {
-			dma_unmap_single(&de->pdev->dev, mapping, buflen,
-					 DMA_FROM_DEVICE);
+			pci_unmap_single(de->pdev, mapping,
+					 buflen, PCI_DMA_FROMDEVICE);
 			skb_put(skb, len);
 
 			mapping =
 			de->rx_skb[rx_tail].mapping =
-				dma_map_single(&de->pdev->dev, copy_skb->data,
-					       buflen, DMA_FROM_DEVICE);
+				pci_map_single(de->pdev, copy_skb->data,
+					       buflen, PCI_DMA_FROMDEVICE);
 			de->rx_skb[rx_tail].skb = copy_skb;
 		} else {
-			dma_sync_single_for_cpu(&de->pdev->dev, mapping, len,
-						DMA_FROM_DEVICE);
+			pci_dma_sync_single_for_cpu(de->pdev, mapping, len, PCI_DMA_FROMDEVICE);
 			skb_reserve(copy_skb, RX_OFFSET);
 			skb_copy_from_linear_data(skb, skb_put(copy_skb, len),
 						  len);
-			dma_sync_single_for_device(&de->pdev->dev, mapping,
-						   len, DMA_FROM_DEVICE);
+			pci_dma_sync_single_for_device(de->pdev, mapping, len, PCI_DMA_FROMDEVICE);
 
 			/* We'll reuse the original ring buffer. */
 			skb = copy_skb;
@@ -556,15 +554,13 @@ static void de_tx (struct de_private *de)
 			goto next;
 
 		if (unlikely(skb == DE_SETUP_SKB)) {
-			dma_unmap_single(&de->pdev->dev,
-					 de->tx_skb[tx_tail].mapping,
-					 sizeof(de->setup_frame),
-					 DMA_TO_DEVICE);
+			pci_unmap_single(de->pdev, de->tx_skb[tx_tail].mapping,
+					 sizeof(de->setup_frame), PCI_DMA_TODEVICE);
 			goto next;
 		}
 
-		dma_unmap_single(&de->pdev->dev, de->tx_skb[tx_tail].mapping,
-				 skb->len, DMA_TO_DEVICE);
+		pci_unmap_single(de->pdev, de->tx_skb[tx_tail].mapping,
+				 skb->len, PCI_DMA_TODEVICE);
 
 		if (status & LastFrag) {
 			if (status & TxError) {
@@ -624,8 +620,7 @@ static netdev_tx_t de_start_xmit (struct sk_buff *skb,
 	txd = &de->tx_ring[entry];
 
 	len = skb->len;
-	mapping = dma_map_single(&de->pdev->dev, skb->data, len,
-				 DMA_TO_DEVICE);
+	mapping = pci_map_single(de->pdev, skb->data, len, PCI_DMA_TODEVICE);
 	if (entry == (DE_TX_RING_SIZE - 1))
 		flags |= RingEnd;
 	if (!tx_free || (tx_free == (DE_TX_RING_SIZE / 2)))
@@ -768,8 +763,8 @@ static void __de_set_rx_mode (struct net_device *dev)
 
 	de->tx_skb[entry].skb = DE_SETUP_SKB;
 	de->tx_skb[entry].mapping = mapping =
-	    dma_map_single(&de->pdev->dev, de->setup_frame,
-			   sizeof(de->setup_frame), DMA_TO_DEVICE);
+	    pci_map_single (de->pdev, de->setup_frame,
+			    sizeof (de->setup_frame), PCI_DMA_TODEVICE);
 
 	/* Put the setup frame on the Tx list. */
 	txd = &de->tx_ring[entry];
@@ -1284,10 +1279,8 @@ static int de_refill_rx (struct de_private *de)
 		if (!skb)
 			goto err_out;
 
-		de->rx_skb[i].mapping = dma_map_single(&de->pdev->dev,
-						       skb->data,
-						       de->rx_buf_sz,
-						       DMA_FROM_DEVICE);
+		de->rx_skb[i].mapping = pci_map_single(de->pdev,
+			skb->data, de->rx_buf_sz, PCI_DMA_FROMDEVICE);
 		de->rx_skb[i].skb = skb;
 
 		de->rx_ring[i].opts1 = cpu_to_le32(DescOwn);
@@ -1320,8 +1313,7 @@ static int de_init_rings (struct de_private *de)
 
 static int de_alloc_rings (struct de_private *de)
 {
-	de->rx_ring = dma_alloc_coherent(&de->pdev->dev, DE_RING_BYTES,
-					 &de->ring_dma, GFP_KERNEL);
+	de->rx_ring = pci_alloc_consistent(de->pdev, DE_RING_BYTES, &de->ring_dma);
 	if (!de->rx_ring)
 		return -ENOMEM;
 	de->tx_ring = &de->rx_ring[DE_RX_RING_SIZE];
@@ -1341,9 +1333,8 @@ static void de_clean_rings (struct de_private *de)
 
 	for (i = 0; i < DE_RX_RING_SIZE; i++) {
 		if (de->rx_skb[i].skb) {
-			dma_unmap_single(&de->pdev->dev,
-					 de->rx_skb[i].mapping, de->rx_buf_sz,
-					 DMA_FROM_DEVICE);
+			pci_unmap_single(de->pdev, de->rx_skb[i].mapping,
+					 de->rx_buf_sz, PCI_DMA_FROMDEVICE);
 			dev_kfree_skb(de->rx_skb[i].skb);
 		}
 	}
@@ -1353,15 +1344,15 @@ static void de_clean_rings (struct de_private *de)
 		if ((skb) && (skb != DE_DUMMY_SKB)) {
 			if (skb != DE_SETUP_SKB) {
 				de->dev->stats.tx_dropped++;
-				dma_unmap_single(&de->pdev->dev,
-						 de->tx_skb[i].mapping,
-						 skb->len, DMA_TO_DEVICE);
+				pci_unmap_single(de->pdev,
+					de->tx_skb[i].mapping,
+					skb->len, PCI_DMA_TODEVICE);
 				dev_kfree_skb(skb);
 			} else {
-				dma_unmap_single(&de->pdev->dev,
-						 de->tx_skb[i].mapping,
-						 sizeof(de->setup_frame),
-						 DMA_TO_DEVICE);
+				pci_unmap_single(de->pdev,
+					de->tx_skb[i].mapping,
+					sizeof(de->setup_frame),
+					PCI_DMA_TODEVICE);
 			}
 		}
 	}
@@ -1373,8 +1364,7 @@ static void de_clean_rings (struct de_private *de)
 static void de_free_rings (struct de_private *de)
 {
 	de_clean_rings(de);
-	dma_free_coherent(&de->pdev->dev, DE_RING_BYTES, de->rx_ring,
-			  de->ring_dma);
+	pci_free_consistent(de->pdev, DE_RING_BYTES, de->rx_ring, de->ring_dma);
 	de->rx_ring = NULL;
 	de->tx_ring = NULL;
 }
@@ -2115,10 +2105,11 @@ static void de_remove_one(struct pci_dev *pdev)
 	free_netdev(dev);
 }
 
-static int __maybe_unused de_suspend(struct device *dev_d)
+#ifdef CONFIG_PM
+
+static int de_suspend (struct pci_dev *pdev, pm_message_t state)
 {
-	struct pci_dev *pdev = to_pci_dev(dev_d);
-	struct net_device *dev = pci_get_drvdata(pdev);
+	struct net_device *dev = pci_get_drvdata (pdev);
 	struct de_private *de = netdev_priv(dev);
 
 	rtnl_lock();
@@ -2145,6 +2136,7 @@ static int __maybe_unused de_suspend(struct device *dev_d)
 		de_clean_rings(de);
 
 		de_adapter_sleep(de);
+		pci_disable_device(pdev);
 	} else {
 		netif_device_detach(dev);
 	}
@@ -2152,17 +2144,21 @@ static int __maybe_unused de_suspend(struct device *dev_d)
 	return 0;
 }
 
-static int __maybe_unused de_resume(struct device *dev_d)
+static int de_resume (struct pci_dev *pdev)
 {
-	struct pci_dev *pdev = to_pci_dev(dev_d);
-	struct net_device *dev = pci_get_drvdata(pdev);
+	struct net_device *dev = pci_get_drvdata (pdev);
 	struct de_private *de = netdev_priv(dev);
+	int retval = 0;
 
 	rtnl_lock();
 	if (netif_device_present(dev))
 		goto out;
 	if (!netif_running(dev))
 		goto out_attach;
+	if ((retval = pci_enable_device(pdev))) {
+		netdev_err(dev, "pci_enable_device failed in resume\n");
+		goto out;
+	}
 	pci_set_master(pdev);
 	de_init_rings(de);
 	de_init_hw(de);
@@ -2173,24 +2169,17 @@ out:
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(de_pm_ops, de_suspend, de_resume);
-
-static void de_shutdown(struct pci_dev *pdev)
-{
-	struct net_device *dev = pci_get_drvdata(pdev);
-
-	rtnl_lock();
-	dev_close(dev);
-	rtnl_unlock();
-}
+#endif /* CONFIG_PM */
 
 static struct pci_driver de_driver = {
 	.name		= DRV_NAME,
 	.id_table	= de_pci_tbl,
 	.probe		= de_init_one,
 	.remove		= de_remove_one,
-	.shutdown	= de_shutdown,
-	.driver.pm	= &de_pm_ops,
+#ifdef CONFIG_PM
+	.suspend	= de_suspend,
+	.resume		= de_resume,
+#endif
 };
 
 static int __init de_init (void)

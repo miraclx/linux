@@ -18,7 +18,6 @@
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/smp.h>
-#include <linux/platform_device.h>
 
 /**
  * struct cpu_data
@@ -29,6 +28,12 @@ struct cpu_data {
 	struct clk **pclk;
 	struct cpufreq_frequency_table *table;
 };
+
+/*
+ * Don't use cpufreq on this SoC -- used when the SoC would have otherwise
+ * matched a more generic compatible.
+ */
+#define SOC_BLACKLIST		1
 
 /**
  * struct soc_data - SoC specific data
@@ -259,51 +264,64 @@ static struct cpufreq_driver qoriq_cpufreq_driver = {
 	.attr		= cpufreq_generic_attr,
 };
 
-static const struct of_device_id qoriq_cpufreq_blacklist[] = {
+static const struct soc_data blacklist = {
+	.flags = SOC_BLACKLIST,
+};
+
+static const struct of_device_id node_matches[] __initconst = {
 	/* e6500 cannot use cpufreq due to erratum A-008083 */
-	{ .compatible = "fsl,b4420-clockgen", },
-	{ .compatible = "fsl,b4860-clockgen", },
-	{ .compatible = "fsl,t2080-clockgen", },
-	{ .compatible = "fsl,t4240-clockgen", },
+	{ .compatible = "fsl,b4420-clockgen", &blacklist },
+	{ .compatible = "fsl,b4860-clockgen", &blacklist },
+	{ .compatible = "fsl,t2080-clockgen", &blacklist },
+	{ .compatible = "fsl,t4240-clockgen", &blacklist },
+
+	{ .compatible = "fsl,ls1012a-clockgen", },
+	{ .compatible = "fsl,ls1021a-clockgen", },
+	{ .compatible = "fsl,ls1028a-clockgen", },
+	{ .compatible = "fsl,ls1043a-clockgen", },
+	{ .compatible = "fsl,ls1046a-clockgen", },
+	{ .compatible = "fsl,ls1088a-clockgen", },
+	{ .compatible = "fsl,ls2080a-clockgen", },
+	{ .compatible = "fsl,lx2160a-clockgen", },
+	{ .compatible = "fsl,p4080-clockgen", },
+	{ .compatible = "fsl,qoriq-clockgen-1.0", },
+	{ .compatible = "fsl,qoriq-clockgen-2.0", },
 	{}
 };
 
-static int qoriq_cpufreq_probe(struct platform_device *pdev)
+static int __init qoriq_cpufreq_init(void)
 {
 	int ret;
-	struct device_node *np;
+	struct device_node  *np;
+	const struct of_device_id *match;
+	const struct soc_data *data;
 
-	np = of_find_matching_node(NULL, qoriq_cpufreq_blacklist);
-	if (np) {
-		dev_info(&pdev->dev, "Disabling due to erratum A-008083");
+	np = of_find_matching_node(NULL, node_matches);
+	if (!np)
 		return -ENODEV;
-	}
+
+	match = of_match_node(node_matches, np);
+	data = match->data;
+
+	of_node_put(np);
+
+	if (data && data->flags & SOC_BLACKLIST)
+		return -ENODEV;
 
 	ret = cpufreq_register_driver(&qoriq_cpufreq_driver);
-	if (ret)
-		return ret;
+	if (!ret)
+		pr_info("Freescale QorIQ CPU frequency scaling driver\n");
 
-	dev_info(&pdev->dev, "Freescale QorIQ CPU frequency scaling driver\n");
-	return 0;
+	return ret;
 }
+module_init(qoriq_cpufreq_init);
 
-static int qoriq_cpufreq_remove(struct platform_device *pdev)
+static void __exit qoriq_cpufreq_exit(void)
 {
 	cpufreq_unregister_driver(&qoriq_cpufreq_driver);
-
-	return 0;
 }
+module_exit(qoriq_cpufreq_exit);
 
-static struct platform_driver qoriq_cpufreq_platform_driver = {
-	.driver = {
-		.name = "qoriq-cpufreq",
-	},
-	.probe = qoriq_cpufreq_probe,
-	.remove = qoriq_cpufreq_remove,
-};
-module_platform_driver(qoriq_cpufreq_platform_driver);
-
-MODULE_ALIAS("platform:qoriq-cpufreq");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Tang Yuantian <Yuantian.Tang@freescale.com>");
 MODULE_DESCRIPTION("cpufreq driver for Freescale QorIQ series SoCs");

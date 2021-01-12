@@ -170,8 +170,9 @@ static ssize_t show_constraint_name(struct device *dev,
 	if (pconst && pconst->ops && pconst->ops->get_name) {
 		name = pconst->ops->get_name(power_zone, id);
 		if (name) {
-			sprintf(buf, "%.*s\n", POWERCAP_CONSTRAINT_NAME_LEN - 1,
-				name);
+			snprintf(buf, POWERCAP_CONSTRAINT_NAME_LEN,
+								"%s\n", name);
+			buf[POWERCAP_CONSTRAINT_NAME_LEN] = '\0';
 			len = strlen(buf);
 		}
 	}
@@ -366,9 +367,9 @@ static void create_power_zone_common_attributes(
 					&dev_attr_max_energy_range_uj.attr;
 	if (power_zone->ops->get_energy_uj) {
 		if (power_zone->ops->reset_energy_uj)
-			dev_attr_energy_uj.attr.mode = S_IWUSR | S_IRUSR;
+			dev_attr_energy_uj.attr.mode = S_IWUSR | S_IRUGO;
 		else
-			dev_attr_energy_uj.attr.mode = S_IRUSR;
+			dev_attr_energy_uj.attr.mode = S_IRUGO;
 		power_zone->zone_dev_attrs[count++] =
 					&dev_attr_energy_uj.attr;
 	}

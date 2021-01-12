@@ -89,7 +89,7 @@ struct displayid_detailed_timings_1 {
 
 struct displayid_detailed_timing_block {
 	struct displayid_block base;
-	struct displayid_detailed_timings_1 timings[];
+	struct displayid_detailed_timings_1 timings[0];
 };
 
 #define for_each_displayid_db(displayid, block, idx, length) \
@@ -97,7 +97,7 @@ struct displayid_detailed_timing_block {
 	     (idx) + sizeof(struct displayid_block) <= (length) && \
 	     (idx) + sizeof(struct displayid_block) + (block)->num_bytes <= (length) && \
 	     (block)->num_bytes > 0; \
-	     (idx) += sizeof(struct displayid_block) + (block)->num_bytes, \
+	     (idx) += (block)->num_bytes + sizeof(struct displayid_block), \
 	     (block) = (struct displayid_block *)&(displayid)[idx])
 
 #endif

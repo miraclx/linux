@@ -31,6 +31,7 @@
 #include <asm/apic.h>
 #endif
 
+#define ACPI_PROCESSOR_CLASS            "processor"
 #define _COMPONENT              ACPI_PROCESSOR_COMPONENT
 ACPI_MODULE_NAME("processor_idle");
 
@@ -160,10 +161,18 @@ static void lapic_timer_propagate_broadcast(struct acpi_processor *pr)
 }
 
 /* Power(C) State timer broadcast control */
-static bool lapic_timer_needs_broadcast(struct acpi_processor *pr,
-					struct acpi_processor_cx *cx)
+static void lapic_timer_state_broadcast(struct acpi_processor *pr,
+				       struct acpi_processor_cx *cx,
+				       int broadcast)
 {
-	return cx - pr->power.states >= pr->power.timer_broadcast_on_state;
+	int state = cx - pr->power.states;
+
+	if (state >= pr->power.timer_broadcast_on_state) {
+		if (broadcast)
+			tick_broadcast_enter();
+		else
+			tick_broadcast_exit();
+	}
 }
 
 #else
@@ -171,11 +180,10 @@ static bool lapic_timer_needs_broadcast(struct acpi_processor *pr,
 static void lapic_timer_check_state(int state, struct acpi_processor *pr,
 				   struct acpi_processor_cx *cstate) { }
 static void lapic_timer_propagate_broadcast(struct acpi_processor *pr) { }
-
-static bool lapic_timer_needs_broadcast(struct acpi_processor *pr,
-					struct acpi_processor_cx *cx)
+static void lapic_timer_state_broadcast(struct acpi_processor *pr,
+				       struct acpi_processor_cx *cx,
+				       int broadcast)
 {
-	return false;
 }
 
 #endif
@@ -195,7 +203,8 @@ static void tsc_check_state(int state)
 		 */
 		if (boot_cpu_has(X86_FEATURE_NONSTOP_TSC))
 			return;
-		fallthrough;
+
+		/*FALL THROUGH*/
 	default:
 		/* TSC could halt in idle, so notify users */
 		if (state > ACPI_STATE_C1)
@@ -299,7 +308,11 @@ static int acpi_processor_get_power_info_cst(struct acpi_processor *pr)
 	if (ret)
 		return ret;
 
-	if (!pr->power.count)
+	/*
+	 * It is expected that there will be at least 2 states, C1 and
+	 * something else (C2 or C3), so fail if that is not the case.
+	 */
+	if (pr->power.count < 2)
 		return -EFAULT;
 
 	pr->flags.has_cst = 1;
@@ -455,7 +468,8 @@ static int acpi_processor_get_cstate_info(struct acpi_processor *pr)
 	for (i = 1; i < ACPI_PROCESSOR_MAX_POWER; i++) {
 		if (pr->power.states[i].valid) {
 			pr->power.count = i;
-			pr->flags.power = 1;
+			if (pr->power.states[i].type >= ACPI_STATE_C2)
+				pr->flags.power = 1;
 		}
 	}
 
@@ -558,43 +572,32 @@ static DEFINE_RAW_SPINLOCK(c3_lock);
 
 /**
  * acpi_idle_enter_bm - enters C3 with proper BM handling
- * @drv: cpuidle driver
  * @pr: Target processor
  * @cx: Target state context
- * @index: index of target state
+ * @timer_bc: Whether or not to change timer mode to broadcast
  */
-static int acpi_idle_enter_bm(struct cpuidle_driver *drv,
-			       struct acpi_processor *pr,
-			       struct acpi_processor_cx *cx,
-			       int index)
+static void acpi_idle_enter_bm(struct acpi_processor *pr,
+			       struct acpi_processor_cx *cx, bool timer_bc)
 {
-	static struct acpi_processor_cx safe_cx = {
-		.entry_method = ACPI_CSTATE_HALT,
-	};
+	acpi_unlazy_tlb(smp_processor_id());
+
+	/*
+	 * Must be done before busmaster disable as we might need to
+	 * access HPET !
+	 */
+	if (timer_bc)
+		lapic_timer_state_broadcast(pr, cx, 1);
 
 	/*
 	 * disable bus master
 	 * bm_check implies we need ARB_DIS
 	 * bm_control implies whether we can do ARB_DIS
 	 *
-	 * That leaves a case where bm_check is set and bm_control is not set.
-	 * In that case we cannot do much, we enter C3 without doing anything.
+	 * That leaves a case where bm_check is set and bm_control is
+	 * not set. In that case we cannot do much, we enter C3
+	 * without doing anything.
 	 */
-	bool dis_bm = pr->flags.bm_control;
-
-	/* If we can skip BM, demote to a safe state. */
-	if (!cx->bm_sts_skip && acpi_idle_bm_check()) {
-		dis_bm = false;
-		index = drv->safe_state_index;
-		if (index >= 0) {
-			cx = this_cpu_read(acpi_cstate[index]);
-		} else {
-			cx = &safe_cx;
-			index = -EBUSY;
-		}
-	}
-
-	if (dis_bm) {
+	if (pr->flags.bm_control) {
 		raw_spin_lock(&c3_lock);
 		c3_cpu_count++;
 		/* Disable bus master arbitration when all CPUs are in C3 */
@@ -603,21 +606,18 @@ static int acpi_idle_enter_bm(struct cpuidle_driver *drv,
 		raw_spin_unlock(&c3_lock);
 	}
 
-	rcu_idle_enter();
-
 	acpi_idle_do_entry(cx);
 
-	rcu_idle_exit();
-
 	/* Re-enable bus master arbitration */
-	if (dis_bm) {
+	if (pr->flags.bm_control) {
 		raw_spin_lock(&c3_lock);
 		acpi_write_bit_register(ACPI_BITREG_ARB_DISABLE, 0);
 		c3_cpu_count--;
 		raw_spin_unlock(&c3_lock);
 	}
 
-	return index;
+	if (timer_bc)
+		lapic_timer_state_broadcast(pr, cx, 0);
 }
 
 static int acpi_idle_enter(struct cpuidle_device *dev,
@@ -631,26 +631,37 @@ static int acpi_idle_enter(struct cpuidle_device *dev,
 		return -EINVAL;
 
 	if (cx->type != ACPI_STATE_C1) {
-		if (cx->type == ACPI_STATE_C3 && pr->flags.bm_check)
-			return acpi_idle_enter_bm(drv, pr, cx, index);
-
-		/* C2 to C1 demotion. */
 		if (acpi_idle_fallback_to_c1(pr) && num_online_cpus() > 1) {
 			index = ACPI_IDLE_STATE_START;
 			cx = per_cpu(acpi_cstate[index], dev->cpu);
+		} else if (cx->type == ACPI_STATE_C3 && pr->flags.bm_check) {
+			if (cx->bm_sts_skip || !acpi_idle_bm_check()) {
+				acpi_idle_enter_bm(pr, cx, true);
+				return index;
+			} else if (drv->safe_state_index >= 0) {
+				index = drv->safe_state_index;
+				cx = per_cpu(acpi_cstate[index], dev->cpu);
+			} else {
+				acpi_safe_halt();
+				return -EBUSY;
+			}
 		}
 	}
+
+	lapic_timer_state_broadcast(pr, cx, 1);
 
 	if (cx->type == ACPI_STATE_C3)
 		ACPI_FLUSH_CPU_CACHE();
 
 	acpi_idle_do_entry(cx);
 
+	lapic_timer_state_broadcast(pr, cx, 0);
+
 	return index;
 }
 
-static int acpi_idle_enter_s2idle(struct cpuidle_device *dev,
-				  struct cpuidle_driver *drv, int index)
+static void acpi_idle_enter_s2idle(struct cpuidle_device *dev,
+				   struct cpuidle_driver *drv, int index)
 {
 	struct acpi_processor_cx *cx = per_cpu(acpi_cstate[index], dev->cpu);
 
@@ -658,24 +669,16 @@ static int acpi_idle_enter_s2idle(struct cpuidle_device *dev,
 		struct acpi_processor *pr = __this_cpu_read(processors);
 
 		if (unlikely(!pr))
-			return 0;
+			return;
 
 		if (pr->flags.bm_check) {
-			u8 bm_sts_skip = cx->bm_sts_skip;
-
-			/* Don't check BM_STS, do an unconditional ARB_DIS for S2IDLE */
-			cx->bm_sts_skip = 1;
-			acpi_idle_enter_bm(drv, pr, cx, index);
-			cx->bm_sts_skip = bm_sts_skip;
-
-			return 0;
+			acpi_idle_enter_bm(pr, cx, false);
+			return;
 		} else {
 			ACPI_FLUSH_CPU_CACHE();
 		}
 	}
 	acpi_idle_do_entry(cx);
-
-	return 0;
 }
 
 static int acpi_processor_setup_cpuidle_cx(struct acpi_processor *pr,
@@ -683,28 +686,17 @@ static int acpi_processor_setup_cpuidle_cx(struct acpi_processor *pr,
 {
 	int i, count = ACPI_IDLE_STATE_START;
 	struct acpi_processor_cx *cx;
-	struct cpuidle_state *state;
 
 	if (max_cstate == 0)
 		max_cstate = 1;
 
 	for (i = 1; i < ACPI_PROCESSOR_MAX_POWER && i <= max_cstate; i++) {
-		state = &acpi_idle_driver.states[count];
 		cx = &pr->power.states[i];
 
 		if (!cx->valid)
 			continue;
 
 		per_cpu(acpi_cstate[count], dev->cpu) = cx;
-
-		if (lapic_timer_needs_broadcast(pr, cx))
-			state->flags |= CPUIDLE_FLAG_TIMER_STOP;
-
-		if (cx->type == ACPI_STATE_C3) {
-			state->flags |= CPUIDLE_FLAG_TLB_FLUSHED;
-			if (pr->flags.bm_check)
-				state->flags |= CPUIDLE_FLAG_RCU_IDLE;
-		}
 
 		count++;
 		if (count == CPUIDLE_STATE_MAX)

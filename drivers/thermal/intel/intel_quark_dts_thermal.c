@@ -103,6 +103,7 @@ struct soc_sensor_entry {
 	bool locked;
 	u32 store_ptps;
 	u32 store_dts_enable;
+	enum thermal_device_mode mode;
 	struct thermal_zone_device *tzone;
 };
 
@@ -126,8 +127,10 @@ static int soc_dts_enable(struct thermal_zone_device *tzd)
 	if (ret)
 		return ret;
 
-	if (out & QRK_DTS_ENABLE_BIT)
+	if (out & QRK_DTS_ENABLE_BIT) {
+		aux_entry->mode = THERMAL_DEVICE_ENABLED;
 		return 0;
+	}
 
 	if (!aux_entry->locked) {
 		out |= QRK_DTS_ENABLE_BIT;
@@ -135,7 +138,10 @@ static int soc_dts_enable(struct thermal_zone_device *tzd)
 				     QRK_DTS_REG_OFFSET_ENABLE, out);
 		if (ret)
 			return ret;
+
+		aux_entry->mode = THERMAL_DEVICE_ENABLED;
 	} else {
+		aux_entry->mode = THERMAL_DEVICE_DISABLED;
 		pr_info("DTS is locked. Cannot enable DTS\n");
 		ret = -EPERM;
 	}
@@ -154,8 +160,10 @@ static int soc_dts_disable(struct thermal_zone_device *tzd)
 	if (ret)
 		return ret;
 
-	if (!(out & QRK_DTS_ENABLE_BIT))
+	if (!(out & QRK_DTS_ENABLE_BIT)) {
+		aux_entry->mode = THERMAL_DEVICE_DISABLED;
 		return 0;
+	}
 
 	if (!aux_entry->locked) {
 		out &= ~QRK_DTS_ENABLE_BIT;
@@ -164,7 +172,10 @@ static int soc_dts_disable(struct thermal_zone_device *tzd)
 
 		if (ret)
 			return ret;
+
+		aux_entry->mode = THERMAL_DEVICE_DISABLED;
 	} else {
+		aux_entry->mode = THERMAL_DEVICE_ENABLED;
 		pr_info("DTS is locked. Cannot disable DTS\n");
 		ret = -EPERM;
 	}
@@ -298,8 +309,16 @@ static int sys_get_curr_temp(struct thermal_zone_device *tzd,
 	return 0;
 }
 
-static int sys_change_mode(struct thermal_zone_device *tzd,
-			   enum thermal_device_mode mode)
+static int sys_get_mode(struct thermal_zone_device *tzd,
+				enum thermal_device_mode *mode)
+{
+	struct soc_sensor_entry *aux_entry = tzd->devdata;
+	*mode = aux_entry->mode;
+	return 0;
+}
+
+static int sys_set_mode(struct thermal_zone_device *tzd,
+				enum thermal_device_mode mode)
 {
 	int ret;
 
@@ -319,7 +338,8 @@ static struct thermal_zone_device_ops tzone_ops = {
 	.get_trip_type = sys_get_trip_type,
 	.set_trip_temp = sys_set_trip_temp,
 	.get_crit_temp = sys_get_crit_temp,
-	.change_mode = sys_change_mode,
+	.get_mode = sys_get_mode,
+	.set_mode = sys_set_mode,
 };
 
 static void free_soc_dts(struct soc_sensor_entry *aux_entry)
@@ -394,7 +414,9 @@ static struct soc_sensor_entry *alloc_soc_dts(void)
 		goto err_ret;
 	}
 
-	err = thermal_zone_device_enable(aux_entry->tzone);
+	mutex_lock(&dts_update_mutex);
+	err = soc_dts_enable(aux_entry->tzone);
+	mutex_unlock(&dts_update_mutex);
 	if (err)
 		goto err_aux_status;
 

@@ -70,8 +70,7 @@ enum cudbg_dbg_entity_type {
 	CUDBG_HMA_INDIRECT = 67,
 	CUDBG_HMA = 68,
 	CUDBG_QDESC = 70,
-	CUDBG_FLASH = 71,
-	CUDBG_MAX_ENTITY = 72,
+	CUDBG_MAX_ENTITY = 71,
 };
 
 struct cudbg_init {

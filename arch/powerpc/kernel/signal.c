@@ -133,6 +133,36 @@ unsigned long copy_ckvsx_from_user(struct task_struct *task,
 	return 0;
 }
 #endif /* CONFIG_PPC_TRANSACTIONAL_MEM */
+#else
+inline unsigned long copy_fpr_to_user(void __user *to,
+				      struct task_struct *task)
+{
+	return __copy_to_user(to, task->thread.fp_state.fpr,
+			      ELF_NFPREG * sizeof(double));
+}
+
+inline unsigned long copy_fpr_from_user(struct task_struct *task,
+					void __user *from)
+{
+	return __copy_from_user(task->thread.fp_state.fpr, from,
+			      ELF_NFPREG * sizeof(double));
+}
+
+#ifdef CONFIG_PPC_TRANSACTIONAL_MEM
+inline unsigned long copy_ckfpr_to_user(void __user *to,
+					 struct task_struct *task)
+{
+	return __copy_to_user(to, task->thread.ckfp_state.fpr,
+			      ELF_NFPREG * sizeof(double));
+}
+
+inline unsigned long copy_ckfpr_from_user(struct task_struct *task,
+						 void __user *from)
+{
+	return __copy_from_user(task->thread.ckfp_state.fpr, from,
+				ELF_NFPREG * sizeof(double));
+}
+#endif /* CONFIG_PPC_TRANSACTIONAL_MEM */
 #endif
 
 /* Log an error when sending an unhandled signal to a process. Controlled
@@ -144,21 +174,19 @@ int show_unhandled_signals = 1;
 /*
  * Allocate space for the signal frame
  */
-static unsigned long get_tm_stackpointer(struct task_struct *tsk);
-
-void __user *get_sigframe(struct ksignal *ksig, struct task_struct *tsk,
-			  size_t frame_size, int is_32)
+void __user *get_sigframe(struct ksignal *ksig, unsigned long sp,
+			   size_t frame_size, int is_32)
 {
         unsigned long oldsp, newsp;
-	unsigned long sp = get_tm_stackpointer(tsk);
 
         /* Default to using normal stack */
-	if (is_32)
-		oldsp = sp & 0x0ffffffffUL;
-	else
-		oldsp = sp;
+        oldsp = get_clean_sp(sp, is_32);
 	oldsp = sigsp(oldsp, ksig);
 	newsp = (oldsp - frame_size) & ~0xFUL;
+
+	/* Check access */
+	if (!access_ok((void __user *)newsp, oldsp - newsp))
+		return NULL;
 
         return (void __user *)newsp;
 }
@@ -170,21 +198,12 @@ static void check_syscall_restart(struct pt_regs *regs, struct k_sigaction *ka,
 	int restart = 1;
 
 	/* syscall ? */
-	if (!trap_is_syscall(regs))
-		return;
-
-	if (trap_norestart(regs))
+	if (TRAP(regs) != 0x0C00)
 		return;
 
 	/* error signalled ? */
-	if (trap_is_scv(regs)) {
-		/* 32-bit compat mode sign extend? */
-		if (!IS_ERR_VALUE(ret))
-			return;
-		ret = -ret;
-	} else if (!(regs->ccr & 0x10000000)) {
+	if (!(regs->ccr & 0x10000000))
 		return;
-	}
 
 	switch (ret) {
 	case ERESTART_RESTARTBLOCK:
@@ -217,14 +236,9 @@ static void check_syscall_restart(struct pt_regs *regs, struct k_sigaction *ka,
 		regs->nip -= 4;
 		regs->result = 0;
 	} else {
-		if (trap_is_scv(regs)) {
-			regs->result = -EINTR;
-			regs->gpr[3] = -EINTR;
-		} else {
-			regs->result = -EINTR;
-			regs->gpr[3] = EINTR;
-			regs->ccr |= 0x10000000;
-		}
+		regs->result = -EINTR;
+		regs->gpr[3] = EINTR;
+		regs->ccr |= 0x10000000;
 	}
 }
 
@@ -244,24 +258,19 @@ static void do_signal(struct task_struct *tsk)
 	if (ksig.sig <= 0) {
 		/* No signal to deliver -- put the saved sigmask back */
 		restore_saved_sigmask();
-		set_trap_norestart(tsk->thread.regs);
+		tsk->thread.regs->trap = 0;
 		return;               /* no signals delivered */
 	}
 
+#ifndef CONFIG_PPC_ADV_DEBUG_REGS
         /*
 	 * Reenable the DABR before delivering the signal to
 	 * user space. The DABR will have been cleared if it
 	 * triggered inside the kernel.
 	 */
-	if (!IS_ENABLED(CONFIG_PPC_ADV_DEBUG_REGS)) {
-		int i;
-
-		for (i = 0; i < nr_wp_slots(); i++) {
-			if (tsk->thread.hw_brk[i].address && tsk->thread.hw_brk[i].type)
-				__set_breakpoint(i, &tsk->thread.hw_brk[i]);
-		}
-	}
-
+	if (tsk->thread.hw_brk.address && tsk->thread.hw_brk.type)
+		__set_breakpoint(&tsk->thread.hw_brk);
+#endif
 	/* Re-enable the breakpoints for the signal stack */
 	thread_change_pc(tsk, tsk->thread.regs);
 
@@ -276,7 +285,7 @@ static void do_signal(struct task_struct *tsk)
 		ret = handle_rt_signal64(&ksig, oldset, tsk);
 	}
 
-	set_trap_norestart(tsk->thread.regs);
+	tsk->thread.regs->trap = 0;
 	signal_setup_done(ret, &ksig, test_thread_flag(TIF_SINGLESTEP));
 }
 
@@ -284,18 +293,22 @@ void do_notify_resume(struct pt_regs *regs, unsigned long thread_info_flags)
 {
 	user_exit();
 
+	/* Check valid addr_limit, TIF check is done there */
+	addr_limit_user_check();
+
 	if (thread_info_flags & _TIF_UPROBE)
 		uprobe_notify_resume(regs);
 
 	if (thread_info_flags & _TIF_PATCH_PENDING)
 		klp_update_patch_state(current);
 
-	if (thread_info_flags & (_TIF_SIGPENDING | _TIF_NOTIFY_SIGNAL)) {
+	if (thread_info_flags & _TIF_SIGPENDING) {
 		BUG_ON(regs != current->thread.regs);
 		do_signal(current);
 	}
 
 	if (thread_info_flags & _TIF_NOTIFY_RESUME) {
+		clear_thread_flag(TIF_NOTIFY_RESUME);
 		tracehook_notify_resume(regs);
 		rseq_handle_notify_resume(NULL, regs);
 	}
@@ -303,7 +316,7 @@ void do_notify_resume(struct pt_regs *regs, unsigned long thread_info_flags)
 	user_enter();
 }
 
-static unsigned long get_tm_stackpointer(struct task_struct *tsk)
+unsigned long get_tm_stackpointer(struct task_struct *tsk)
 {
 	/* When in an active transaction that takes a signal, we need to be
 	 * careful with the stack.  It's possible that the stack has moved back
@@ -350,15 +363,4 @@ static unsigned long get_tm_stackpointer(struct task_struct *tsk)
 	}
 #endif
 	return ret;
-}
-
-static const char fm32[] = KERN_INFO "%s[%d]: bad frame in %s: %p nip %08lx lr %08lx\n";
-static const char fm64[] = KERN_INFO "%s[%d]: bad frame in %s: %p nip %016lx lr %016lx\n";
-
-void signal_fault(struct task_struct *tsk, struct pt_regs *regs,
-		  const char *where, void __user *ptr)
-{
-	if (show_unhandled_signals)
-		printk_ratelimited(regs->msr & MSR_64BIT ? fm64 : fm32, tsk->comm,
-				   task_pid_nr(tsk), where, ptr, regs->nip, regs->link);
 }

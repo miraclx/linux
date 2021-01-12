@@ -54,6 +54,7 @@
 #define cpu_has_64bits			0
 #define cpu_has_64bit_zero_reg		0
 #define cpu_has_64bit_gp_regs		0
+#define cpu_has_64bit_addresses		0
 
 #define cpu_has_inclusive_pcaches	0
 

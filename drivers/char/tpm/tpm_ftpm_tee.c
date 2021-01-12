@@ -214,10 +214,11 @@ static int ftpm_tee_match(struct tee_ioctl_version_data *ver, const void *data)
  * Return:
  *	On success, 0. On failure, -errno.
  */
-static int ftpm_tee_probe(struct device *dev)
+static int ftpm_tee_probe(struct platform_device *pdev)
 {
 	int rc;
 	struct tpm_chip *chip;
+	struct device *dev = &pdev->dev;
 	struct ftpm_tee_private *pvt_data = NULL;
 	struct tee_ioctl_open_session_arg sess_arg;
 
@@ -240,7 +241,7 @@ static int ftpm_tee_probe(struct device *dev)
 
 	/* Open a session with fTPM TA */
 	memset(&sess_arg, 0, sizeof(sess_arg));
-	export_uuid(sess_arg.uuid, &ftpm_ta_uuid);
+	memcpy(sess_arg.uuid, ftpm_ta_uuid.b, TEE_IOCTL_UUID_LEN);
 	sess_arg.clnt_login = TEE_IOCTL_LOGIN_PUBLIC;
 	sess_arg.num_params = 0;
 
@@ -296,13 +297,6 @@ out_tee_session:
 	return rc;
 }
 
-static int ftpm_plat_tee_probe(struct platform_device *pdev)
-{
-	struct device *dev = &pdev->dev;
-
-	return ftpm_tee_probe(dev);
-}
-
 /**
  * ftpm_tee_remove() - remove the TPM device
  * @pdev: the platform_device description.
@@ -310,9 +304,9 @@ static int ftpm_plat_tee_probe(struct platform_device *pdev)
  * Return:
  *	0 always.
  */
-static int ftpm_tee_remove(struct device *dev)
+static int ftpm_tee_remove(struct platform_device *pdev)
 {
-	struct ftpm_tee_private *pvt_data = dev_get_drvdata(dev);
+	struct ftpm_tee_private *pvt_data = dev_get_drvdata(&pdev->dev);
 
 	/* Release the chip */
 	tpm_chip_unregister(pvt_data->chip);
@@ -334,18 +328,11 @@ static int ftpm_tee_remove(struct device *dev)
 	return 0;
 }
 
-static int ftpm_plat_tee_remove(struct platform_device *pdev)
-{
-	struct device *dev = &pdev->dev;
-
-	return ftpm_tee_remove(dev);
-}
-
 /**
  * ftpm_tee_shutdown() - shutdown the TPM device
  * @pdev: the platform_device description.
  */
-static void ftpm_plat_tee_shutdown(struct platform_device *pdev)
+static void ftpm_tee_shutdown(struct platform_device *pdev)
 {
 	struct ftpm_tee_private *pvt_data = dev_get_drvdata(&pdev->dev);
 
@@ -360,54 +347,17 @@ static const struct of_device_id of_ftpm_tee_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, of_ftpm_tee_ids);
 
-static struct platform_driver ftpm_tee_plat_driver = {
+static struct platform_driver ftpm_tee_driver = {
 	.driver = {
 		.name = "ftpm-tee",
 		.of_match_table = of_match_ptr(of_ftpm_tee_ids),
 	},
-	.shutdown = ftpm_plat_tee_shutdown,
-	.probe = ftpm_plat_tee_probe,
-	.remove = ftpm_plat_tee_remove,
+	.probe = ftpm_tee_probe,
+	.remove = ftpm_tee_remove,
+	.shutdown = ftpm_tee_shutdown,
 };
 
-/* UUID of the fTPM TA */
-static const struct tee_client_device_id optee_ftpm_id_table[] = {
-	{UUID_INIT(0xbc50d971, 0xd4c9, 0x42c4,
-		   0x82, 0xcb, 0x34, 0x3f, 0xb7, 0xf3, 0x78, 0x96)},
-	{}
-};
-
-MODULE_DEVICE_TABLE(tee, optee_ftpm_id_table);
-
-static struct tee_client_driver ftpm_tee_driver = {
-	.id_table	= optee_ftpm_id_table,
-	.driver		= {
-		.name		= "optee-ftpm",
-		.bus		= &tee_bus_type,
-		.probe		= ftpm_tee_probe,
-		.remove		= ftpm_tee_remove,
-	},
-};
-
-static int __init ftpm_mod_init(void)
-{
-	int rc;
-
-	rc = platform_driver_register(&ftpm_tee_plat_driver);
-	if (rc)
-		return rc;
-
-	return driver_register(&ftpm_tee_driver.driver);
-}
-
-static void __exit ftpm_mod_exit(void)
-{
-	platform_driver_unregister(&ftpm_tee_plat_driver);
-	driver_unregister(&ftpm_tee_driver.driver);
-}
-
-module_init(ftpm_mod_init);
-module_exit(ftpm_mod_exit);
+module_platform_driver(ftpm_tee_driver);
 
 MODULE_AUTHOR("Thirupathaiah Annapureddy <thiruan@microsoft.com>");
 MODULE_DESCRIPTION("TPM Driver for fTPM TA in TEE");

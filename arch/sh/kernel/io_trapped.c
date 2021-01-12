@@ -102,6 +102,7 @@ int register_trapped_io(struct trapped_io *tiop)
 	pr_warn("unable to install trapped io filter\n");
 	return -1;
 }
+EXPORT_SYMBOL_GPL(register_trapped_io);
 
 void __iomem *match_trapped_io_handler(struct list_head *list,
 				       unsigned long offset,
@@ -130,11 +131,11 @@ void __iomem *match_trapped_io_handler(struct list_head *list,
 	spin_unlock_irqrestore(&trapped_lock, flags);
 	return NULL;
 }
+EXPORT_SYMBOL_GPL(match_trapped_io_handler);
 
 static struct trapped_io *lookup_tiop(unsigned long address)
 {
 	pgd_t *pgd_k;
-	p4d_t *p4d_k;
 	pud_t *pud_k;
 	pmd_t *pmd_k;
 	pte_t *pte_k;
@@ -144,11 +145,7 @@ static struct trapped_io *lookup_tiop(unsigned long address)
 	if (!pgd_present(*pgd_k))
 		return NULL;
 
-	p4d_k = p4d_offset(pgd_k, address);
-	if (!p4d_present(*p4d_k))
-		return NULL;
-
-	pud_k = pud_offset(p4d_k, address);
+	pud_k = pud_offset(pgd_k, address);
 	if (!pud_present(*pud_k))
 		return NULL;
 

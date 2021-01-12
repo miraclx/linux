@@ -47,7 +47,7 @@ void child(int cpu)
 	_exit(0);
 }
 
-int run_test(int cpu)
+bool run_test(int cpu)
 {
 	int status;
 	pid_t pid = fork();
@@ -55,7 +55,7 @@ int run_test(int cpu)
 
 	if (pid < 0) {
 		ksft_print_msg("fork() failed: %s\n", strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 	if (pid == 0)
 		child(cpu);
@@ -63,68 +63,67 @@ int run_test(int cpu)
 	wpid = waitpid(pid, &status, __WALL);
 	if (wpid != pid) {
 		ksft_print_msg("waitpid() failed: %s\n", strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 	if (!WIFSTOPPED(status)) {
 		ksft_print_msg("child did not stop: %s\n", strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 	if (WSTOPSIG(status) != SIGSTOP) {
 		ksft_print_msg("child did not stop with SIGSTOP: %s\n",
 			strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 
 	if (ptrace(PTRACE_SINGLESTEP, pid, NULL, NULL) < 0) {
 		if (errno == EIO) {
-			ksft_print_msg(
+			ksft_exit_skip(
 				"ptrace(PTRACE_SINGLESTEP) not supported on this architecture: %s\n",
 				strerror(errno));
-			return KSFT_SKIP;
 		}
 		ksft_print_msg("ptrace(PTRACE_SINGLESTEP) failed: %s\n",
 			strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 
 	wpid = waitpid(pid, &status, __WALL);
 	if (wpid != pid) {
 		ksft_print_msg("waitpid() failed: $s\n", strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 	if (WIFEXITED(status)) {
 		ksft_print_msg("child did not single-step: %s\n",
 			strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 	if (!WIFSTOPPED(status)) {
 		ksft_print_msg("child did not stop: %s\n", strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 	if (WSTOPSIG(status) != SIGTRAP) {
 		ksft_print_msg("child did not stop with SIGTRAP: %s\n",
 			strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 
 	if (ptrace(PTRACE_CONT, pid, NULL, NULL) < 0) {
 		ksft_print_msg("ptrace(PTRACE_CONT) failed: %s\n",
 			strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 
 	wpid = waitpid(pid, &status, __WALL);
 	if (wpid != pid) {
 		ksft_print_msg("waitpid() failed: %s\n", strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 	if (!WIFEXITED(status)) {
 		ksft_print_msg("child did not exit after PTRACE_CONT: %s\n",
 			strerror(errno));
-		return KSFT_FAIL;
+		return false;
 	}
 
-	return KSFT_PASS;
+	return true;
 }
 
 void suspend(void)
@@ -184,38 +183,32 @@ int main(int argc, char **argv)
 		}
 	}
 
-	err = sched_getaffinity(0, sizeof(available_cpus), &available_cpus);
-	if (err < 0)
-		ksft_exit_fail_msg("sched_getaffinity() failed\n");
-
 	for (cpu = 0; cpu < CPU_SETSIZE; cpu++) {
 		if (!CPU_ISSET(cpu, &available_cpus))
 			continue;
 		tests++;
 	}
+	ksft_set_plan(tests);
 
 	if (do_suspend)
 		suspend();
 
-	ksft_set_plan(tests);
+	err = sched_getaffinity(0, sizeof(available_cpus), &available_cpus);
+	if (err < 0)
+		ksft_exit_fail_msg("sched_getaffinity() failed\n");
+
 	for (cpu = 0; cpu < CPU_SETSIZE; cpu++) {
-		int test_success;
+		bool test_success;
 
 		if (!CPU_ISSET(cpu, &available_cpus))
 			continue;
 
 		test_success = run_test(cpu);
-		switch (test_success) {
-		case KSFT_PASS:
+		if (test_success) {
 			ksft_test_result_pass("CPU %d\n", cpu);
-			break;
-		case KSFT_SKIP:
-			ksft_test_result_skip("CPU %d\n", cpu);
-			break;
-		case KSFT_FAIL:
+		} else {
 			ksft_test_result_fail("CPU %d\n", cpu);
 			succeeded = false;
-			break;
 		}
 	}
 

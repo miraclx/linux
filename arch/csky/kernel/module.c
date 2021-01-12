@@ -10,6 +10,7 @@
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
+#include <asm/pgtable.h>
 
 #ifdef CONFIG_CPU_CK810
 #define IS_BSR32(hi16, lo16)		(((hi16) & 0xFC00) == 0xE000)

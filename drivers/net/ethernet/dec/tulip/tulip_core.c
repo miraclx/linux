@@ -350,9 +350,9 @@ static void tulip_up(struct net_device *dev)
 		*setup_frm++ = eaddrs[1]; *setup_frm++ = eaddrs[1];
 		*setup_frm++ = eaddrs[2]; *setup_frm++ = eaddrs[2];
 
-		mapping = dma_map_single(&tp->pdev->dev, tp->setup_frame,
+		mapping = pci_map_single(tp->pdev, tp->setup_frame,
 					 sizeof(tp->setup_frame),
-					 DMA_TO_DEVICE);
+					 PCI_DMA_TODEVICE);
 		tp->tx_buffers[tp->cur_tx].skb = NULL;
 		tp->tx_buffers[tp->cur_tx].mapping = mapping;
 
@@ -630,8 +630,8 @@ static void tulip_init_ring(struct net_device *dev)
 		tp->rx_buffers[i].skb = skb;
 		if (skb == NULL)
 			break;
-		mapping = dma_map_single(&tp->pdev->dev, skb->data,
-					 PKT_BUF_SZ, DMA_FROM_DEVICE);
+		mapping = pci_map_single(tp->pdev, skb->data,
+					 PKT_BUF_SZ, PCI_DMA_FROMDEVICE);
 		tp->rx_buffers[i].mapping = mapping;
 		tp->rx_ring[i].status = cpu_to_le32(DescOwned);	/* Owned by Tulip chip */
 		tp->rx_ring[i].buffer1 = cpu_to_le32(mapping);
@@ -664,8 +664,8 @@ tulip_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	entry = tp->cur_tx % TX_RING_SIZE;
 
 	tp->tx_buffers[entry].skb = skb;
-	mapping = dma_map_single(&tp->pdev->dev, skb->data, skb->len,
-				 DMA_TO_DEVICE);
+	mapping = pci_map_single(tp->pdev, skb->data,
+				 skb->len, PCI_DMA_TODEVICE);
 	tp->tx_buffers[entry].mapping = mapping;
 	tp->tx_ring[entry].buffer1 = cpu_to_le32(mapping);
 
@@ -716,17 +716,16 @@ static void tulip_clean_tx_ring(struct tulip_private *tp)
 		if (tp->tx_buffers[entry].skb == NULL) {
 			/* test because dummy frames not mapped */
 			if (tp->tx_buffers[entry].mapping)
-				dma_unmap_single(&tp->pdev->dev,
-						 tp->tx_buffers[entry].mapping,
-						 sizeof(tp->setup_frame),
-						 DMA_TO_DEVICE);
+				pci_unmap_single(tp->pdev,
+					tp->tx_buffers[entry].mapping,
+					sizeof(tp->setup_frame),
+					PCI_DMA_TODEVICE);
 			continue;
 		}
 
-		dma_unmap_single(&tp->pdev->dev,
-				 tp->tx_buffers[entry].mapping,
-				 tp->tx_buffers[entry].skb->len,
-				 DMA_TO_DEVICE);
+		pci_unmap_single(tp->pdev, tp->tx_buffers[entry].mapping,
+				tp->tx_buffers[entry].skb->len,
+				PCI_DMA_TODEVICE);
 
 		/* Free the original skb. */
 		dev_kfree_skb_irq(tp->tx_buffers[entry].skb);
@@ -796,8 +795,8 @@ static void tulip_free_ring (struct net_device *dev)
 		/* An invalid address. */
 		tp->rx_ring[i].buffer1 = cpu_to_le32(0xBADF00D0);
 		if (skb) {
-			dma_unmap_single(&tp->pdev->dev, mapping, PKT_BUF_SZ,
-					 DMA_FROM_DEVICE);
+			pci_unmap_single(tp->pdev, mapping, PKT_BUF_SZ,
+					 PCI_DMA_FROMDEVICE);
 			dev_kfree_skb (skb);
 		}
 	}
@@ -806,9 +805,8 @@ static void tulip_free_ring (struct net_device *dev)
 		struct sk_buff *skb = tp->tx_buffers[i].skb;
 
 		if (skb != NULL) {
-			dma_unmap_single(&tp->pdev->dev,
-					 tp->tx_buffers[i].mapping, skb->len,
-					 DMA_TO_DEVICE);
+			pci_unmap_single(tp->pdev, tp->tx_buffers[i].mapping,
+					 skb->len, PCI_DMA_TODEVICE);
 			dev_kfree_skb (skb);
 		}
 		tp->tx_buffers[i].skb = NULL;
@@ -913,7 +911,7 @@ static int private_ioctl (struct net_device *dev, struct ifreq *rq, int cmd)
 			data->phy_id = 1;
 		else
 			return -ENODEV;
-		fallthrough;
+		/* Fall through */
 
 	case SIOCGMIIREG:		/* Read MII PHY register. */
 		if (data->phy_id == 32 && (tp->flags & HAS_NWAY)) {
@@ -1151,10 +1149,9 @@ static void set_rx_mode(struct net_device *dev)
 
 			tp->tx_buffers[entry].skb = NULL;
 			tp->tx_buffers[entry].mapping =
-				dma_map_single(&tp->pdev->dev,
-					       tp->setup_frame,
+				pci_map_single(tp->pdev, tp->setup_frame,
 					       sizeof(tp->setup_frame),
-					       DMA_TO_DEVICE);
+					       PCI_DMA_TODEVICE);
 			/* Put the setup frame on the Tx list. */
 			if (entry == TX_RING_SIZE-1)
 				tx_flags |= DESC_RING_WRAP;		/* Wrap ring. */
@@ -1293,9 +1290,7 @@ static int tulip_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	static unsigned char last_phys_addr[ETH_ALEN] = {
 		0x00, 'L', 'i', 'n', 'u', 'x'
 	};
-#if defined(__i386__) || defined(__x86_64__)	/* Patch up x86 BIOS bug. */
 	static int last_irq;
-#endif
 	int i, irq;
 	unsigned short sum;
 	unsigned char *ee_data;
@@ -1427,10 +1422,10 @@ static int tulip_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	tp = netdev_priv(dev);
 	tp->dev = dev;
 
-	tp->rx_ring = dma_alloc_coherent(&pdev->dev,
-					 sizeof(struct tulip_rx_desc) * RX_RING_SIZE +
-					 sizeof(struct tulip_tx_desc) * TX_RING_SIZE,
-					 &tp->rx_ring_dma, GFP_KERNEL);
+	tp->rx_ring = pci_alloc_consistent(pdev,
+					   sizeof(struct tulip_rx_desc) * RX_RING_SIZE +
+					   sizeof(struct tulip_tx_desc) * TX_RING_SIZE,
+					   &tp->rx_ring_dma);
 	if (!tp->rx_ring)
 		goto err_out_mtable;
 	tp->tx_ring = (struct tulip_tx_desc *)(tp->rx_ring + RX_RING_SIZE);
@@ -1619,9 +1614,7 @@ static int tulip_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	for (i = 0; i < 6; i++)
 		last_phys_addr[i] = dev->dev_addr[i];
-#if defined(__i386__) || defined(__x86_64__)	/* Patch up x86 BIOS bug. */
 	last_irq = irq;
-#endif
 
 	/* The lower four bits are the media type. */
 	if (board_idx >= 0  &&  board_idx < MAX_UNITS) {
@@ -1764,10 +1757,10 @@ static int tulip_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	return 0;
 
 err_out_free_ring:
-	dma_free_coherent(&pdev->dev,
-			  sizeof(struct tulip_rx_desc) * RX_RING_SIZE +
-			  sizeof(struct tulip_tx_desc) * TX_RING_SIZE,
-			  tp->rx_ring, tp->rx_ring_dma);
+	pci_free_consistent (pdev,
+			     sizeof (struct tulip_rx_desc) * RX_RING_SIZE +
+			     sizeof (struct tulip_tx_desc) * TX_RING_SIZE,
+			     tp->rx_ring, tp->rx_ring_dma);
 
 err_out_mtable:
 	kfree (tp->mtable);
@@ -1810,9 +1803,13 @@ static void tulip_set_wolopts (struct pci_dev *pdev, u32 wolopts)
 	}
 }
 
-static int __maybe_unused tulip_suspend(struct device *dev_d)
+#ifdef CONFIG_PM
+
+
+static int tulip_suspend (struct pci_dev *pdev, pm_message_t state)
 {
-	struct net_device *dev = dev_get_drvdata(dev_d);
+	pci_power_t pstate;
+	struct net_device *dev = pci_get_drvdata(pdev);
 	struct tulip_private *tp = netdev_priv(dev);
 
 	if (!dev)
@@ -1828,26 +1825,44 @@ static int __maybe_unused tulip_suspend(struct device *dev_d)
 	free_irq(tp->pdev->irq, dev);
 
 save_state:
-	tulip_set_wolopts(to_pci_dev(dev_d), tp->wolinfo.wolopts);
-	device_set_wakeup_enable(dev_d, !!tp->wolinfo.wolopts);
+	pci_save_state(pdev);
+	pci_disable_device(pdev);
+	pstate = pci_choose_state(pdev, state);
+	if (state.event == PM_EVENT_SUSPEND && pstate != PCI_D0) {
+		int rc;
+
+		tulip_set_wolopts(pdev, tp->wolinfo.wolopts);
+		rc = pci_enable_wake(pdev, pstate, tp->wolinfo.wolopts);
+		if (rc)
+			pr_err("pci_enable_wake failed (%d)\n", rc);
+	}
+	pci_set_power_state(pdev, pstate);
 
 	return 0;
 }
 
-static int __maybe_unused tulip_resume(struct device *dev_d)
+
+static int tulip_resume(struct pci_dev *pdev)
 {
-	struct pci_dev *pdev = to_pci_dev(dev_d);
-	struct net_device *dev = dev_get_drvdata(dev_d);
+	struct net_device *dev = pci_get_drvdata(pdev);
 	struct tulip_private *tp = netdev_priv(dev);
 	void __iomem *ioaddr = tp->base_addr;
+	int retval;
 	unsigned int tmp;
-	int retval = 0;
 
 	if (!dev)
 		return -EINVAL;
 
+	pci_set_power_state(pdev, PCI_D0);
+	pci_restore_state(pdev);
+
 	if (!netif_running(dev))
 		return 0;
+
+	if ((retval = pci_enable_device(pdev))) {
+		pr_err("pci_enable_device failed in resume\n");
+		return retval;
+	}
 
 	retval = request_irq(pdev->irq, tulip_interrupt, IRQF_SHARED,
 			     dev->name, dev);
@@ -1857,7 +1872,8 @@ static int __maybe_unused tulip_resume(struct device *dev_d)
 	}
 
 	if (tp->flags & COMET_PM) {
-		device_set_wakeup_enable(dev_d, 0);
+		pci_enable_wake(pdev, PCI_D3hot, 0);
+		pci_enable_wake(pdev, PCI_D3cold, 0);
 
 		/* Clear the PMES flag */
 		tmp = ioread32(ioaddr + CSR20);
@@ -1875,6 +1891,9 @@ static int __maybe_unused tulip_resume(struct device *dev_d)
 	return 0;
 }
 
+#endif /* CONFIG_PM */
+
+
 static void tulip_remove_one(struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata (pdev);
@@ -1885,10 +1904,10 @@ static void tulip_remove_one(struct pci_dev *pdev)
 
 	tp = netdev_priv(dev);
 	unregister_netdev(dev);
-	dma_free_coherent(&pdev->dev,
-			  sizeof(struct tulip_rx_desc) * RX_RING_SIZE +
-			  sizeof(struct tulip_tx_desc) * TX_RING_SIZE,
-			  tp->rx_ring, tp->rx_ring_dma);
+	pci_free_consistent (pdev,
+			     sizeof (struct tulip_rx_desc) * RX_RING_SIZE +
+			     sizeof (struct tulip_tx_desc) * TX_RING_SIZE,
+			     tp->rx_ring, tp->rx_ring_dma);
 	kfree (tp->mtable);
 	pci_iounmap(pdev, tp->base_addr);
 	free_netdev (dev);
@@ -1918,14 +1937,15 @@ static void poll_tulip (struct net_device *dev)
 }
 #endif
 
-static SIMPLE_DEV_PM_OPS(tulip_pm_ops, tulip_suspend, tulip_resume);
-
 static struct pci_driver tulip_driver = {
 	.name		= DRV_NAME,
 	.id_table	= tulip_pci_tbl,
 	.probe		= tulip_init_one,
 	.remove		= tulip_remove_one,
-	.driver.pm	= &tulip_pm_ops,
+#ifdef CONFIG_PM
+	.suspend	= tulip_suspend,
+	.resume		= tulip_resume,
+#endif /* CONFIG_PM */
 };
 
 

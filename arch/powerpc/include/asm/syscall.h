@@ -26,10 +26,7 @@ static inline int syscall_get_nr(struct task_struct *task, struct pt_regs *regs)
 	 * This is important for seccomp so that compat tasks can set r0 = -1
 	 * to reject the syscall.
 	 */
-	if (trap_is_syscall(regs))
-		return regs->gpr[0];
-	else
-		return -1;
+	return TRAP(regs) == 0xc00 ? regs->gpr[0] : -1;
 }
 
 static inline void syscall_rollback(struct task_struct *task,

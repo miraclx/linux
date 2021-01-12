@@ -9,8 +9,6 @@ RISC-V architecture
     pmu
     patch-acceptance
 
-    features
-
 .. only::  subproject and html
 
    Indices

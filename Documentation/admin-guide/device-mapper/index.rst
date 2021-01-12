@@ -11,7 +11,6 @@ Device Mapper
     dm-clone
     dm-crypt
     dm-dust
-    dm-ebs
     dm-flakey
     dm-init
     dm-integrity

@@ -33,7 +33,6 @@
 #include "evsel.h"
 #include "evsel_config.h"
 #include "symbol.h"
-#include "util/perf_api_probe.h"
 #include "util/synthetic-events.h"
 #include "thread_map.h"
 #include "asm/bug.h"
@@ -55,19 +54,41 @@
 #include "util/mmap.h"
 
 #include <linux/ctype.h>
+#include <linux/kernel.h>
 #include "symbol/kallsyms.h"
 #include <internal/lib.h>
+
+static struct perf_pmu *perf_evsel__find_pmu(struct evsel *evsel)
+{
+	struct perf_pmu *pmu = NULL;
+
+	while ((pmu = perf_pmu__scan(pmu)) != NULL) {
+		if (pmu->type == evsel->core.attr.type)
+			break;
+	}
+
+	return pmu;
+}
+
+static bool perf_evsel__is_aux_event(struct evsel *evsel)
+{
+	struct perf_pmu *pmu = perf_evsel__find_pmu(evsel);
+
+	return pmu && pmu->auxtrace;
+}
 
 /*
  * Make a group from 'leader' to 'last', requiring that the events were not
  * already grouped to a different leader.
  */
-static int evlist__regroup(struct evlist *evlist, struct evsel *leader, struct evsel *last)
+static int perf_evlist__regroup(struct evlist *evlist,
+				struct evsel *leader,
+				struct evsel *last)
 {
 	struct evsel *evsel;
 	bool grp;
 
-	if (!evsel__is_group_leader(leader))
+	if (!perf_evsel__is_group_leader(leader))
 		return -EINVAL;
 
 	grp = false;
@@ -656,7 +677,8 @@ int auxtrace_record__read_finish(struct auxtrace_record *itr, int idx)
 		if (evsel->core.attr.type == itr->pmu->type) {
 			if (evsel->disabled)
 				return 0;
-			return evlist__enable_event_idx(itr->evlist, evsel, idx);
+			return perf_evlist__enable_event_idx(itr->evlist, evsel,
+							     idx);
 		}
 	}
 	return -EINVAL;
@@ -681,8 +703,8 @@ static int auxtrace_validate_aux_sample_size(struct evlist *evlist,
 
 	evlist__for_each_entry(evlist, evsel) {
 		sz = evsel->core.attr.aux_sample_size;
-		if (evsel__is_group_leader(evsel)) {
-			has_aux_leader = evsel__is_aux_event(evsel);
+		if (perf_evsel__is_group_leader(evsel)) {
+			has_aux_leader = perf_evsel__is_aux_event(evsel);
 			if (sz) {
 				if (has_aux_leader)
 					pr_err("Cannot add AUX area sampling to an AUX area event\n");
@@ -701,10 +723,10 @@ static int auxtrace_validate_aux_sample_size(struct evlist *evlist,
 				pr_err("Cannot add AUX area sampling because group leader is not an AUX area event\n");
 				return -EINVAL;
 			}
-			evsel__set_sample_bit(evsel, AUX);
+			perf_evsel__set_sample_bit(evsel, AUX);
 			opts->auxtrace_sample_mode = true;
 		} else {
-			evsel__reset_sample_bit(evsel, AUX);
+			perf_evsel__reset_sample_bit(evsel, AUX);
 		}
 	}
 
@@ -725,7 +747,7 @@ int auxtrace_parse_sample_options(struct auxtrace_record *itr,
 				  struct evlist *evlist,
 				  struct record_opts *opts, const char *str)
 {
-	struct evsel_config_term *term;
+	struct perf_evsel_config_term *term;
 	struct evsel *aux_evsel;
 	bool has_aux_sample_size = false;
 	bool has_aux_leader = false;
@@ -755,8 +777,8 @@ int auxtrace_parse_sample_options(struct auxtrace_record *itr,
 
 	/* Set aux_sample_size based on --aux-sample option */
 	evlist__for_each_entry(evlist, evsel) {
-		if (evsel__is_group_leader(evsel)) {
-			has_aux_leader = evsel__is_aux_event(evsel);
+		if (perf_evsel__is_group_leader(evsel)) {
+			has_aux_leader = perf_evsel__is_aux_event(evsel);
 		} else if (has_aux_leader) {
 			evsel->core.attr.aux_sample_size = sz;
 		}
@@ -765,15 +787,15 @@ no_opt:
 	aux_evsel = NULL;
 	/* Override with aux_sample_size from config term */
 	evlist__for_each_entry(evlist, evsel) {
-		if (evsel__is_aux_event(evsel))
+		if (perf_evsel__is_aux_event(evsel))
 			aux_evsel = evsel;
-		term = evsel__get_config_term(evsel, AUX_SAMPLE_SIZE);
+		term = perf_evsel__get_config_term(evsel, AUX_SAMPLE_SIZE);
 		if (term) {
 			has_aux_sample_size = true;
 			evsel->core.attr.aux_sample_size = term->val.aux_sample_size;
 			/* If possible, group with the AUX event */
 			if (aux_evsel && evsel->core.attr.aux_sample_size)
-				evlist__regroup(evlist, aux_evsel, evsel);
+				perf_evlist__regroup(evlist, aux_evsel, evsel);
 		}
 	}
 
@@ -1014,7 +1036,7 @@ struct auxtrace_queue *auxtrace_queues__sample_queue(struct auxtrace_queues *que
 	if (!id)
 		return NULL;
 
-	sid = evlist__id2sid(session->evlist, id);
+	sid = perf_evlist__id2sid(session->evlist, id);
 	if (!sid)
 		return NULL;
 
@@ -1044,7 +1066,7 @@ int auxtrace_queues__add_sample(struct auxtrace_queues *queues,
 	if (!id)
 		return -EINVAL;
 
-	sid = evlist__id2sid(session->evlist, id);
+	sid = perf_evlist__id2sid(session->evlist, id);
 	if (!sid)
 		return -ENOENT;
 
@@ -1079,7 +1101,7 @@ static int auxtrace_queue_data_cb(struct perf_session *session,
 	if (!qd->samples || event->header.type != PERF_RECORD_SAMPLE)
 		return 0;
 
-	err = evlist__parse_sample(session->evlist, event, &sample);
+	err = perf_evlist__parse_sample(session->evlist, event, &sample);
 	if (err)
 		return err;
 
@@ -1212,79 +1234,29 @@ out_free:
 	return err;
 }
 
-static void unleader_evsel(struct evlist *evlist, struct evsel *leader)
-{
-	struct evsel *new_leader = NULL;
-	struct evsel *evsel;
-
-	/* Find new leader for the group */
-	evlist__for_each_entry(evlist, evsel) {
-		if (evsel->leader != leader || evsel == leader)
-			continue;
-		if (!new_leader)
-			new_leader = evsel;
-		evsel->leader = new_leader;
-	}
-
-	/* Update group information */
-	if (new_leader) {
-		zfree(&new_leader->group_name);
-		new_leader->group_name = leader->group_name;
-		leader->group_name = NULL;
-
-		new_leader->core.nr_members = leader->core.nr_members - 1;
-		leader->core.nr_members = 1;
-	}
-}
-
-static void unleader_auxtrace(struct perf_session *session)
-{
-	struct evsel *evsel;
-
-	evlist__for_each_entry(session->evlist, evsel) {
-		if (auxtrace__evsel_is_auxtrace(session, evsel) &&
-		    evsel__is_group_leader(evsel)) {
-			unleader_evsel(session->evlist, evsel);
-		}
-	}
-}
-
 int perf_event__process_auxtrace_info(struct perf_session *session,
 				      union perf_event *event)
 {
 	enum auxtrace_type type = event->auxtrace_info.type;
-	int err;
 
 	if (dump_trace)
 		fprintf(stdout, " type: %u\n", type);
 
 	switch (type) {
 	case PERF_AUXTRACE_INTEL_PT:
-		err = intel_pt_process_auxtrace_info(event, session);
-		break;
+		return intel_pt_process_auxtrace_info(event, session);
 	case PERF_AUXTRACE_INTEL_BTS:
-		err = intel_bts_process_auxtrace_info(event, session);
-		break;
+		return intel_bts_process_auxtrace_info(event, session);
 	case PERF_AUXTRACE_ARM_SPE:
-		err = arm_spe_process_auxtrace_info(event, session);
-		break;
+		return arm_spe_process_auxtrace_info(event, session);
 	case PERF_AUXTRACE_CS_ETM:
-		err = cs_etm__process_auxtrace_info(event, session);
-		break;
+		return cs_etm__process_auxtrace_info(event, session);
 	case PERF_AUXTRACE_S390_CPUMSF:
-		err = s390_cpumsf_process_auxtrace_info(event, session);
-		break;
+		return s390_cpumsf_process_auxtrace_info(event, session);
 	case PERF_AUXTRACE_UNKNOWN:
 	default:
 		return -EINVAL;
 	}
-
-	if (err)
-		return err;
-
-	unleader_auxtrace(session);
-
-	return 0;
 }
 
 s64 perf_event__process_auxtrace(struct perf_session *session,
@@ -1327,12 +1299,6 @@ void itrace_synth_opts__set_default(struct itrace_synth_opts *synth_opts,
 	synth_opts->pwr_events = true;
 	synth_opts->other_events = true;
 	synth_opts->errors = true;
-	synth_opts->flc = true;
-	synth_opts->llc = true;
-	synth_opts->tlb = true;
-	synth_opts->mem = true;
-	synth_opts->remote_access = true;
-
 	if (no_sample) {
 		synth_opts->period_type = PERF_ITRACE_PERIOD_INSTRUCTIONS;
 		synth_opts->period = 1;
@@ -1345,47 +1311,6 @@ void itrace_synth_opts__set_default(struct itrace_synth_opts *synth_opts,
 	synth_opts->callchain_sz = PERF_ITRACE_DEFAULT_CALLCHAIN_SZ;
 	synth_opts->last_branch_sz = PERF_ITRACE_DEFAULT_LAST_BRANCH_SZ;
 	synth_opts->initial_skip = 0;
-}
-
-static int get_flag(const char **ptr, unsigned int *flags)
-{
-	while (1) {
-		char c = **ptr;
-
-		if (c >= 'a' && c <= 'z') {
-			*flags |= 1 << (c - 'a');
-			++*ptr;
-			return 0;
-		} else if (c == ' ') {
-			++*ptr;
-			continue;
-		} else {
-			return -1;
-		}
-	}
-}
-
-static int get_flags(const char **ptr, unsigned int *plus_flags, unsigned int *minus_flags)
-{
-	while (1) {
-		switch (**ptr) {
-		case '+':
-			++*ptr;
-			if (get_flag(ptr, plus_flags))
-				return -1;
-			break;
-		case '-':
-			++*ptr;
-			if (get_flag(ptr, minus_flags))
-				return -1;
-			break;
-		case ' ':
-			++*ptr;
-			break;
-		default:
-			return 0;
-		}
-	}
 }
 
 /*
@@ -1475,15 +1400,9 @@ int itrace_parse_synth_opts(const struct option *opt, const char *str,
 			break;
 		case 'e':
 			synth_opts->errors = true;
-			if (get_flags(&p, &synth_opts->error_plus_flags,
-				      &synth_opts->error_minus_flags))
-				goto out_err;
 			break;
 		case 'd':
 			synth_opts->log = true;
-			if (get_flags(&p, &synth_opts->log_plus_flags,
-				      &synth_opts->log_minus_flags))
-				goto out_err;
 			break;
 		case 'c':
 			synth_opts->branches = true;
@@ -1493,12 +1412,8 @@ int itrace_parse_synth_opts(const struct option *opt, const char *str,
 			synth_opts->branches = true;
 			synth_opts->returns = true;
 			break;
-		case 'G':
 		case 'g':
-			if (p[-1] == 'G')
-				synth_opts->add_callchain = true;
-			else
-				synth_opts->callchain = true;
+			synth_opts->callchain = true;
 			synth_opts->callchain_sz =
 					PERF_ITRACE_DEFAULT_CALLCHAIN_SZ;
 			while (*p == ' ' || *p == ',')
@@ -1513,12 +1428,8 @@ int itrace_parse_synth_opts(const struct option *opt, const char *str,
 				synth_opts->callchain_sz = val;
 			}
 			break;
-		case 'L':
 		case 'l':
-			if (p[-1] == 'L')
-				synth_opts->add_last_branch = true;
-			else
-				synth_opts->last_branch = true;
+			synth_opts->last_branch = true;
 			synth_opts->last_branch_sz =
 					PERF_ITRACE_DEFAULT_LAST_BRANCH_SZ;
 			while (*p == ' ' || *p == ',')
@@ -1539,24 +1450,6 @@ int itrace_parse_synth_opts(const struct option *opt, const char *str,
 			if (p == endptr)
 				goto out_err;
 			p = endptr;
-			break;
-		case 'f':
-			synth_opts->flc = true;
-			break;
-		case 'm':
-			synth_opts->llc = true;
-			break;
-		case 't':
-			synth_opts->tlb = true;
-			break;
-		case 'a':
-			synth_opts->remote_access = true;
-			break;
-		case 'M':
-			synth_opts->mem = true;
-			break;
-		case 'q':
-			synth_opts->quick += 1;
 			break;
 		case ' ':
 		case ',':
@@ -2589,7 +2482,7 @@ static int parse_addr_filter(struct evsel *evsel, const char *filter,
 			goto out_exit;
 		}
 
-		if (evsel__append_addr_filter(evsel, new_filter)) {
+		if (perf_evsel__append_addr_filter(evsel, new_filter)) {
 			err = -ENOMEM;
 			goto out_exit;
 		}
@@ -2607,9 +2500,9 @@ out_exit:
 	return err;
 }
 
-static int evsel__nr_addr_filter(struct evsel *evsel)
+static int perf_evsel__nr_addr_filter(struct evsel *evsel)
 {
-	struct perf_pmu *pmu = evsel__find_pmu(evsel);
+	struct perf_pmu *pmu = perf_evsel__find_pmu(evsel);
 	int nr_addr_filters = 0;
 
 	if (!pmu)
@@ -2628,7 +2521,7 @@ int auxtrace_parse_filters(struct evlist *evlist)
 
 	evlist__for_each_entry(evlist, evsel) {
 		filter = evsel->filter;
-		max_nr = evsel__nr_addr_filter(evsel);
+		max_nr = perf_evsel__nr_addr_filter(evsel);
 		if (!filter || !max_nr)
 			continue;
 		evsel->filter = NULL;
@@ -2683,13 +2576,4 @@ void auxtrace__free(struct perf_session *session)
 		return;
 
 	return session->auxtrace->free(session);
-}
-
-bool auxtrace__evsel_is_auxtrace(struct perf_session *session,
-				 struct evsel *evsel)
-{
-	if (!session->auxtrace || !session->auxtrace->evsel_is_auxtrace)
-		return false;
-
-	return session->auxtrace->evsel_is_auxtrace(session, evsel);
 }

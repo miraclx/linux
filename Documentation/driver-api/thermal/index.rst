@@ -8,7 +8,6 @@ Thermal
    :maxdepth: 1
 
    cpu-cooling-api
-   cpu-idle-cooling
    sysfs-api
    power_allocator
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0
 /*
  * soc-acpi-intel-skl-match.c - tables and support for SKL ACPI enumeration.
  *

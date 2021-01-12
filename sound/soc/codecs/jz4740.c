@@ -219,11 +219,12 @@ static struct snd_soc_dai_driver jz4740_codec_dai = {
 
 static void jz4740_codec_wakeup(struct regmap *regmap)
 {
-	regmap_set_bits(regmap, JZ4740_REG_CODEC_1, JZ4740_CODEC_1_RESET);
+	regmap_update_bits(regmap, JZ4740_REG_CODEC_1,
+		JZ4740_CODEC_1_RESET, JZ4740_CODEC_1_RESET);
 	udelay(2);
 
-	regmap_clear_bits(regmap, JZ4740_REG_CODEC_1,
-			  JZ4740_CODEC_1_SUSPEND | JZ4740_CODEC_1_RESET);
+	regmap_update_bits(regmap, JZ4740_REG_CODEC_1,
+		JZ4740_CODEC_1_SUSPEND | JZ4740_CODEC_1_RESET, 0);
 
 	regcache_sync(regmap);
 }
@@ -234,6 +235,7 @@ static int jz4740_codec_set_bias_level(struct snd_soc_component *component,
 	struct jz4740_codec *jz4740_codec = snd_soc_component_get_drvdata(component);
 	struct regmap *regmap = jz4740_codec->regmap;
 	unsigned int mask;
+	unsigned int value;
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
@@ -242,8 +244,9 @@ static int jz4740_codec_set_bias_level(struct snd_soc_component *component,
 		mask = JZ4740_CODEC_1_VREF_DISABLE |
 				JZ4740_CODEC_1_VREF_AMP_DISABLE |
 				JZ4740_CODEC_1_HEADPHONE_POWERDOWN_M;
+		value = 0;
 
-		regmap_clear_bits(regmap, JZ4740_REG_CODEC_1, mask);
+		regmap_update_bits(regmap, JZ4740_REG_CODEC_1, mask, value);
 		break;
 	case SND_SOC_BIAS_STANDBY:
 		/* The only way to clear the suspend flag is to reset the codec */
@@ -253,12 +256,17 @@ static int jz4740_codec_set_bias_level(struct snd_soc_component *component,
 		mask = JZ4740_CODEC_1_VREF_DISABLE |
 			JZ4740_CODEC_1_VREF_AMP_DISABLE |
 			JZ4740_CODEC_1_HEADPHONE_POWERDOWN_M;
+		value = JZ4740_CODEC_1_VREF_DISABLE |
+			JZ4740_CODEC_1_VREF_AMP_DISABLE |
+			JZ4740_CODEC_1_HEADPHONE_POWERDOWN_M;
 
-		regmap_set_bits(regmap, JZ4740_REG_CODEC_1, mask);
+		regmap_update_bits(regmap, JZ4740_REG_CODEC_1, mask, value);
 		break;
 	case SND_SOC_BIAS_OFF:
 		mask = JZ4740_CODEC_1_SUSPEND;
-		regmap_set_bits(regmap, JZ4740_REG_CODEC_1, mask);
+		value = JZ4740_CODEC_1_SUSPEND;
+
+		regmap_update_bits(regmap, JZ4740_REG_CODEC_1, mask, value);
 		regcache_mark_dirty(regmap);
 		break;
 	default:
@@ -336,17 +344,19 @@ static int jz4740_codec_probe(struct platform_device *pdev)
 	return ret;
 }
 
+#ifdef CONFIG_OF
 static const struct of_device_id jz4740_codec_of_matches[] = {
 	{ .compatible = "ingenic,jz4740-codec", },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, jz4740_codec_of_matches);
+#endif
 
 static struct platform_driver jz4740_codec_driver = {
 	.probe = jz4740_codec_probe,
 	.driver = {
 		.name = "jz4740-codec",
-		.of_match_table = jz4740_codec_of_matches,
+		.of_match_table = of_match_ptr(jz4740_codec_of_matches),
 	},
 };
 

@@ -1966,13 +1966,13 @@ static int i810fb_setup(char *options)
 	
 	while ((this_opt = strsep(&options, ",")) != NULL) {
 		if (!strncmp(this_opt, "mtrr", 4))
-			mtrr = true;
+			mtrr = 1;
 		else if (!strncmp(this_opt, "accel", 5))
-			accel = true;
+			accel = 1;
 		else if (!strncmp(this_opt, "extvga", 6))
-			extvga = true;
+			extvga = 1;
 		else if (!strncmp(this_opt, "sync", 4))
-			sync = true;
+			sync = 1;
 		else if (!strncmp(this_opt, "vram:", 5))
 			vram = (simple_strtoul(this_opt+5, NULL, 0));
 		else if (!strncmp(this_opt, "voffset:", 8))
@@ -1998,7 +1998,7 @@ static int i810fb_setup(char *options)
 		else if (!strncmp(this_opt, "vsync2:", 7))
 			vsync2 = simple_strtoul(this_opt+7, NULL, 0);
 		else if (!strncmp(this_opt, "dcolor", 6))
-			dcolor = true;
+			dcolor = 1;
 		else if (!strncmp(this_opt, "ddc3", 4))
 			ddc3 = true;
 		else

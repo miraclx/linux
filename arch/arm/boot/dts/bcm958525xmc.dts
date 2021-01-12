@@ -58,10 +58,6 @@
 
 /* XHCI support needed to be complete */
 
-&dma {
-	status = "okay";
-};
-
 &amac0 {
 	status = "okay";
 };
@@ -196,7 +192,7 @@
 };
 
 &sdio {
-	status = "okay";
+	status = "ok";
 };
 
 &uart0 {
@@ -209,8 +205,4 @@
 
 &xhci {
 	status = "okay";
-};
-
-&srab {
-	compatible = "brcm,bcm58525-srab", "brcm,nsp-srab";
 };

@@ -20,7 +20,6 @@
 #include <drm/drm_of.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_print.h>
-#include <drm/drm_simple_kms_helper.h>
 
 #include <sound/hdmi-codec.h>
 
@@ -255,6 +254,10 @@ static const struct drm_encoder_helper_funcs zx_hdmi_encoder_helper_funcs = {
 	.mode_set = zx_hdmi_encoder_mode_set,
 };
 
+static const struct drm_encoder_funcs zx_hdmi_encoder_funcs = {
+	.destroy = drm_encoder_cleanup,
+};
+
 static int zx_hdmi_connector_get_modes(struct drm_connector *connector)
 {
 	struct zx_hdmi *hdmi = to_zx_hdmi(connector);
@@ -310,7 +313,8 @@ static int zx_hdmi_register(struct drm_device *drm, struct zx_hdmi *hdmi)
 
 	encoder->possible_crtcs = VOU_CRTC_MASK;
 
-	drm_simple_encoder_init(drm, encoder, DRM_MODE_ENCODER_TMDS);
+	drm_encoder_init(drm, encoder, &zx_hdmi_encoder_funcs,
+			 DRM_MODE_ENCODER_TMDS, NULL);
 	drm_encoder_helper_add(encoder, &zx_hdmi_encoder_helper_funcs);
 
 	hdmi->connector.polled = DRM_CONNECTOR_POLL_HPD;
@@ -439,8 +443,8 @@ static int zx_hdmi_audio_hw_params(struct device *dev,
 	return zx_hdmi_infoframe_trans(hdmi, &frame, FSEL_AUDIO);
 }
 
-static int zx_hdmi_audio_mute(struct device *dev, void *data,
-			      bool enable, int direction)
+static int zx_hdmi_audio_digital_mute(struct device *dev, void *data,
+				      bool enable)
 {
 	struct zx_hdmi *hdmi = dev_get_drvdata(dev);
 
@@ -468,9 +472,8 @@ static const struct hdmi_codec_ops zx_hdmi_codec_ops = {
 	.audio_startup = zx_hdmi_audio_startup,
 	.hw_params = zx_hdmi_audio_hw_params,
 	.audio_shutdown = zx_hdmi_audio_shutdown,
-	.mute_stream = zx_hdmi_audio_mute,
+	.digital_mute = zx_hdmi_audio_digital_mute,
 	.get_eld = zx_hdmi_audio_get_eld,
-	.no_capture_mute = 1,
 };
 
 static struct hdmi_codec_pdata zx_hdmi_codec_pdata = {

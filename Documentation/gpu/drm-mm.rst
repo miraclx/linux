@@ -179,14 +179,17 @@ GEM Objects Lifetime
 
 All GEM objects are reference-counted by the GEM core. References can be
 acquired and release by calling drm_gem_object_get() and drm_gem_object_put()
-respectively.
+respectively. The caller must hold the :c:type:`struct drm_device <drm_device>`
+struct_mutex lock when calling drm_gem_object_get(). As a convenience, GEM
+provides drm_gem_object_put_unlocked() functions that can be called without
+holding the lock.
 
 When the last reference to a GEM object is released the GEM core calls
-the :c:type:`struct drm_gem_object_funcs <gem_object_funcs>` free
+the :c:type:`struct drm_driver <drm_driver>` gem_free_object_unlocked
 operation. That operation is mandatory for GEM-enabled drivers and must
 free the GEM object and all associated resources.
 
-void (\*free) (struct drm_gem_object \*obj); Drivers are
+void (\*gem_free_object) (struct drm_gem_object \*obj); Drivers are
 responsible for freeing all GEM object resources. This includes the
 resources created by the GEM core, which need to be released with
 drm_gem_object_release().
@@ -311,7 +314,7 @@ To use drm_gem_cma_get_unmapped_area(), drivers must fill the struct
 a pointer on drm_gem_cma_get_unmapped_area().
 
 More detailed information about get_unmapped_area can be found in
-Documentation/admin-guide/mm/nommu-mmap.rst
+Documentation/nommu-mmap.txt
 
 Memory Coherency
 ----------------
@@ -370,17 +373,14 @@ GEM CMA Helper Functions Reference
 .. kernel-doc:: drivers/gpu/drm/drm_gem_cma_helper.c
    :export:
 
-GEM SHMEM Helper Function Reference
------------------------------------
+VRAM Helper Function Reference
+==============================
 
-.. kernel-doc:: drivers/gpu/drm/drm_gem_shmem_helper.c
+.. kernel-doc:: drivers/gpu/drm/drm_vram_helper_common.c
    :doc: overview
 
-.. kernel-doc:: include/drm/drm_gem_shmem_helper.h
+.. kernel-doc:: include/drm/drm_gem_vram_helper.h
    :internal:
-
-.. kernel-doc:: drivers/gpu/drm/drm_gem_shmem_helper.c
-   :export:
 
 GEM VRAM Helper Functions Reference
 -----------------------------------

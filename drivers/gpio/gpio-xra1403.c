@@ -121,7 +121,6 @@ static void xra1403_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 	struct xra1403 *xra = gpiochip_get_data(chip);
 	int value[XRA_LAST];
 	int i;
-	const char *label;
 	unsigned int gcr;
 	unsigned int gsr;
 
@@ -137,7 +136,12 @@ static void xra1403_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 
 	gcr = value[XRA_GCR + 1] << 8 | value[XRA_GCR];
 	gsr = value[XRA_GSR + 1] << 8 | value[XRA_GSR];
-	for_each_requested_gpio(chip, i, label) {
+	for (i = 0; i < chip->ngpio; i++) {
+		const char *label = gpiochip_is_requested(chip, i);
+
+		if (!label)
+			continue;
+
 		seq_printf(s, " gpio-%-3d (%-12s) %s %s\n",
 			   chip->base + i, label,
 			   (gcr & BIT(i)) ? "in" : "out",
@@ -186,7 +190,15 @@ static int xra1403_probe(struct spi_device *spi)
 		return ret;
 	}
 
-	return devm_gpiochip_add_data(&spi->dev, &xra->chip, xra);
+	ret = devm_gpiochip_add_data(&spi->dev, &xra->chip, xra);
+	if (ret < 0) {
+		dev_err(&spi->dev, "Unable to register gpiochip\n");
+		return ret;
+	}
+
+	spi_set_drvdata(spi, xra);
+
+	return 0;
 }
 
 static const struct spi_device_id xra1403_ids[] = {

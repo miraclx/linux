@@ -734,7 +734,7 @@ static void b43_short_slot_timing_disable(struct b43_wldev *dev)
 }
 
 /* DummyTransmission function, as documented on
- * https://bcm-v4.sipsolutions.net/802.11/DummyTransmission
+ * http://bcm-v4.sipsolutions.net/802.11/DummyTransmission
  */
 void b43_dummy_transmission(struct b43_wldev *dev, bool ofdm, bool pa_on)
 {
@@ -781,9 +781,8 @@ void b43_dummy_transmission(struct b43_wldev *dev, bool ofdm, bool pa_on)
 	b43_write16(dev, B43_MMIO_XMTSEL, 0x0826);
 	b43_write16(dev, B43_MMIO_TXE0_CTL, 0x0000);
 
-	if (!pa_on && phy->type == B43_PHYTYPE_N) {
+	if (!pa_on && phy->type == B43_PHYTYPE_N)
 		; /*b43_nphy_pa_override(dev, false) */
-	}
 
 	switch (phy->type) {
 	case B43_PHYTYPE_N:
@@ -1199,7 +1198,7 @@ void b43_power_saving_ctl_bits(struct b43_wldev *dev, unsigned int ps_flags)
 	}
 }
 
-/* https://bcm-v4.sipsolutions.net/802.11/PHY/BmacCorePllReset */
+/* http://bcm-v4.sipsolutions.net/802.11/PHY/BmacCorePllReset */
 void b43_wireless_core_phy_pll_reset(struct b43_wldev *dev)
 {
 	struct bcma_drv_cc *bcma_cc __maybe_unused;
@@ -1874,7 +1873,7 @@ static void b43_handle_firmware_panic(struct b43_wldev *dev)
 	switch (reason) {
 	default:
 		b43dbg(dev->wl, "The panic reason is unknown.\n");
-		fallthrough;
+		/* fallthrough */
 	case B43_FWPANIC_DIE:
 		/* Do not restart the controller or firmware.
 		 * The device is nonfunctional from now on.
@@ -2014,9 +2013,8 @@ static void b43_do_interrupt_thread(struct b43_wldev *dev)
 		handle_irq_beacon(dev);
 	if (reason & B43_IRQ_PMQ)
 		handle_irq_pmq(dev);
-	if (reason & B43_IRQ_TXFIFO_FLUSH_OK) {
+	if (reason & B43_IRQ_TXFIFO_FLUSH_OK)
 		;/* TODO */
-	}
 	if (reason & B43_IRQ_NOISESAMPLE_OK)
 		handle_irq_noise(dev);
 
@@ -2166,7 +2164,7 @@ static void b43_print_fw_helptext(struct b43_wl *wl, bool error)
 {
 	const char text[] =
 		"You must go to " \
-		"https://wireless.wiki.kernel.org/en/users/Drivers/b43#devicefirmware " \
+		"http://wireless.kernel.org/en/users/Drivers/b43#devicefirmware " \
 		"and download the correct firmware for this driver version. " \
 		"Please carefully read all instructions on this website.\n";
 
@@ -2268,7 +2266,7 @@ fw_ready:
 		size = be32_to_cpu(hdr->size);
 		if (size != ctx->blob->size - sizeof(struct b43_fw_header))
 			goto err_format;
-		fallthrough;
+		/* fallthrough */
 	case B43_FW_TYPE_IV:
 		if (hdr->ver != 1)
 			goto err_format;
@@ -2292,7 +2290,7 @@ err_format:
 	return -EPROTO;
 }
 
-/* https://bcm-v4.sipsolutions.net/802.11/Init/Firmware */
+/* http://bcm-v4.sipsolutions.net/802.11/Init/Firmware */
 static int b43_try_request_fw(struct b43_request_fw_context *ctx)
 {
 	struct b43_wldev *dev = ctx->dev;
@@ -2845,7 +2843,7 @@ static int b43_upload_initvals_band(struct b43_wldev *dev)
 }
 
 /* Initialize the GPIOs
- * https://bcm-specs.sipsolutions.net/GPIO
+ * http://bcm-specs.sipsolutions.net/GPIO
  */
 
 #ifdef CONFIG_B43_SSB
@@ -2973,7 +2971,7 @@ void b43_mac_enable(struct b43_wldev *dev)
 	}
 }
 
-/* https://bcm-specs.sipsolutions.net/SuspendMAC */
+/* http://bcm-specs.sipsolutions.net/SuspendMAC */
 void b43_mac_suspend(struct b43_wldev *dev)
 {
 	int i;
@@ -3006,7 +3004,7 @@ out:
 	dev->mac_suspended++;
 }
 
-/* https://bcm-v4.sipsolutions.net/802.11/PHY/N/MacPhyClkSet */
+/* http://bcm-v4.sipsolutions.net/802.11/PHY/N/MacPhyClkSet */
 void b43_mac_phy_clock_set(struct b43_wldev *dev, bool on)
 {
 	u32 tmp;
@@ -3180,7 +3178,7 @@ static void b43_rate_memory_init(struct b43_wldev *dev)
 		b43_rate_memory_write(dev, B43_OFDM_RATE_36MB, 1);
 		b43_rate_memory_write(dev, B43_OFDM_RATE_48MB, 1);
 		b43_rate_memory_write(dev, B43_OFDM_RATE_54MB, 1);
-		fallthrough;
+		/* fallthrough */
 	case B43_PHYTYPE_B:
 		b43_rate_memory_write(dev, B43_CCK_RATE_1MB, 0);
 		b43_rate_memory_write(dev, B43_CCK_RATE_2MB, 0);
@@ -3233,7 +3231,7 @@ static void b43_chip_exit(struct b43_wldev *dev)
 }
 
 /* Initialize the chip
- * https://bcm-specs.sipsolutions.net/ChipInit
+ * http://bcm-specs.sipsolutions.net/ChipInit
  */
 static int b43_chip_init(struct b43_wldev *dev)
 {
@@ -4961,11 +4959,12 @@ static int b43_op_add_interface(struct ieee80211_hw *hw,
 	struct b43_wldev *dev;
 	int err = -EOPNOTSUPP;
 
-	/* TODO: allow AP devices to coexist */
+	/* TODO: allow WDS/AP devices to coexist */
 
 	if (vif->type != NL80211_IFTYPE_AP &&
 	    vif->type != NL80211_IFTYPE_MESH_POINT &&
 	    vif->type != NL80211_IFTYPE_STATION &&
+	    vif->type != NL80211_IFTYPE_WDS &&
 	    vif->type != NL80211_IFTYPE_ADHOC)
 		return -EOPNOTSUPP;
 
@@ -5330,7 +5329,7 @@ static void b43_supported_bands(struct b43_wldev *dev, bool *have_2ghz_phy,
 		/* There are 14e4:4321 PCI devs with 2.4 GHz BCM4321 (N-PHY) */
 		if (dev->phy.type != B43_PHYTYPE_G)
 			break;
-		fallthrough;
+		/* fall through */
 	case 0x4313: /* BCM4311 */
 	case 0x431a: /* BCM4318 */
 	case 0x432a: /* BCM4321 */
@@ -5570,11 +5569,14 @@ static struct b43_wl *b43_wireless_init(struct b43_bus_dev *dev)
 	/* fill hw info */
 	ieee80211_hw_set(hw, RX_INCLUDES_FCS);
 	ieee80211_hw_set(hw, SIGNAL_DBM);
-	ieee80211_hw_set(hw, MFP_CAPABLE);
+
 	hw->wiphy->interface_modes =
 		BIT(NL80211_IFTYPE_AP) |
 		BIT(NL80211_IFTYPE_MESH_POINT) |
 		BIT(NL80211_IFTYPE_STATION) |
+#ifdef CONFIG_WIRELESS_WDS
+		BIT(NL80211_IFTYPE_WDS) |
+#endif
 		BIT(NL80211_IFTYPE_ADHOC);
 
 	hw->wiphy->flags |= WIPHY_FLAG_IBSS_RSN;

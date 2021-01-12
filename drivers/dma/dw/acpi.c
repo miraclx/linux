@@ -41,7 +41,6 @@ void dw_dma_acpi_controller_register(struct dw_dma *dw)
 	if (ret)
 		dev_err(dev, "could not register acpi_dma_controller\n");
 }
-EXPORT_SYMBOL_GPL(dw_dma_acpi_controller_register);
 
 void dw_dma_acpi_controller_free(struct dw_dma *dw)
 {
@@ -52,4 +51,3 @@ void dw_dma_acpi_controller_free(struct dw_dma *dw)
 
 	acpi_dma_controller_free(dev);
 }
-EXPORT_SYMBOL_GPL(dw_dma_acpi_controller_free);

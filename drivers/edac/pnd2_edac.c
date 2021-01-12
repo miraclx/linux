@@ -198,7 +198,7 @@ static int apl_rd_reg(int port, int off, int op, void *data, size_t sz, char *na
 	switch (sz) {
 	case 8:
 		ret = _apl_rd_reg(port, off + 4, op, (u32 *)(data + 4));
-		fallthrough;
+		/* fall through */
 	case 4:
 		ret |= _apl_rd_reg(port, off, op, (u32 *)data);
 		pnd2_printk(KERN_DEBUG, "%s=%x%08x ret=%d\n", name,
@@ -1155,7 +1155,7 @@ static void pnd2_mce_output_error(struct mem_ctl_info *mci, const struct mce *m,
 	u32 optypenum = GET_BITFIELD(m->status, 4, 6);
 	int rc;
 
-	tp_event = uc_err ? (ripv ? HW_EVENT_ERR_UNCORRECTED : HW_EVENT_ERR_FATAL) :
+	tp_event = uc_err ? (ripv ? HW_EVENT_ERR_FATAL : HW_EVENT_ERR_UNCORRECTED) :
 						 HW_EVENT_ERR_CORRECTED;
 
 	/*
@@ -1396,8 +1396,11 @@ static int pnd2_mce_check_error(struct notifier_block *nb, unsigned long val, vo
 	struct dram_addr daddr;
 	char *type;
 
+	if (edac_get_report_status() == EDAC_REPORTING_DISABLED)
+		return NOTIFY_DONE;
+
 	mci = pnd2_mci;
-	if (!mci || (mce->kflags & MCE_HANDLED_CEC))
+	if (!mci)
 		return NOTIFY_DONE;
 
 	/*
@@ -1426,13 +1429,11 @@ static int pnd2_mce_check_error(struct notifier_block *nb, unsigned long val, vo
 	pnd2_mce_output_error(mci, mce, &daddr);
 
 	/* Advice mcelog that the error were handled */
-	mce->kflags |= MCE_HANDLED_EDAC;
-	return NOTIFY_OK;
+	return NOTIFY_STOP;
 }
 
 static struct notifier_block pnd2_mce_dec = {
 	.notifier_call	= pnd2_mce_check_error,
-	.priority	= MCE_PRIO_EDAC,
 };
 
 #ifdef CONFIG_EDAC_DEBUG

@@ -8,7 +8,6 @@
 
 #define pr_fmt(fmt) "CPUidle arm: " fmt
 
-#include <linux/cpu_cooling.h>
 #include <linux/cpuidle.h>
 #include <linux/cpumask.h>
 #include <linux/cpu_pm.h>
@@ -124,8 +123,6 @@ static int __init arm_idle_init_cpu(int cpu)
 	ret = cpuidle_register(drv, NULL);
 	if (ret)
 		goto out_kfree_drv;
-
-	cpuidle_cooling_register(drv);
 
 	return 0;
 

@@ -235,7 +235,7 @@ static int sunxi_wdt_probe(struct platform_device *pdev)
 
 	sunxi_wdt = devm_kzalloc(dev, sizeof(*sunxi_wdt), GFP_KERNEL);
 	if (!sunxi_wdt)
-		return -ENOMEM;
+		return -EINVAL;
 
 	sunxi_wdt->wdt_regs = of_device_get_match_data(dev);
 	if (!sunxi_wdt->wdt_regs)

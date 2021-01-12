@@ -38,14 +38,11 @@
 #define HINIC_SQ_WQEBB_SIZE                     64
 #define HINIC_RQ_WQEBB_SIZE                     32
 
-#define HINIC_SQ_PAGE_SIZE                      SZ_256K
-#define HINIC_RQ_PAGE_SIZE                      SZ_256K
+#define HINIC_SQ_PAGE_SIZE                      SZ_4K
+#define HINIC_RQ_PAGE_SIZE                      SZ_4K
 
 #define HINIC_SQ_DEPTH                          SZ_4K
 #define HINIC_RQ_DEPTH                          SZ_4K
-
-#define HINIC_MAX_QUEUE_DEPTH			SZ_4K
-#define HINIC_MIN_QUEUE_DEPTH			128
 
 /* In any change to HINIC_RX_BUF_SZ, HINIC_RX_BUF_SZ_IDX must be changed */
 #define HINIC_RX_BUF_SZ                         2048
@@ -81,8 +78,6 @@ struct hinic_sq {
 
 	struct hinic_wq         *wq;
 
-	u16			qid;
-
 	u32                     irq;
 	u16                     msix_entry;
 
@@ -92,15 +87,12 @@ struct hinic_sq {
 	void __iomem            *db_base;
 
 	struct sk_buff          **saved_skb;
-	struct hinic_debug_priv	*dbg;
 };
 
 struct hinic_rq {
 	struct hinic_hwif       *hwif;
 
 	struct hinic_wq         *wq;
-
-	u16			qid;
 
 	struct cpumask		affinity_mask;
 	u32                     irq;
@@ -115,7 +107,6 @@ struct hinic_rq {
 
 	u16                     *pi_virt_addr;
 	dma_addr_t              pi_dma_addr;
-	struct hinic_debug_priv	*dbg;
 };
 
 struct hinic_qp {

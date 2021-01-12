@@ -29,6 +29,7 @@
 #include <asm/bootinfo.h>
 #include <asm/bootinfo-vme.h>
 #include <asm/byteorder.h>
+#include <asm/pgtable.h>
 #include <asm/setup.h>
 #include <asm/irq.h>
 #include <asm/traps.h>
@@ -37,7 +38,7 @@
 
 
 static void mvme147_get_model(char *model);
-extern void mvme147_sched_init(void);
+extern void mvme147_sched_init(irq_handler_t handler);
 extern int mvme147_hwclk (int, struct rtc_time *);
 extern void mvme147_reset (void);
 
@@ -80,6 +81,7 @@ void __init mvme147_init_IRQ(void)
 
 void __init config_mvme147(void)
 {
+	mach_max_dma_address	= 0x01000000;
 	mach_sched_init		= mvme147_sched_init;
 	mach_init_IRQ		= mvme147_init_IRQ;
 	mach_hwclk		= mvme147_hwclk;
@@ -111,23 +113,24 @@ static u32 clk_total;
 
 static irqreturn_t mvme147_timer_int (int irq, void *dev_id)
 {
+	irq_handler_t timer_routine = dev_id;
 	unsigned long flags;
 
 	local_irq_save(flags);
 	m147_pcc->t1_int_cntrl = PCC_TIMER_INT_CLR;
 	m147_pcc->t1_cntrl = PCC_TIMER_CLR_OVF;
 	clk_total += PCC_TIMER_CYCLES;
-	legacy_timer_tick(1);
+	timer_routine(0, NULL);
 	local_irq_restore(flags);
 
 	return IRQ_HANDLED;
 }
 
 
-void mvme147_sched_init (void)
+void mvme147_sched_init (irq_handler_t timer_routine)
 {
 	if (request_irq(PCC_IRQ_TIMER1, mvme147_timer_int, IRQF_TIMER,
-			"timer 1", NULL))
+			"timer 1", timer_routine))
 		pr_err("Couldn't register timer interrupt\n");
 
 	/* Init the clock with a value */

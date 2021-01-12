@@ -11,7 +11,7 @@
 
 #include "a5xx_gpu.h"
 
-static void pfp_print(struct msm_gpu *gpu, struct drm_printer *p)
+static int pfp_print(struct msm_gpu *gpu, struct drm_printer *p)
 {
 	int i;
 
@@ -22,9 +22,11 @@ static void pfp_print(struct msm_gpu *gpu, struct drm_printer *p)
 		drm_printf(p, "  %02x: %08x\n", i,
 			gpu_read(gpu, REG_A5XX_CP_PFP_STAT_DATA));
 	}
+
+	return 0;
 }
 
-static void me_print(struct msm_gpu *gpu, struct drm_printer *p)
+static int me_print(struct msm_gpu *gpu, struct drm_printer *p)
 {
 	int i;
 
@@ -35,9 +37,11 @@ static void me_print(struct msm_gpu *gpu, struct drm_printer *p)
 		drm_printf(p, "  %02x: %08x\n", i,
 			gpu_read(gpu, REG_A5XX_CP_ME_STAT_DATA));
 	}
+
+	return 0;
 }
 
-static void meq_print(struct msm_gpu *gpu, struct drm_printer *p)
+static int meq_print(struct msm_gpu *gpu, struct drm_printer *p)
 {
 	int i;
 
@@ -48,9 +52,11 @@ static void meq_print(struct msm_gpu *gpu, struct drm_printer *p)
 		drm_printf(p, "  %02x: %08x\n", i,
 			gpu_read(gpu, REG_A5XX_CP_MEQ_DBG_DATA));
 	}
+
+	return 0;
 }
 
-static void roq_print(struct msm_gpu *gpu, struct drm_printer *p)
+static int roq_print(struct msm_gpu *gpu, struct drm_printer *p)
 {
 	int i;
 
@@ -65,6 +71,8 @@ static void roq_print(struct msm_gpu *gpu, struct drm_printer *p)
 		drm_printf(p, "  %02x: %08x %08x %08x %08x\n", i,
 			val[0], val[1], val[2], val[3]);
 	}
+
+	return 0;
 }
 
 static int show(struct seq_file *m, void *arg)
@@ -73,11 +81,10 @@ static int show(struct seq_file *m, void *arg)
 	struct drm_device *dev = node->minor->dev;
 	struct msm_drm_private *priv = dev->dev_private;
 	struct drm_printer p = drm_seq_file_printer(m);
-	void (*show)(struct msm_gpu *gpu, struct drm_printer *p) =
+	int (*show)(struct msm_gpu *gpu, struct drm_printer *p) =
 		node->info_ent->data;
 
-	show(priv->gpu, &p);
-	return 0;
+	return show(priv->gpu, &p);
 }
 
 #define ENT(n) { .name = #n, .show = show, .data = n ##_print }
@@ -117,13 +124,13 @@ reset_set(void *data, u64 val)
 
 	if (a5xx_gpu->pm4_bo) {
 		msm_gem_unpin_iova(a5xx_gpu->pm4_bo, gpu->aspace);
-		drm_gem_object_put_locked(a5xx_gpu->pm4_bo);
+		drm_gem_object_put(a5xx_gpu->pm4_bo);
 		a5xx_gpu->pm4_bo = NULL;
 	}
 
 	if (a5xx_gpu->pfp_bo) {
 		msm_gem_unpin_iova(a5xx_gpu->pfp_bo, gpu->aspace);
-		drm_gem_object_put_locked(a5xx_gpu->pfp_bo);
+		drm_gem_object_put(a5xx_gpu->pfp_bo);
 		a5xx_gpu->pfp_bo = NULL;
 	}
 
@@ -141,19 +148,27 @@ reset_set(void *data, u64 val)
 DEFINE_SIMPLE_ATTRIBUTE(reset_fops, NULL, reset_set, "%llx\n");
 
 
-void a5xx_debugfs_init(struct msm_gpu *gpu, struct drm_minor *minor)
+int a5xx_debugfs_init(struct msm_gpu *gpu, struct drm_minor *minor)
 {
 	struct drm_device *dev;
+	int ret;
 
 	if (!minor)
-		return;
+		return 0;
 
 	dev = minor->dev;
 
-	drm_debugfs_create_files(a5xx_debugfs_list,
-				 ARRAY_SIZE(a5xx_debugfs_list),
-				 minor->debugfs_root, minor);
+	ret = drm_debugfs_create_files(a5xx_debugfs_list,
+			ARRAY_SIZE(a5xx_debugfs_list),
+			minor->debugfs_root, minor);
+
+	if (ret) {
+		DRM_DEV_ERROR(dev->dev, "could not install a5xx_debugfs_list\n");
+		return ret;
+	}
 
 	debugfs_create_file("reset", S_IWUGO, minor->debugfs_root, dev,
 			    &reset_fops);
+
+	return 0;
 }

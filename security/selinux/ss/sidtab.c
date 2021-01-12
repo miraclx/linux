@@ -54,15 +54,14 @@ int sidtab_init(struct sidtab *s)
 	return 0;
 }
 
-static u32 context_to_sid(struct sidtab *s, struct context *context, u32 hash)
+static u32 context_to_sid(struct sidtab *s, struct context *context)
 {
 	struct sidtab_entry *entry;
 	u32 sid = 0;
 
 	rcu_read_lock();
-	hash_for_each_possible_rcu(s->context_to_sid, entry, list, hash) {
-		if (entry->hash != hash)
-			continue;
+	hash_for_each_possible_rcu(s->context_to_sid, entry, list,
+				   context->hash) {
 		if (context_cmp(&entry->context, context)) {
 			sid = entry->sid;
 			break;
@@ -75,7 +74,6 @@ static u32 context_to_sid(struct sidtab *s, struct context *context, u32 hash)
 int sidtab_set_initial(struct sidtab *s, u32 sid, struct context *context)
 {
 	struct sidtab_isid_entry *isid;
-	u32 hash;
 	int rc;
 
 	if (sid == 0 || sid > SECINITSID_NUM)
@@ -92,18 +90,15 @@ int sidtab_set_initial(struct sidtab *s, u32 sid, struct context *context)
 #endif
 	isid->set = 1;
 
-	hash = context_compute_hash(context);
-
 	/*
 	 * Multiple initial sids may map to the same context. Check that this
 	 * context is not already represented in the context_to_sid hashtable
 	 * to avoid duplicate entries and long linked lists upon hash
 	 * collision.
 	 */
-	if (!context_to_sid(s, context, hash)) {
+	if (!context_to_sid(s, context)) {
 		isid->entry.sid = sid;
-		isid->entry.hash = hash;
-		hash_add(s->context_to_sid, &isid->entry.list, hash);
+		hash_add(s->context_to_sid, &isid->entry.list, context->hash);
 	}
 
 	return 0;
@@ -264,12 +259,12 @@ int sidtab_context_to_sid(struct sidtab *s, struct context *context,
 			  u32 *sid)
 {
 	unsigned long flags;
-	u32 count, hash = context_compute_hash(context);
+	u32 count;
 	struct sidtab_convert_params *convert;
 	struct sidtab_entry *dst, *dst_convert;
 	int rc;
 
-	*sid = context_to_sid(s, context, hash);
+	*sid = context_to_sid(s, context);
 	if (*sid)
 		return 0;
 
@@ -277,11 +272,12 @@ int sidtab_context_to_sid(struct sidtab *s, struct context *context,
 	spin_lock_irqsave(&s->lock, flags);
 
 	rc = 0;
-	*sid = context_to_sid(s, context, hash);
+	*sid = context_to_sid(s, context);
 	if (*sid)
 		goto out_unlock;
 
-	count = s->count;
+	/* read entries only after reading count */
+	count = smp_load_acquire(&s->count);
 	convert = s->convert;
 
 	/* bail out if we already reached max entries */
@@ -296,7 +292,6 @@ int sidtab_context_to_sid(struct sidtab *s, struct context *context,
 		goto out_unlock;
 
 	dst->sid = index_to_sid(count);
-	dst->hash = hash;
 
 	rc = context_cpy(&dst->context, context);
 	if (rc)
@@ -321,11 +316,10 @@ int sidtab_context_to_sid(struct sidtab *s, struct context *context,
 			goto out_unlock;
 		}
 		dst_convert->sid = index_to_sid(count);
-		dst_convert->hash = context_compute_hash(&dst_convert->context);
 		convert->target->count = count + 1;
 
 		hash_add_rcu(convert->target->context_to_sid,
-			     &dst_convert->list, dst_convert->hash);
+			     &dst_convert->list, dst_convert->context.hash);
 	}
 
 	if (context->len)
@@ -336,7 +330,7 @@ int sidtab_context_to_sid(struct sidtab *s, struct context *context,
 
 	/* write entries before updating count */
 	smp_store_release(&s->count, count + 1);
-	hash_add_rcu(s->context_to_sid, &dst->list, dst->hash);
+	hash_add_rcu(s->context_to_sid, &dst->list, dst->context.hash);
 
 	rc = 0;
 out_unlock:
@@ -352,9 +346,10 @@ static void sidtab_convert_hashtable(struct sidtab *s, u32 count)
 	for (i = 0; i < count; i++) {
 		entry = sidtab_do_lookup(s, i, 0);
 		entry->sid = index_to_sid(i);
-		entry->hash = context_compute_hash(&entry->context);
 
-		hash_add_rcu(s->context_to_sid, &entry->list, entry->hash);
+		hash_add_rcu(s->context_to_sid, &entry->list,
+			     entry->context.hash);
+
 	}
 }
 
@@ -462,16 +457,6 @@ int sidtab_convert(struct sidtab *s, struct sidtab_convert_params *params)
 	spin_unlock_irqrestore(&s->lock, flags);
 
 	return 0;
-}
-
-void sidtab_cancel_convert(struct sidtab *s)
-{
-	unsigned long flags;
-
-	/* cancelling policy load - disable live convert of sidtab */
-	spin_lock_irqsave(&s->lock, flags);
-	s->convert = NULL;
-	spin_unlock_irqrestore(&s->lock, flags);
 }
 
 static void sidtab_destroy_entry(struct sidtab_entry *entry)

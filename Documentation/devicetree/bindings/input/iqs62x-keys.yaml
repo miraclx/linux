@@ -30,9 +30,10 @@ properties:
       - azoteq,iqs625-keys
 
   linux,keycodes:
-    $ref: /schemas/types.yaml#/definitions/uint32-array
-    minItems: 1
-    maxItems: 16
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/uint32-array
+      - minItems: 1
+        maxItems: 16
     description: |
       Specifies the numeric keycodes associated with each available touch or
       proximity event according to the following table. An 'x' indicates the

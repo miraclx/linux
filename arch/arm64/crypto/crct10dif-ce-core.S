@@ -66,7 +66,7 @@
 #include <asm/assembler.h>
 
 	.text
-	.arch		armv8-a+crypto
+	.cpu		generic+crypto
 
 	init_crc	.req	w19
 	buf		.req	x20

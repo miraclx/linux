@@ -193,6 +193,7 @@ MODULE_DEVICE_TABLE(of, vt8500_pwm_dt_ids);
 static int vt8500_pwm_probe(struct platform_device *pdev)
 {
 	struct vt8500_chip *chip;
+	struct resource *r;
 	struct device_node *np = pdev->dev.of_node;
 	int ret;
 
@@ -218,7 +219,8 @@ static int vt8500_pwm_probe(struct platform_device *pdev)
 		return PTR_ERR(chip->clk);
 	}
 
-	chip->base = devm_platform_ioremap_resource(pdev, 0);
+	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	chip->base = devm_ioremap_resource(&pdev->dev, r);
 	if (IS_ERR(chip->base))
 		return PTR_ERR(chip->base);
 

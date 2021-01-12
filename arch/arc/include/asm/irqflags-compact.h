@@ -90,9 +90,6 @@ static inline void arch_local_irq_restore(unsigned long flags)
 /*
  * Unconditionally Enable IRQs
  */
-#ifdef CONFIG_ARC_COMPACT_IRQ_LEVELS
-extern void arch_local_irq_enable(void);
-#else
 static inline void arch_local_irq_enable(void)
 {
 	unsigned long temp;
@@ -105,7 +102,7 @@ static inline void arch_local_irq_enable(void)
 	: "n"((STATUS_E1_MASK | STATUS_E2_MASK))
 	: "cc", "memory");
 }
-#endif
+
 
 /*
  * Unconditionally Disable IRQs

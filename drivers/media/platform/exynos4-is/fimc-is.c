@@ -12,6 +12,7 @@
 #include <linux/device.h>
 #include <linux/debugfs.h>
 #include <linux/delay.h>
+#include <linux/dma-contiguous.h>
 #include <linux/errno.h>
 #include <linux/firmware.h>
 #include <linux/interrupt.h>
@@ -268,7 +269,7 @@ int fimc_is_cpu_set_power(struct fimc_is *is, int on)
 		mcuctl_write(0, is, REG_WDT_ISP);
 
 		/* Cortex-A5 start address setting */
-		mcuctl_write(is->memory.addr, is, MCUCTL_REG_BBOAR);
+		mcuctl_write(is->memory.paddr, is, MCUCTL_REG_BBOAR);
 
 		/* Enable and start Cortex-A5 */
 		pmuisp_write(0x18000, is, REG_PMU_ISP_ARM_OPTION);
@@ -335,26 +336,26 @@ static int fimc_is_alloc_cpu_memory(struct fimc_is *is)
 	struct device *dev = &is->pdev->dev;
 
 	is->memory.vaddr = dma_alloc_coherent(dev, FIMC_IS_CPU_MEM_SIZE,
-					      &is->memory.addr, GFP_KERNEL);
+					      &is->memory.paddr, GFP_KERNEL);
 	if (is->memory.vaddr == NULL)
 		return -ENOMEM;
 
 	is->memory.size = FIMC_IS_CPU_MEM_SIZE;
 
-	dev_info(dev, "FIMC-IS CPU memory base: %pad\n", &is->memory.addr);
+	dev_info(dev, "FIMC-IS CPU memory base: %#x\n", (u32)is->memory.paddr);
 
-	if (((u32)is->memory.addr) & FIMC_IS_FW_ADDR_MASK) {
+	if (((u32)is->memory.paddr) & FIMC_IS_FW_ADDR_MASK) {
 		dev_err(dev, "invalid firmware memory alignment: %#x\n",
-			(u32)is->memory.addr);
+			(u32)is->memory.paddr);
 		dma_free_coherent(dev, is->memory.size, is->memory.vaddr,
-				  is->memory.addr);
+				  is->memory.paddr);
 		return -EIO;
 	}
 
 	is->is_p_region = (struct is_region *)(is->memory.vaddr +
 				FIMC_IS_CPU_MEM_SIZE - FIMC_IS_REGION_SIZE);
 
-	is->is_dma_p_region = is->memory.addr +
+	is->is_dma_p_region = is->memory.paddr +
 				FIMC_IS_CPU_MEM_SIZE - FIMC_IS_REGION_SIZE;
 
 	is->is_shared_region = (struct is_share_region *)(is->memory.vaddr +
@@ -370,7 +371,7 @@ static void fimc_is_free_cpu_memory(struct fimc_is *is)
 		return;
 
 	dma_free_coherent(dev, is->memory.size, is->memory.vaddr,
-			  is->memory.addr);
+			  is->memory.paddr);
 }
 
 static void fimc_is_load_firmware(const struct firmware *fw, void *context)
@@ -415,7 +416,7 @@ static void fimc_is_load_firmware(const struct firmware *fw, void *context)
 
 	dev_info(dev, "loaded firmware: %s, rev. %s\n",
 		 is->fw.info, is->fw.version);
-	dev_dbg(dev, "FW size: %zu, DMA addr: %pad\n", fw->size, &is->memory.addr);
+	dev_dbg(dev, "FW size: %zu, paddr: %pad\n", fw->size, &is->memory.paddr);
 
 	is->is_shared_region->chip_id = 0xe4412;
 	is->is_shared_region->chip_rev_no = 1;
@@ -698,7 +699,7 @@ int fimc_is_hw_initialize(struct fimc_is *is)
 	}
 
 	pr_debug("shared region: %pad, parameter region: %pad\n",
-		 &is->memory.addr + FIMC_IS_SHARED_REGION_OFFSET,
+		 &is->memory.paddr + FIMC_IS_SHARED_REGION_OFFSET,
 		 &is->is_dma_p_region);
 
 	is->setfile.sub_index = 0;
@@ -755,12 +756,18 @@ static void fimc_is_debugfs_remove(struct fimc_is *is)
 	is->debugfs_entry = NULL;
 }
 
-static void fimc_is_debugfs_create(struct fimc_is *is)
+static int fimc_is_debugfs_create(struct fimc_is *is)
 {
+	struct dentry *dentry;
+
 	is->debugfs_entry = debugfs_create_dir("fimc_is", NULL);
 
-	debugfs_create_file("fw_log", S_IRUGO, is->debugfs_entry, is,
-			    &fimc_is_fops);
+	dentry = debugfs_create_file("fw_log", S_IRUGO, is->debugfs_entry,
+				     is, &fimc_is_fops);
+	if (!dentry)
+		fimc_is_debugfs_remove(is);
+
+	return is->debugfs_entry == NULL ? -EIO : 0;
 }
 
 static int fimc_is_runtime_resume(struct device *dev);
@@ -846,7 +853,9 @@ static int fimc_is_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto err_pm;
 
-	fimc_is_debugfs_create(is);
+	ret = fimc_is_debugfs_create(is);
+	if (ret < 0)
+		goto err_sd;
 
 	ret = fimc_is_request_firmware(is, FIMC_IS_FW_FILENAME);
 	if (ret < 0)
@@ -859,9 +868,9 @@ static int fimc_is_probe(struct platform_device *pdev)
 
 err_dfs:
 	fimc_is_debugfs_remove(is);
+err_sd:
 	fimc_is_unregister_subdevs(is);
 err_pm:
-	pm_runtime_put_noidle(dev);
 	if (!pm_runtime_enabled(dev))
 		fimc_is_runtime_suspend(dev);
 err_irq:

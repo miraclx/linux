@@ -55,7 +55,7 @@ static int can_rx_offload_napi_poll(struct napi_struct *napi, int quota)
 
 		work_done++;
 		stats->rx_packets++;
-		stats->rx_bytes += cf->len;
+		stats->rx_bytes += cf->can_dlc;
 		netif_receive_skb(skb);
 	}
 
@@ -157,7 +157,7 @@ can_rx_offload_offload_one(struct can_rx_offload *offload, unsigned int n)
 	/* There was a problem reading the mailbox, propagate
 	 * error value.
 	 */
-	if (IS_ERR(skb)) {
+	if (unlikely(IS_ERR(skb))) {
 		offload->dev->stats.rx_dropped++;
 		offload->dev->stats.rx_fifo_errors++;
 
@@ -245,7 +245,7 @@ int can_rx_offload_queue_sorted(struct can_rx_offload *offload,
 
 	if (skb_queue_len(&offload->skb_queue) >
 	    offload->skb_queue_len_max) {
-		dev_kfree_skb_any(skb);
+		kfree_skb(skb);
 		return -ENOBUFS;
 	}
 
@@ -290,7 +290,7 @@ int can_rx_offload_queue_tail(struct can_rx_offload *offload,
 {
 	if (skb_queue_len(&offload->skb_queue) >
 	    offload->skb_queue_len_max) {
-		dev_kfree_skb_any(skb);
+		kfree_skb(skb);
 		return -ENOBUFS;
 	}
 
@@ -350,17 +350,6 @@ int can_rx_offload_add_fifo(struct net_device *dev,
 	return can_rx_offload_init_queue(dev, offload, weight);
 }
 EXPORT_SYMBOL_GPL(can_rx_offload_add_fifo);
-
-int can_rx_offload_add_manual(struct net_device *dev,
-			      struct can_rx_offload *offload,
-			      unsigned int weight)
-{
-	if (offload->mailbox_read)
-		return -EINVAL;
-
-	return can_rx_offload_init_queue(dev, offload, weight);
-}
-EXPORT_SYMBOL_GPL(can_rx_offload_add_manual);
 
 void can_rx_offload_enable(struct can_rx_offload *offload)
 {

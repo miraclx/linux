@@ -9,12 +9,11 @@
 #include <linux/kallsyms.h>
 #include <linux/kthread.h>
 #include <linux/module.h>
-#include <linux/timer.h>
-#include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/kprobes.h>
 #include <linux/wait.h>
 #include <asm/irq.h>
+#include <asm/delay.h>
 
 #define BT_BUF_SIZE (PAGE_SIZE * 4)
 
@@ -64,7 +63,6 @@ static noinline int test_unwind(struct task_struct *task, struct pt_regs *regs,
 			break;
 		if (state.reliable && !addr) {
 			pr_err("unwind state reliable but addr is 0\n");
-			kfree(bt);
 			return -EINVAL;
 		}
 		sprint_symbol(sym, addr);
@@ -205,15 +203,12 @@ static noinline int unwindme_func3(struct unwindme *u)
 /* This function must appear in the backtrace. */
 static noinline int unwindme_func2(struct unwindme *u)
 {
-	unsigned long flags;
 	int rc;
 
 	if (u->flags & UWM_SWITCH_STACK) {
-		local_irq_save(flags);
-		local_mcck_disable();
+		preempt_disable();
 		rc = CALL_ON_STACK(unwindme_func3, S390_lowcore.nodat_stack, 1, u);
-		local_mcck_enable();
-		local_irq_restore(flags);
+		preempt_enable();
 		return rc;
 	} else {
 		return unwindme_func3(u);
@@ -226,27 +221,31 @@ static noinline int unwindme_func1(void *u)
 	return unwindme_func2((struct unwindme *)u);
 }
 
-static void unwindme_timer_fn(struct timer_list *unused)
+static void unwindme_irq_handler(struct ext_code ext_code,
+				       unsigned int param32,
+				       unsigned long param64)
 {
 	struct unwindme *u = READ_ONCE(unwindme);
 
-	if (u) {
+	if (u && u->task == current) {
 		unwindme = NULL;
 		u->task = NULL;
 		u->ret = unwindme_func1(u);
-		complete(&u->task_ready);
 	}
 }
 
-static struct timer_list unwind_timer;
-
 static int test_unwind_irq(struct unwindme *u)
 {
+	preempt_disable();
+	if (register_external_irq(EXT_IRQ_CLK_COMP, unwindme_irq_handler)) {
+		pr_info("Couldn't register external interrupt handler");
+		return -1;
+	}
+	u->task = current;
 	unwindme = u;
-	init_completion(&u->task_ready);
-	timer_setup(&unwind_timer, unwindme_timer_fn, 0);
-	mod_timer(&unwind_timer, jiffies + 1);
-	wait_for_completion(&u->task_ready);
+	udelay(1);
+	unregister_external_irq(EXT_IRQ_CLK_COMP, unwindme_irq_handler);
+	preempt_enable();
 	return u->ret;
 }
 

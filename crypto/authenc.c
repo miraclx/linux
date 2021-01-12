@@ -372,6 +372,7 @@ static void crypto_authenc_free(struct aead_instance *inst)
 static int crypto_authenc_create(struct crypto_template *tmpl,
 				 struct rtattr **tb)
 {
+	struct crypto_attr_type *algt;
 	u32 mask;
 	struct aead_instance *inst;
 	struct authenc_instance_ctx *ctx;
@@ -380,9 +381,14 @@ static int crypto_authenc_create(struct crypto_template *tmpl,
 	struct skcipher_alg *enc;
 	int err;
 
-	err = crypto_check_attr_type(tb, CRYPTO_ALG_TYPE_AEAD, &mask);
-	if (err)
-		return err;
+	algt = crypto_get_attr_type(tb);
+	if (IS_ERR(algt))
+		return PTR_ERR(algt);
+
+	if ((algt->type ^ CRYPTO_ALG_TYPE_AEAD) & algt->mask)
+		return -EINVAL;
+
+	mask = crypto_requires_sync(algt->type, algt->mask);
 
 	inst = kzalloc(sizeof(*inst) + sizeof(*ctx), GFP_KERNEL);
 	if (!inst)
@@ -417,6 +423,8 @@ static int crypto_authenc_create(struct crypto_template *tmpl,
 		     enc->base.cra_driver_name) >= CRYPTO_MAX_ALG_NAME)
 		goto err_free_inst;
 
+	inst->alg.base.cra_flags = (auth_base->cra_flags |
+				    enc->base.cra_flags) & CRYPTO_ALG_ASYNC;
 	inst->alg.base.cra_priority = enc->base.cra_priority * 10 +
 				      auth_base->cra_priority;
 	inst->alg.base.cra_blocksize = enc->base.cra_blocksize;

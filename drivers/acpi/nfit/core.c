@@ -5,7 +5,6 @@
 #include <linux/list_sort.h>
 #include <linux/libnvdimm.h>
 #include <linux/module.h>
-#include <linux/nospec.h>
 #include <linux/mutex.h>
 #include <linux/ndctl.h>
 #include <linux/sysfs.h>
@@ -73,18 +72,6 @@ const guid_t *to_nfit_uuid(enum nfit_uuids id)
 	return &nfit_uuid[id];
 }
 EXPORT_SYMBOL(to_nfit_uuid);
-
-static const guid_t *to_nfit_bus_uuid(int family)
-{
-	if (WARN_ONCE(family == NVDIMM_BUS_FAMILY_NFIT,
-			"only secondary bus families can be translated\n"))
-		return NULL;
-	/*
-	 * The index of bus UUIDs starts immediately following the last
-	 * NVDIMM/leaf family.
-	 */
-	return to_nfit_uuid(family + NVDIMM_FAMILY_MAX);
-}
 
 static struct acpi_device *to_acpi_dev(struct acpi_nfit_desc *acpi_desc)
 {
@@ -283,18 +270,17 @@ err:
 
 static union acpi_object *int_to_buf(union acpi_object *integer)
 {
-	union acpi_object *buf = NULL;
+	union acpi_object *buf = ACPI_ALLOCATE(sizeof(*buf) + 4);
 	void *dst = NULL;
+
+	if (!buf)
+		goto err;
 
 	if (integer->type != ACPI_TYPE_INTEGER) {
 		WARN_ONCE(1, "BIOS bug, unexpected element type: %d\n",
 				integer->type);
 		goto err;
 	}
-
-	buf = ACPI_ALLOCATE(sizeof(*buf) + 4);
-	if (!buf)
-		goto err;
 
 	dst = buf + 1;
 	buf->type = ACPI_TYPE_BUFFER;
@@ -376,8 +362,24 @@ static u8 nfit_dsm_revid(unsigned family, unsigned func)
 {
 	static const u8 revid_table[NVDIMM_FAMILY_MAX+1][NVDIMM_CMD_MAX+1] = {
 		[NVDIMM_FAMILY_INTEL] = {
-			[NVDIMM_INTEL_GET_MODES ...
-				NVDIMM_INTEL_FW_ACTIVATE_ARM] = 2,
+			[NVDIMM_INTEL_GET_MODES] = 2,
+			[NVDIMM_INTEL_GET_FWINFO] = 2,
+			[NVDIMM_INTEL_START_FWUPDATE] = 2,
+			[NVDIMM_INTEL_SEND_FWUPDATE] = 2,
+			[NVDIMM_INTEL_FINISH_FWUPDATE] = 2,
+			[NVDIMM_INTEL_QUERY_FWUPDATE] = 2,
+			[NVDIMM_INTEL_SET_THRESHOLD] = 2,
+			[NVDIMM_INTEL_INJECT_ERROR] = 2,
+			[NVDIMM_INTEL_GET_SECURITY_STATE] = 2,
+			[NVDIMM_INTEL_SET_PASSPHRASE] = 2,
+			[NVDIMM_INTEL_DISABLE_PASSPHRASE] = 2,
+			[NVDIMM_INTEL_UNLOCK_UNIT] = 2,
+			[NVDIMM_INTEL_FREEZE_LOCK] = 2,
+			[NVDIMM_INTEL_SECURE_ERASE] = 2,
+			[NVDIMM_INTEL_OVERWRITE] = 2,
+			[NVDIMM_INTEL_QUERY_OVERWRITE] = 2,
+			[NVDIMM_INTEL_SET_MASTER_PASSPHRASE] = 2,
+			[NVDIMM_INTEL_MASTER_SECURE_ERASE] = 2,
 		},
 	};
 	u8 id;
@@ -404,7 +406,7 @@ static bool payload_dumpable(struct nvdimm *nvdimm, unsigned int func)
 }
 
 static int cmd_to_func(struct nfit_mem *nfit_mem, unsigned int cmd,
-		struct nd_cmd_pkg *call_pkg, int *family)
+		struct nd_cmd_pkg *call_pkg)
 {
 	if (call_pkg) {
 		int i;
@@ -415,7 +417,6 @@ static int cmd_to_func(struct nfit_mem *nfit_mem, unsigned int cmd,
 		for (i = 0; i < ARRAY_SIZE(call_pkg->nd_reserved2); i++)
 			if (call_pkg->nd_reserved2[i])
 				return -EINVAL;
-		*family = call_pkg->nd_family;
 		return call_pkg->nd_command;
 	}
 
@@ -449,14 +450,13 @@ int acpi_nfit_ctl(struct nvdimm_bus_descriptor *nd_desc, struct nvdimm *nvdimm,
 	acpi_handle handle;
 	const guid_t *guid;
 	int func, rc, i;
-	int family = 0;
 
 	if (cmd_rc)
 		*cmd_rc = -EINVAL;
 
 	if (cmd == ND_CMD_CALL)
 		call_pkg = buf;
-	func = cmd_to_func(nfit_mem, cmd, call_pkg, &family);
+	func = cmd_to_func(nfit_mem, cmd, call_pkg);
 	if (func < 0)
 		return func;
 
@@ -478,20 +478,9 @@ int acpi_nfit_ctl(struct nvdimm_bus_descriptor *nd_desc, struct nvdimm *nvdimm,
 
 		cmd_name = nvdimm_bus_cmd_name(cmd);
 		cmd_mask = nd_desc->cmd_mask;
-		if (cmd == ND_CMD_CALL && call_pkg->nd_family) {
-			family = call_pkg->nd_family;
-			if (family > NVDIMM_BUS_FAMILY_MAX ||
-			    !test_bit(family, &nd_desc->bus_family_mask))
-				return -EINVAL;
-			family = array_index_nospec(family,
-						    NVDIMM_BUS_FAMILY_MAX + 1);
-			dsm_mask = acpi_desc->family_dsm_mask[family];
-			guid = to_nfit_bus_uuid(family);
-		} else {
-			dsm_mask = acpi_desc->bus_dsm_mask;
-			guid = to_nfit_uuid(NFIT_DEV_BUS);
-		}
+		dsm_mask = nd_desc->bus_dsm_mask;
 		desc = nd_cmd_bus_desc(cmd);
+		guid = to_nfit_uuid(NFIT_DEV_BUS);
 		handle = adev->handle;
 		dimm_name = "bus";
 	}
@@ -527,8 +516,8 @@ int acpi_nfit_ctl(struct nvdimm_bus_descriptor *nd_desc, struct nvdimm *nvdimm,
 		in_buf.buffer.length = call_pkg->nd_size_in;
 	}
 
-	dev_dbg(dev, "%s cmd: %d: family: %d func: %d input length: %d\n",
-		dimm_name, cmd, family, func, in_buf.buffer.length);
+	dev_dbg(dev, "%s cmd: %d: func: %d input length: %d\n",
+		dimm_name, cmd, func, in_buf.buffer.length);
 	if (payload_dumpable(nvdimm, func))
 		print_hex_dump_debug("nvdimm in  ", DUMP_PREFIX_OFFSET, 4, 4,
 				in_buf.buffer.pointer,
@@ -1249,9 +1238,8 @@ static ssize_t bus_dsm_mask_show(struct device *dev,
 {
 	struct nvdimm_bus *nvdimm_bus = to_nvdimm_bus(dev);
 	struct nvdimm_bus_descriptor *nd_desc = to_nd_desc(nvdimm_bus);
-	struct acpi_nfit_desc *acpi_desc = to_acpi_desc(nd_desc);
 
-	return sprintf(buf, "%#lx\n", acpi_desc->bus_dsm_mask);
+	return sprintf(buf, "%#lx\n", nd_desc->bus_dsm_mask);
 }
 static struct device_attribute dev_attr_bus_dsm_mask =
 		__ATTR(dsm_mask, 0444, bus_dsm_mask_show, NULL);
@@ -1394,15 +1382,11 @@ static bool ars_supported(struct nvdimm_bus *nvdimm_bus)
 
 static umode_t nfit_visible(struct kobject *kobj, struct attribute *a, int n)
 {
-	struct device *dev = kobj_to_dev(kobj);
+	struct device *dev = container_of(kobj, struct device, kobj);
 	struct nvdimm_bus *nvdimm_bus = to_nvdimm_bus(dev);
 
-	if (a == &dev_attr_scrub.attr)
-		return ars_supported(nvdimm_bus) ? a->mode : 0;
-
-	if (a == &dev_attr_firmware_activate_noidle.attr)
-		return intel_fwa_supported(nvdimm_bus) ? a->mode : 0;
-
+	if (a == &dev_attr_scrub.attr && !ars_supported(nvdimm_bus))
+		return 0;
 	return a->mode;
 }
 
@@ -1411,7 +1395,6 @@ static struct attribute *acpi_nfit_attributes[] = {
 	&dev_attr_scrub.attr,
 	&dev_attr_hw_error_scrub.attr,
 	&dev_attr_bus_dsm_mask.attr,
-	&dev_attr_firmware_activate_noidle.attr,
 	NULL,
 };
 
@@ -1569,7 +1552,7 @@ static ssize_t format1_show(struct device *dev,
 					le16_to_cpu(nfit_dcr->dcr->code));
 			break;
 		}
-		if (rc != -ENXIO)
+		if (rc != ENXIO)
 			break;
 	}
 	mutex_unlock(&acpi_desc->init_mutex);
@@ -1684,7 +1667,7 @@ static struct attribute *acpi_nfit_dimm_attributes[] = {
 static umode_t acpi_nfit_dimm_attr_visible(struct kobject *kobj,
 		struct attribute *a, int n)
 {
-	struct device *dev = kobj_to_dev(kobj);
+	struct device *dev = container_of(kobj, struct device, kobj);
 	struct nvdimm *nvdimm = to_nvdimm(dev);
 	struct nfit_mem *nfit_mem = nvdimm_provider_data(nvdimm);
 
@@ -1840,7 +1823,6 @@ static void populate_shutdown_status(struct nfit_mem *nfit_mem)
 static int acpi_nfit_add_dimm(struct acpi_nfit_desc *acpi_desc,
 		struct nfit_mem *nfit_mem, u32 device_handle)
 {
-	struct nvdimm_bus_descriptor *nd_desc = &acpi_desc->nd_desc;
 	struct acpi_device *adev, *adev_dimm;
 	struct device *dev = acpi_desc->dev;
 	unsigned long dsm_mask, label_mask;
@@ -1852,7 +1834,6 @@ static int acpi_nfit_add_dimm(struct acpi_nfit_desc *acpi_desc,
 	/* nfit test assumes 1:1 relationship between commands and dsms */
 	nfit_mem->dsm_mask = acpi_desc->dimm_cmd_force_en;
 	nfit_mem->family = NVDIMM_FAMILY_INTEL;
-	set_bit(NVDIMM_FAMILY_INTEL, &nd_desc->dimm_family_mask);
 
 	if (dcr->valid_fields & ACPI_NFIT_CONTROL_MFG_INFO_VALID)
 		sprintf(nfit_mem->id, "%04x-%02x-%04x-%08x",
@@ -1905,13 +1886,10 @@ static int acpi_nfit_add_dimm(struct acpi_nfit_desc *acpi_desc,
 	 * Note, that checking for function0 (bit0) tells us if any commands
 	 * are reachable through this GUID.
 	 */
-	clear_bit(NVDIMM_FAMILY_INTEL, &nd_desc->dimm_family_mask);
 	for (i = 0; i <= NVDIMM_FAMILY_MAX; i++)
-		if (acpi_check_dsm(adev_dimm->handle, to_nfit_uuid(i), 1, 1)) {
-			set_bit(i, &nd_desc->dimm_family_mask);
+		if (acpi_check_dsm(adev_dimm->handle, to_nfit_uuid(i), 1, 1))
 			if (family < 0 || i == default_dsm_family)
 				family = i;
-		}
 
 	/* limit the supported commands to those that are publicly documented */
 	nfit_mem->family = family;
@@ -2029,26 +2007,6 @@ static const struct nvdimm_security_ops *acpi_nfit_get_security_ops(int family)
 	}
 }
 
-static const struct nvdimm_fw_ops *acpi_nfit_get_fw_ops(
-		struct nfit_mem *nfit_mem)
-{
-	unsigned long mask;
-	struct acpi_nfit_desc *acpi_desc = nfit_mem->acpi_desc;
-	struct nvdimm_bus_descriptor *nd_desc = &acpi_desc->nd_desc;
-
-	if (!nd_desc->fw_ops)
-		return NULL;
-
-	if (nfit_mem->family != NVDIMM_FAMILY_INTEL)
-		return NULL;
-
-	mask = nfit_mem->dsm_mask & NVDIMM_INTEL_FW_ACTIVATE_CMDMASK;
-	if (mask != NVDIMM_INTEL_FW_ACTIVATE_CMDMASK)
-		return NULL;
-
-	return intel_fw_ops;
-}
-
 static int acpi_nfit_register_dimms(struct acpi_nfit_desc *acpi_desc)
 {
 	struct nfit_mem *nfit_mem;
@@ -2125,8 +2083,7 @@ static int acpi_nfit_register_dimms(struct acpi_nfit_desc *acpi_desc)
 				acpi_nfit_dimm_attribute_groups,
 				flags, cmd_mask, flush ? flush->hint_count : 0,
 				nfit_mem->flush_wpq, &nfit_mem->id[0],
-				acpi_nfit_get_security_ops(nfit_mem->family),
-				acpi_nfit_get_fw_ops(nfit_mem));
+				acpi_nfit_get_security_ops(nfit_mem->family));
 		if (!nvdimm)
 			return -ENOMEM;
 
@@ -2180,33 +2137,22 @@ static int acpi_nfit_register_dimms(struct acpi_nfit_desc *acpi_desc)
  * these commands.
  */
 enum nfit_aux_cmds {
-	NFIT_CMD_TRANSLATE_SPA = 5,
-	NFIT_CMD_ARS_INJECT_SET = 7,
-	NFIT_CMD_ARS_INJECT_CLEAR = 8,
-	NFIT_CMD_ARS_INJECT_GET = 9,
+        NFIT_CMD_TRANSLATE_SPA = 5,
+        NFIT_CMD_ARS_INJECT_SET = 7,
+        NFIT_CMD_ARS_INJECT_CLEAR = 8,
+        NFIT_CMD_ARS_INJECT_GET = 9,
 };
 
 static void acpi_nfit_init_dsms(struct acpi_nfit_desc *acpi_desc)
 {
 	struct nvdimm_bus_descriptor *nd_desc = &acpi_desc->nd_desc;
 	const guid_t *guid = to_nfit_uuid(NFIT_DEV_BUS);
-	unsigned long dsm_mask, *mask;
 	struct acpi_device *adev;
+	unsigned long dsm_mask;
 	int i;
 
-	set_bit(ND_CMD_CALL, &nd_desc->cmd_mask);
-	set_bit(NVDIMM_BUS_FAMILY_NFIT, &nd_desc->bus_family_mask);
-
-	/* enable nfit_test to inject bus command emulation */
-	if (acpi_desc->bus_cmd_force_en) {
-		nd_desc->cmd_mask = acpi_desc->bus_cmd_force_en;
-		mask = &nd_desc->bus_family_mask;
-		if (acpi_desc->family_dsm_mask[NVDIMM_BUS_FAMILY_INTEL]) {
-			set_bit(NVDIMM_BUS_FAMILY_INTEL, mask);
-			nd_desc->fw_ops = intel_bus_fw_ops;
-		}
-	}
-
+	nd_desc->cmd_mask = acpi_desc->bus_cmd_force_en;
+	nd_desc->bus_dsm_mask = acpi_desc->bus_nfit_cmd_force_en;
 	adev = to_acpi_dev(acpi_desc);
 	if (!adev)
 		return;
@@ -2214,6 +2160,7 @@ static void acpi_nfit_init_dsms(struct acpi_nfit_desc *acpi_desc)
 	for (i = ND_CMD_ARS_CAP; i <= ND_CMD_CLEAR_ERROR; i++)
 		if (acpi_check_dsm(adev->handle, guid, 1, 1ULL << i))
 			set_bit(i, &nd_desc->cmd_mask);
+	set_bit(ND_CMD_CALL, &nd_desc->cmd_mask);
 
 	dsm_mask =
 		(1 << ND_CMD_ARS_CAP) |
@@ -2226,20 +2173,7 @@ static void acpi_nfit_init_dsms(struct acpi_nfit_desc *acpi_desc)
 		(1 << NFIT_CMD_ARS_INJECT_GET);
 	for_each_set_bit(i, &dsm_mask, BITS_PER_LONG)
 		if (acpi_check_dsm(adev->handle, guid, 1, 1ULL << i))
-			set_bit(i, &acpi_desc->bus_dsm_mask);
-
-	/* Enumerate allowed NVDIMM_BUS_FAMILY_INTEL commands */
-	dsm_mask = NVDIMM_BUS_INTEL_FW_ACTIVATE_CMDMASK;
-	guid = to_nfit_bus_uuid(NVDIMM_BUS_FAMILY_INTEL);
-	mask = &acpi_desc->family_dsm_mask[NVDIMM_BUS_FAMILY_INTEL];
-	for_each_set_bit(i, &dsm_mask, BITS_PER_LONG)
-		if (acpi_check_dsm(adev->handle, guid, 1, 1ULL << i))
-			set_bit(i, mask);
-
-	if (*mask == dsm_mask) {
-		set_bit(NVDIMM_BUS_FAMILY_INTEL, &nd_desc->bus_family_mask);
-		nd_desc->fw_ops = intel_bus_fw_ops;
-	}
+			set_bit(i, &nd_desc->bus_dsm_mask);
 }
 
 static ssize_t range_index_show(struct device *dev,
@@ -2359,7 +2293,7 @@ static int acpi_nfit_init_interleave_set(struct acpi_nfit_desc *acpi_desc,
 	nd_set = devm_kzalloc(dev, sizeof(*nd_set), GFP_KERNEL);
 	if (!nd_set)
 		return -ENOMEM;
-	import_guid(&nd_set->type_guid, spa->range_guid);
+	guid_copy(&nd_set->type_guid, (guid_t *) spa->range_guid);
 
 	info = devm_kzalloc(dev, sizeof_nfit_set_info(nr), GFP_KERNEL);
 	if (!info)
@@ -2637,7 +2571,7 @@ static int acpi_nfit_blk_region_enable(struct nvdimm_bus *nvdimm_bus,
 	nfit_blk->bdw_offset = nfit_mem->bdw->offset;
 	mmio = &nfit_blk->mmio[BDW];
 	mmio->addr.base = devm_nvdimm_memremap(dev, nfit_mem->spa_bdw->address,
-			nfit_mem->spa_bdw->length, nd_blk_memremap_flags(ndbr));
+                        nfit_mem->spa_bdw->length, nd_blk_memremap_flags(ndbr));
 	if (!mmio->addr.base) {
 		dev_dbg(dev, "%s failed to map bdw\n",
 				nvdimm_name(nvdimm));
@@ -3011,8 +2945,10 @@ static int acpi_nfit_register_region(struct acpi_nfit_desc *acpi_desc,
 	ndr_desc->provider_data = nfit_spa;
 	ndr_desc->attr_groups = acpi_nfit_region_attribute_groups;
 	if (spa->flags & ACPI_NFIT_PROXIMITY_VALID) {
-		ndr_desc->numa_node = pxm_to_online_node(spa->proximity_domain);
-		ndr_desc->target_node = pxm_to_node(spa->proximity_domain);
+		ndr_desc->numa_node = acpi_map_pxm_to_online_node(
+						spa->proximity_domain);
+		ndr_desc->target_node = acpi_map_pxm_to_node(
+				spa->proximity_domain);
 	} else {
 		ndr_desc->numa_node = NUMA_NO_NODE;
 		ndr_desc->target_node = NUMA_NO_NODE;
@@ -3337,7 +3273,7 @@ static void acpi_nfit_init_ars(struct acpi_nfit_desc *acpi_desc,
 static int acpi_nfit_register_regions(struct acpi_nfit_desc *acpi_desc)
 {
 	struct nfit_spa *nfit_spa;
-	int rc, do_sched_ars = 0;
+	int rc;
 
 	set_bit(ARS_VALID, &acpi_desc->scrub_flags);
 	list_for_each_entry(nfit_spa, &acpi_desc->spas, list) {
@@ -3349,7 +3285,7 @@ static int acpi_nfit_register_regions(struct acpi_nfit_desc *acpi_desc)
 		}
 	}
 
-	list_for_each_entry(nfit_spa, &acpi_desc->spas, list) {
+	list_for_each_entry(nfit_spa, &acpi_desc->spas, list)
 		switch (nfit_spa_type(nfit_spa->spa)) {
 		case NFIT_SPA_VOLATILE:
 		case NFIT_SPA_PM:
@@ -3357,13 +3293,6 @@ static int acpi_nfit_register_regions(struct acpi_nfit_desc *acpi_desc)
 			rc = ars_register(acpi_desc, nfit_spa);
 			if (rc)
 				return rc;
-
-			/*
-			 * Kick off background ARS if at least one
-			 * region successfully registered ARS
-			 */
-			if (!test_bit(ARS_FAILED, &nfit_spa->ars_state))
-				do_sched_ars++;
 			break;
 		case NFIT_SPA_BDW:
 			/* nothing to register */
@@ -3382,10 +3311,8 @@ static int acpi_nfit_register_regions(struct acpi_nfit_desc *acpi_desc)
 			/* don't register unknown regions */
 			break;
 		}
-	}
 
-	if (do_sched_ars)
-		sched_ars(acpi_desc);
+	sched_ars(acpi_desc);
 	return 0;
 }
 
@@ -3558,10 +3485,7 @@ static int __acpi_nfit_clear_to_send(struct nvdimm_bus_descriptor *nd_desc,
 	return 0;
 }
 
-/*
- * Prevent security and firmware activate commands from being issued via
- * ioctl.
- */
+/* prevent security commands from being issued via ioctl */
 static int acpi_nfit_clear_to_send(struct nvdimm_bus_descriptor *nd_desc,
 		struct nvdimm *nvdimm, unsigned int cmd, void *buf)
 {
@@ -3572,14 +3496,9 @@ static int acpi_nfit_clear_to_send(struct nvdimm_bus_descriptor *nd_desc,
 			call_pkg->nd_family == NVDIMM_FAMILY_INTEL) {
 		func = call_pkg->nd_command;
 		if (func > NVDIMM_CMD_MAX ||
-		    (1 << func) & NVDIMM_INTEL_DENY_CMDMASK)
+		    (1 << func) & NVDIMM_INTEL_SECURITY_CMDMASK)
 			return -EOPNOTSUPP;
 	}
-
-	/* block all non-nfit bus commands */
-	if (!nvdimm && cmd == ND_CMD_CALL &&
-			call_pkg->nd_family != NVDIMM_BUS_FAMILY_NFIT)
-		return -EOPNOTSUPP;
 
 	return __acpi_nfit_clear_to_send(nd_desc, nvdimm, cmd);
 }
@@ -3872,7 +3791,6 @@ static __init int nfit_init(void)
 	guid_parse(UUID_NFIT_DIMM_N_HPE2, &nfit_uuid[NFIT_DEV_DIMM_N_HPE2]);
 	guid_parse(UUID_NFIT_DIMM_N_MSFT, &nfit_uuid[NFIT_DEV_DIMM_N_MSFT]);
 	guid_parse(UUID_NFIT_DIMM_N_HYPERV, &nfit_uuid[NFIT_DEV_DIMM_N_HYPERV]);
-	guid_parse(UUID_INTEL_BUS, &nfit_uuid[NFIT_BUS_INTEL]);
 
 	nfit_wq = create_singlethread_workqueue("nfit");
 	if (!nfit_wq)

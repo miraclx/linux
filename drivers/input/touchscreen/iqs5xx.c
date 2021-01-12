@@ -289,7 +289,7 @@ static int iqs5xx_bl_cmd(struct i2c_client *client, u8 bl_cmd, u16 bl_addr)
 		break;
 	case IQS5XX_BL_CMD_EXEC:
 		usleep_range(10000, 10100);
-		fallthrough;
+		/* fall through */
 	default:
 		return 0;
 	}
@@ -1017,7 +1017,7 @@ static int __maybe_unused iqs5xx_suspend(struct device *dev)
 
 	mutex_lock(&input->mutex);
 
-	if (input_device_enabled(input))
+	if (input->users)
 		error = iqs5xx_set_state(iqs5xx->client, IQS5XX_SUSPEND);
 
 	mutex_unlock(&input->mutex);
@@ -1036,7 +1036,7 @@ static int __maybe_unused iqs5xx_resume(struct device *dev)
 
 	mutex_lock(&input->mutex);
 
-	if (input_device_enabled(input))
+	if (input->users)
 		error = iqs5xx_set_state(iqs5xx->client, IQS5XX_RESUME);
 
 	mutex_unlock(&input->mutex);

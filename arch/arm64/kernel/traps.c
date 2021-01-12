@@ -34,8 +34,6 @@
 #include <asm/daifflags.h>
 #include <asm/debug-monitors.h>
 #include <asm/esr.h>
-#include <asm/exception.h>
-#include <asm/extable.h>
 #include <asm/insn.h>
 #include <asm/kprobes.h>
 #include <asm/traps.h>
@@ -54,6 +52,11 @@ static const char *handler[]= {
 };
 
 int show_unhandled_signals = 0;
+
+static void dump_backtrace_entry(unsigned long where)
+{
+	printk(" %pS\n", (void *)where);
+}
 
 static void dump_kernel_instr(const char *lvl, struct pt_regs *regs)
 {
@@ -78,6 +81,65 @@ static void dump_kernel_instr(const char *lvl, struct pt_regs *regs)
 	}
 
 	printk("%sCode: %s\n", lvl, str);
+}
+
+void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
+{
+	struct stackframe frame;
+	int skip = 0;
+
+	pr_debug("%s(regs = %p tsk = %p)\n", __func__, regs, tsk);
+
+	if (regs) {
+		if (user_mode(regs))
+			return;
+		skip = 1;
+	}
+
+	if (!tsk)
+		tsk = current;
+
+	if (!try_get_task_stack(tsk))
+		return;
+
+	if (tsk == current) {
+		start_backtrace(&frame,
+				(unsigned long)__builtin_frame_address(0),
+				(unsigned long)dump_backtrace);
+	} else {
+		/*
+		 * task blocked in __switch_to
+		 */
+		start_backtrace(&frame,
+				thread_saved_fp(tsk),
+				thread_saved_pc(tsk));
+	}
+
+	printk("Call trace:\n");
+	do {
+		/* skip until specified stack frame */
+		if (!skip) {
+			dump_backtrace_entry(frame.pc);
+		} else if (frame.fp == regs->regs[29]) {
+			skip = 0;
+			/*
+			 * Mostly, this is the case where this function is
+			 * called in panic/abort. As exception handler's
+			 * stack frame does not contain the corresponding pc
+			 * at which an exception has taken place, use regs->pc
+			 * instead.
+			 */
+			dump_backtrace_entry(regs->pc);
+		}
+	} while (!unwind_frame(tsk, &frame));
+
+	put_task_stack(tsk);
+}
+
+void show_stack(struct task_struct *tsk, unsigned long *sp)
+{
+	dump_backtrace(NULL, tsk);
+	barrier();
 }
 
 #ifdef CONFIG_PREEMPT
@@ -137,9 +199,9 @@ void die(const char *str, struct pt_regs *regs, int err)
 	oops_exit();
 
 	if (in_interrupt())
-		panic("%s: Fatal exception in interrupt", str);
+		panic("Fatal exception in interrupt");
 	if (panic_on_oops)
-		panic("%s: Fatal exception", str);
+		panic("Fatal exception");
 
 	raw_spin_unlock_irqrestore(&die_lock, flags);
 
@@ -171,32 +233,32 @@ static void arm64_show_signal(int signo, const char *str)
 	__show_regs(regs);
 }
 
-void arm64_force_sig_fault(int signo, int code, unsigned long far,
+void arm64_force_sig_fault(int signo, int code, void __user *addr,
 			   const char *str)
 {
 	arm64_show_signal(signo, str);
 	if (signo == SIGKILL)
 		force_sig(SIGKILL);
 	else
-		force_sig_fault(signo, code, (void __user *)far);
+		force_sig_fault(signo, code, addr);
 }
 
-void arm64_force_sig_mceerr(int code, unsigned long far, short lsb,
+void arm64_force_sig_mceerr(int code, void __user *addr, short lsb,
 			    const char *str)
 {
 	arm64_show_signal(SIGBUS, str);
-	force_sig_mceerr(code, (void __user *)far, lsb);
+	force_sig_mceerr(code, addr, lsb);
 }
 
-void arm64_force_sig_ptrace_errno_trap(int errno, unsigned long far,
+void arm64_force_sig_ptrace_errno_trap(int errno, void __user *addr,
 				       const char *str)
 {
 	arm64_show_signal(SIGTRAP, str);
-	force_sig_ptrace_errno_trap(errno, (void __user *)far);
+	force_sig_ptrace_errno_trap(errno, addr);
 }
 
 void arm64_notify_die(const char *str, struct pt_regs *regs,
-		      int signo, int sicode, unsigned long far,
+		      int signo, int sicode, void __user *addr,
 		      int err)
 {
 	if (user_mode(regs)) {
@@ -204,66 +266,11 @@ void arm64_notify_die(const char *str, struct pt_regs *regs,
 		current->thread.fault_address = 0;
 		current->thread.fault_code = err;
 
-		arm64_force_sig_fault(signo, sicode, far, str);
+		arm64_force_sig_fault(signo, sicode, addr, str);
 	} else {
 		die(str, regs, err);
 	}
 }
-
-#ifdef CONFIG_COMPAT
-#define PSTATE_IT_1_0_SHIFT	25
-#define PSTATE_IT_1_0_MASK	(0x3 << PSTATE_IT_1_0_SHIFT)
-#define PSTATE_IT_7_2_SHIFT	10
-#define PSTATE_IT_7_2_MASK	(0x3f << PSTATE_IT_7_2_SHIFT)
-
-static u32 compat_get_it_state(struct pt_regs *regs)
-{
-	u32 it, pstate = regs->pstate;
-
-	it  = (pstate & PSTATE_IT_1_0_MASK) >> PSTATE_IT_1_0_SHIFT;
-	it |= ((pstate & PSTATE_IT_7_2_MASK) >> PSTATE_IT_7_2_SHIFT) << 2;
-
-	return it;
-}
-
-static void compat_set_it_state(struct pt_regs *regs, u32 it)
-{
-	u32 pstate_it;
-
-	pstate_it  = (it << PSTATE_IT_1_0_SHIFT) & PSTATE_IT_1_0_MASK;
-	pstate_it |= ((it >> 2) << PSTATE_IT_7_2_SHIFT) & PSTATE_IT_7_2_MASK;
-
-	regs->pstate &= ~PSR_AA32_IT_MASK;
-	regs->pstate |= pstate_it;
-}
-
-static void advance_itstate(struct pt_regs *regs)
-{
-	u32 it;
-
-	/* ARM mode */
-	if (!(regs->pstate & PSR_AA32_T_BIT) ||
-	    !(regs->pstate & PSR_AA32_IT_MASK))
-		return;
-
-	it  = compat_get_it_state(regs);
-
-	/*
-	 * If this is the last instruction of the block, wipe the IT
-	 * state. Otherwise advance it.
-	 */
-	if (!(it & 7))
-		it = 0;
-	else
-		it = (it & 0xe0) | ((it << 1) & 0x1f);
-
-	compat_set_it_state(regs, it);
-}
-#else
-static void advance_itstate(struct pt_regs *regs)
-{
-}
-#endif
 
 void arm64_skip_faulting_instruction(struct pt_regs *regs, unsigned long size)
 {
@@ -275,11 +282,6 @@ void arm64_skip_faulting_instruction(struct pt_regs *regs, unsigned long size)
 	 */
 	if (user_mode(regs))
 		user_fastforward_single_step(current);
-
-	if (compat_user_mode(regs))
-		advance_itstate(regs);
-	else
-		regs->pstate &= ~PSR_BTYPE_MASK;
 }
 
 static LIST_HEAD(undef_hook);
@@ -313,7 +315,7 @@ static int call_undef_hook(struct pt_regs *regs)
 
 	if (!user_mode(regs)) {
 		__le32 instr_le;
-		if (get_kernel_nofault(instr_le, (__force __le32 *)pc))
+		if (probe_kernel_address((__force __le32 *)pc, instr_le))
 			goto exit;
 		instr = le32_to_cpu(instr_le);
 	} else if (compat_thumb_mode(regs)) {
@@ -349,7 +351,7 @@ exit:
 	return fn ? fn(regs, instr) : 1;
 }
 
-void force_signal_inject(int signal, int code, unsigned long address, unsigned int err)
+void force_signal_inject(int signal, int code, unsigned long address)
 {
 	const char *desc;
 	struct pt_regs *regs = current_pt_regs();
@@ -375,7 +377,7 @@ void force_signal_inject(int signal, int code, unsigned long address, unsigned i
 		signal = SIGKILL;
 	}
 
-	arm64_notify_die(desc, regs, signal, code, address, err);
+	arm64_notify_die(desc, regs, signal, code, (void __user *)address, 0);
 }
 
 /*
@@ -385,14 +387,14 @@ void arm64_notify_segfault(unsigned long addr)
 {
 	int code;
 
-	mmap_read_lock(current->mm);
-	if (find_vma(current->mm, untagged_addr(addr)) == NULL)
+	down_read(&current->mm->mmap_sem);
+	if (find_vma(current->mm, addr) == NULL)
 		code = SEGV_MAPERR;
 	else
 		code = SEGV_ACCERR;
-	mmap_read_unlock(current->mm);
+	up_read(&current->mm->mmap_sem);
 
-	force_signal_inject(SIGSEGV, code, addr, 0);
+	force_signal_inject(SIGSEGV, code, addr);
 }
 
 void do_undefinstr(struct pt_regs *regs)
@@ -405,27 +407,9 @@ void do_undefinstr(struct pt_regs *regs)
 		return;
 
 	BUG_ON(!user_mode(regs));
-	force_signal_inject(SIGILL, ILL_ILLOPC, regs->pc, 0);
+	force_signal_inject(SIGILL, ILL_ILLOPC, regs->pc);
 }
 NOKPROBE_SYMBOL(do_undefinstr);
-
-void do_bti(struct pt_regs *regs)
-{
-	BUG_ON(!user_mode(regs));
-	force_signal_inject(SIGILL, ILL_ILLOPC, regs->pc, 0);
-}
-NOKPROBE_SYMBOL(do_bti);
-
-void do_ptrauth_fault(struct pt_regs *regs, unsigned int esr)
-{
-	/*
-	 * Unexpected FPAC exception or pointer authentication failure in
-	 * the kernel: kill the task before it does any more harm.
-	 */
-	BUG_ON(!user_mode(regs));
-	force_signal_inject(SIGILL, ILL_ILLOPN, regs->pc, esr);
-}
-NOKPROBE_SYMBOL(do_ptrauth_fault);
 
 #define __user_cache_maint(insn, address, res)			\
 	if (address >= user_addr_max()) {			\
@@ -449,13 +433,12 @@ NOKPROBE_SYMBOL(do_ptrauth_fault);
 
 static void user_cache_maint_handler(unsigned int esr, struct pt_regs *regs)
 {
-	unsigned long tagged_address, address;
+	unsigned long address;
 	int rt = ESR_ELx_SYS64_ISS_RT(esr);
 	int crm = (esr & ESR_ELx_SYS64_ISS_CRM_MASK) >> ESR_ELx_SYS64_ISS_CRM_SHIFT;
 	int ret = 0;
 
-	tagged_address = pt_regs_read_reg(regs, rt);
-	address = untagged_addr(tagged_address);
+	address = untagged_addr(pt_regs_read_reg(regs, rt));
 
 	switch (crm) {
 	case ESR_ELx_SYS64_ISS_CRM_DC_CVAU:	/* DC CVAU, gets promoted */
@@ -477,12 +460,12 @@ static void user_cache_maint_handler(unsigned int esr, struct pt_regs *regs)
 		__user_cache_maint("ic ivau", address, ret);
 		break;
 	default:
-		force_signal_inject(SIGILL, ILL_ILLOPC, regs->pc, 0);
+		force_signal_inject(SIGILL, ILL_ILLOPC, regs->pc);
 		return;
 	}
 
 	if (ret)
-		arm64_notify_segfault(tagged_address);
+		arm64_notify_segfault(address);
 	else
 		arm64_skip_faulting_instruction(regs, AARCH64_INSN_SIZE);
 }
@@ -530,7 +513,7 @@ static void mrs_handler(unsigned int esr, struct pt_regs *regs)
 	sysreg = esr_sys64_to_sysreg(esr);
 
 	if (do_emulate_mrs(regs, sysreg, rt) != 0)
-		force_signal_inject(SIGILL, ILL_ILLOPC, regs->pc, 0);
+		force_signal_inject(SIGILL, ILL_ILLOPC, regs->pc);
 }
 
 static void wfi_handler(unsigned int esr, struct pt_regs *regs)
@@ -583,7 +566,34 @@ static const struct sys64_hook sys64_hooks[] = {
 	{},
 };
 
+
 #ifdef CONFIG_COMPAT
+#define PSTATE_IT_1_0_SHIFT	25
+#define PSTATE_IT_1_0_MASK	(0x3 << PSTATE_IT_1_0_SHIFT)
+#define PSTATE_IT_7_2_SHIFT	10
+#define PSTATE_IT_7_2_MASK	(0x3f << PSTATE_IT_7_2_SHIFT)
+
+static u32 compat_get_it_state(struct pt_regs *regs)
+{
+	u32 it, pstate = regs->pstate;
+
+	it  = (pstate & PSTATE_IT_1_0_MASK) >> PSTATE_IT_1_0_SHIFT;
+	it |= ((pstate & PSTATE_IT_7_2_MASK) >> PSTATE_IT_7_2_SHIFT) << 2;
+
+	return it;
+}
+
+static void compat_set_it_state(struct pt_regs *regs, u32 it)
+{
+	u32 pstate_it;
+
+	pstate_it  = (it << PSTATE_IT_1_0_SHIFT) & PSTATE_IT_1_0_MASK;
+	pstate_it |= ((it >> 2) << PSTATE_IT_7_2_SHIFT) & PSTATE_IT_7_2_MASK;
+
+	regs->pstate &= ~PSR_AA32_IT_MASK;
+	regs->pstate |= pstate_it;
+}
+
 static bool cp15_cond_valid(unsigned int esr, struct pt_regs *regs)
 {
 	int cond;
@@ -604,12 +614,42 @@ static bool cp15_cond_valid(unsigned int esr, struct pt_regs *regs)
 	return aarch32_opcode_cond_checks[cond](regs->pstate);
 }
 
+static void advance_itstate(struct pt_regs *regs)
+{
+	u32 it;
+
+	/* ARM mode */
+	if (!(regs->pstate & PSR_AA32_T_BIT) ||
+	    !(regs->pstate & PSR_AA32_IT_MASK))
+		return;
+
+	it  = compat_get_it_state(regs);
+
+	/*
+	 * If this is the last instruction of the block, wipe the IT
+	 * state. Otherwise advance it.
+	 */
+	if (!(it & 7))
+		it = 0;
+	else
+		it = (it & 0xe0) | ((it << 1) & 0x1f);
+
+	compat_set_it_state(regs, it);
+}
+
+static void arm64_compat_skip_faulting_instruction(struct pt_regs *regs,
+						   unsigned int sz)
+{
+	advance_itstate(regs);
+	arm64_skip_faulting_instruction(regs, sz);
+}
+
 static void compat_cntfrq_read_handler(unsigned int esr, struct pt_regs *regs)
 {
 	int reg = (esr & ESR_ELx_CP15_32_ISS_RT_MASK) >> ESR_ELx_CP15_32_ISS_RT_SHIFT;
 
 	pt_regs_write_reg(regs, reg, arch_timer_get_rate());
-	arm64_skip_faulting_instruction(regs, 4);
+	arm64_compat_skip_faulting_instruction(regs, 4);
 }
 
 static const struct sys64_hook cp15_32_hooks[] = {
@@ -629,7 +669,7 @@ static void compat_cntvct_read_handler(unsigned int esr, struct pt_regs *regs)
 
 	pt_regs_write_reg(regs, rt, lower_32_bits(val));
 	pt_regs_write_reg(regs, rt2, upper_32_bits(val));
-	arm64_skip_faulting_instruction(regs, 4);
+	arm64_compat_skip_faulting_instruction(regs, 4);
 }
 
 static const struct sys64_hook cp15_64_hooks[] = {
@@ -650,7 +690,7 @@ void do_cp15instr(unsigned int esr, struct pt_regs *regs)
 		 * There is no T16 variant of a CP access, so we
 		 * always advance PC by 4 bytes.
 		 */
-		arm64_skip_faulting_instruction(regs, 4);
+		arm64_compat_skip_faulting_instruction(regs, 4);
 		return;
 	}
 
@@ -713,7 +753,6 @@ static const char *esr_class_str[] = {
 	[ESR_ELx_EC_CP10_ID]		= "CP10 MRC/VMRS",
 	[ESR_ELx_EC_PAC]		= "PAC",
 	[ESR_ELx_EC_CP14_64]		= "CP14 MCRR/MRRC",
-	[ESR_ELx_EC_BTI]		= "BTI",
 	[ESR_ELx_EC_ILL]		= "PSTATE.IL",
 	[ESR_ELx_EC_SVC32]		= "SVC (AArch32)",
 	[ESR_ELx_EC_HVC32]		= "HVC (AArch32)",
@@ -724,7 +763,6 @@ static const char *esr_class_str[] = {
 	[ESR_ELx_EC_SYS64]		= "MSR/MRS (AArch64)",
 	[ESR_ELx_EC_SVE]		= "SVE",
 	[ESR_ELx_EC_ERET]		= "ERET/ERETAA/ERETAB",
-	[ESR_ELx_EC_FPAC]		= "FPAC",
 	[ESR_ELx_EC_IMP_DEF]		= "EL3 IMP DEF",
 	[ESR_ELx_EC_IABT_LOW]		= "IABT (lower EL)",
 	[ESR_ELx_EC_IABT_CUR]		= "IABT (current EL)",
@@ -755,17 +793,14 @@ const char *esr_get_class_string(u32 esr)
  * bad_mode handles the impossible case in the exception vector. This is always
  * fatal.
  */
-asmlinkage void notrace bad_mode(struct pt_regs *regs, int reason, unsigned int esr)
+asmlinkage void bad_mode(struct pt_regs *regs, int reason, unsigned int esr)
 {
-	arm64_enter_nmi(regs);
-
 	console_verbose();
 
 	pr_crit("Bad mode in %s handler detected on CPU%d, code 0x%08x -- %s\n",
 		handler[reason], smp_processor_id(), esr,
 		esr_get_class_string(esr));
 
-	__show_regs(regs);
 	local_daif_mask();
 	panic("bad mode");
 }
@@ -776,7 +811,7 @@ asmlinkage void notrace bad_mode(struct pt_regs *regs, int reason, unsigned int 
  */
 void bad_el0_sync(struct pt_regs *regs, int reason, unsigned int esr)
 {
-	unsigned long pc = instruction_pointer(regs);
+	void __user *pc = (void __user *)instruction_pointer(regs);
 
 	current->thread.fault_address = 0;
 	current->thread.fault_code = esr;
@@ -790,15 +825,13 @@ void bad_el0_sync(struct pt_regs *regs, int reason, unsigned int esr)
 DEFINE_PER_CPU(unsigned long [OVERFLOW_STACK_SIZE/sizeof(long)], overflow_stack)
 	__aligned(16);
 
-asmlinkage void noinstr handle_bad_stack(struct pt_regs *regs)
+asmlinkage void handle_bad_stack(struct pt_regs *regs)
 {
 	unsigned long tsk_stk = (unsigned long)current->stack;
 	unsigned long irq_stk = (unsigned long)this_cpu_read(irq_stack_ptr);
 	unsigned long ovf_stk = (unsigned long)this_cpu_ptr(overflow_stack);
 	unsigned int esr = read_sysreg(esr_el1);
 	unsigned long far = read_sysreg(far_el1);
-
-	arm64_enter_nmi(regs);
 
 	console_verbose();
 	pr_emerg("Insufficient stack space to handle exception!");
@@ -809,7 +842,7 @@ asmlinkage void noinstr handle_bad_stack(struct pt_regs *regs)
 	pr_emerg("Task stack:     [0x%016lx..0x%016lx]\n",
 		 tsk_stk, tsk_stk + THREAD_SIZE);
 	pr_emerg("IRQ stack:      [0x%016lx..0x%016lx]\n",
-		 irq_stk, irq_stk + IRQ_STACK_SIZE);
+		 irq_stk, irq_stk + THREAD_SIZE);
 	pr_emerg("Overflow stack: [0x%016lx..0x%016lx]\n",
 		 ovf_stk, ovf_stk + OVERFLOW_STACK_SIZE);
 
@@ -871,15 +904,46 @@ bool arm64_is_fatal_ras_serror(struct pt_regs *regs, unsigned int esr)
 	}
 }
 
-asmlinkage void noinstr do_serror(struct pt_regs *regs, unsigned int esr)
+asmlinkage void do_serror(struct pt_regs *regs, unsigned int esr)
 {
-	arm64_enter_nmi(regs);
+	const bool was_in_nmi = in_nmi();
+
+	if (!was_in_nmi)
+		nmi_enter();
 
 	/* non-RAS errors are not containable */
 	if (!arm64_is_ras_serror(esr) || arm64_is_fatal_ras_serror(regs, esr))
 		arm64_serror_panic(regs, esr);
 
-	arm64_exit_nmi(regs);
+	if (!was_in_nmi)
+		nmi_exit();
+}
+
+asmlinkage void enter_from_user_mode(void)
+{
+	CT_WARN_ON(ct_state() != CONTEXT_USER);
+	user_exit_irqoff();
+}
+NOKPROBE_SYMBOL(enter_from_user_mode);
+
+void __pte_error(const char *file, int line, unsigned long val)
+{
+	pr_err("%s:%d: bad pte %016lx.\n", file, line, val);
+}
+
+void __pmd_error(const char *file, int line, unsigned long val)
+{
+	pr_err("%s:%d: bad pmd %016lx.\n", file, line, val);
+}
+
+void __pud_error(const char *file, int line, unsigned long val)
+{
+	pr_err("%s:%d: bad pud %016lx.\n", file, line, val);
+}
+
+void __pgd_error(const char *file, int line, unsigned long val)
+{
+	pr_err("%s:%d: bad pgd %016lx.\n", file, line, val);
 }
 
 /* GENERIC_BUG traps */
@@ -919,21 +983,6 @@ static int bug_handler(struct pt_regs *regs, unsigned int esr)
 static struct break_hook bug_break_hook = {
 	.fn = bug_handler,
 	.imm = BUG_BRK_IMM,
-};
-
-static int reserved_fault_handler(struct pt_regs *regs, unsigned int esr)
-{
-	pr_err("%s generated an invalid instruction at %pS!\n",
-		in_bpf_jit(regs) ? "BPF JIT" : "Kernel text patching",
-		(void *)instruction_pointer(regs));
-
-	/* We cannot handle this */
-	return DBG_HOOK_ERROR;
-}
-
-static struct break_hook fault_break_hook = {
-	.fn = reserved_fault_handler,
-	.imm = FAULT_BRK_IMM,
 };
 
 #ifdef CONFIG_KASAN_SW_TAGS
@@ -998,12 +1047,11 @@ int __init early_brk64(unsigned long addr, unsigned int esr,
 	return bug_handler(regs, esr) != DBG_HOOK_HANDLED;
 }
 
+/* This registration must happen early, before debug_traps_init(). */
 void __init trap_init(void)
 {
 	register_kernel_break_hook(&bug_break_hook);
-	register_kernel_break_hook(&fault_break_hook);
 #ifdef CONFIG_KASAN_SW_TAGS
 	register_kernel_break_hook(&kasan_break_hook);
 #endif
-	debug_traps_init();
 }

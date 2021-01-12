@@ -8,7 +8,6 @@
  * Martin Bligh, Andi Kleen, James Bottomley, John Stultz, and
  * James Cleverdon.
  */
-#include <linux/thread_info.h>
 #include <asm/apic.h>
 
 #include "local.h"
@@ -32,6 +31,9 @@ void __init default_setup_apic_routing(void)
 			break;
 		}
 	}
+
+	if (x86_platform.apic_post_init)
+		x86_platform.apic_post_init();
 }
 
 int __init default_acpi_madt_oem_check(char *oem_id, char *oem_table_id)

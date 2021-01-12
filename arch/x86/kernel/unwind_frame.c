@@ -74,7 +74,13 @@ static bool in_entry_code(unsigned long ip)
 {
 	char *addr = (char *)ip;
 
-	return addr >= __entry_text_start && addr < __entry_text_end;
+	if (addr >= __entry_text_start && addr < __entry_text_end)
+		return true;
+
+	if (addr >= __irqentry_text_start && addr < __irqentry_text_end)
+		return true;
+
+	return false;
 }
 
 static inline unsigned long *last_frame(struct unwind_state *state)
@@ -269,13 +275,13 @@ bool unwind_next_frame(struct unwind_state *state)
 		/*
 		 * kthreads (other than the boot CPU's idle thread) have some
 		 * partial regs at the end of their stack which were placed
-		 * there by copy_thread().  But the regs don't have any
+		 * there by copy_thread_tls().  But the regs don't have any
 		 * useful information, so we can skip them.
 		 *
 		 * This user_mode() check is slightly broader than a PF_KTHREAD
 		 * check because it also catches the awkward situation where a
 		 * newly forked kthread transitions into a user task by calling
-		 * kernel_execve(), which eventually clears PF_KTHREAD.
+		 * do_execve(), which eventually clears PF_KTHREAD.
 		 */
 		if (!user_mode(regs))
 			goto the_end;

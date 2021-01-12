@@ -1,12 +1,18 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0
 # description: Generic dynamic event - generic clear event
-# requires: dynamic_events "place: [<module>:]<symbol>":README "place (kretprobe): [<module>:]<symbol>":README "s:[synthetic/]":README
+
+[ -f dynamic_events ] || exit_unsupported
+
+grep -q "place: \[<module>:\]<symbol>" README || exit_unsupported
+grep -q "place (kretprobe): \[<module>:\]<symbol>" README || exit_unsupported
+
+grep -q "s:\[synthetic/\]" README || exit_unsupported
 
 echo 0 > events/enable
 echo > dynamic_events
 
-PLACE=$FUNCTION_FORK
+PLACE=_do_fork
 
 setup_events() {
 echo "p:myevent1 $PLACE" >> dynamic_events

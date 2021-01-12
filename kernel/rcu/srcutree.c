@@ -177,13 +177,11 @@ static int init_srcu_struct_fields(struct srcu_struct *ssp, bool is_static)
 	INIT_DELAYED_WORK(&ssp->work, process_srcu);
 	if (!is_static)
 		ssp->sda = alloc_percpu(struct srcu_data);
-	if (!ssp->sda)
-		return -ENOMEM;
 	init_srcu_struct_nodes(ssp, is_static);
 	ssp->srcu_gp_seq_needed_exp = 0;
 	ssp->srcu_last_gp_end = ktime_get_mono_fast_ns();
 	smp_store_release(&ssp->srcu_gp_seq_needed, 0); /* Init done. */
-	return 0;
+	return ssp->sda ? 0 : -ENOMEM;
 }
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
@@ -755,7 +753,7 @@ static void srcu_flip(struct srcu_struct *ssp)
  * it, if this function was preempted for enough time for the counters
  * to wrap, it really doesn't matter whether or not we expedite the grace
  * period.  The extra overhead of a needlessly expedited grace period is
- * negligible when amortized over that time period, and the extra latency
+ * negligible when amoritized over that time period, and the extra latency
  * of a needlessly non-expedited grace period is similarly negligible.
  */
 static bool srcu_might_be_idle(struct srcu_struct *ssp)
@@ -766,15 +764,14 @@ static bool srcu_might_be_idle(struct srcu_struct *ssp)
 	unsigned long t;
 	unsigned long tlast;
 
-	check_init_srcu_struct(ssp);
 	/* If the local srcu_data structure has callbacks, not idle.  */
-	sdp = raw_cpu_ptr(ssp->sda);
-	spin_lock_irqsave_rcu_node(sdp, flags);
+	local_irq_save(flags);
+	sdp = this_cpu_ptr(ssp->sda);
 	if (rcu_segcblist_pend_cbs(&sdp->srcu_cblist)) {
-		spin_unlock_irqrestore_rcu_node(sdp, flags);
+		local_irq_restore(flags);
 		return false; /* Callbacks already present, so not idle. */
 	}
-	spin_unlock_irqrestore_rcu_node(sdp, flags);
+	local_irq_restore(flags);
 
 	/*
 	 * No local callbacks, so probabalistically probe global state.
@@ -854,8 +851,9 @@ static void __call_srcu(struct srcu_struct *ssp, struct rcu_head *rhp,
 	}
 	rhp->func = func;
 	idx = srcu_read_lock(ssp);
-	sdp = raw_cpu_ptr(ssp->sda);
-	spin_lock_irqsave_rcu_node(sdp, flags);
+	local_irq_save(flags);
+	sdp = this_cpu_ptr(ssp->sda);
+	spin_lock_rcu_node(sdp);
 	rcu_segcblist_enqueue(&sdp->srcu_cblist, rhp);
 	rcu_segcblist_advance(&sdp->srcu_cblist,
 			      rcu_seq_current(&ssp->srcu_gp_seq));
@@ -908,7 +906,7 @@ static void __synchronize_srcu(struct srcu_struct *ssp, bool do_norm)
 {
 	struct rcu_synchronize rcu;
 
-	RCU_LOCKDEP_WARN(lockdep_is_held(ssp) ||
+	RCU_LOCKDEP_WARN(lock_is_held(&ssp->dep_map) ||
 			 lock_is_held(&rcu_bh_lock_map) ||
 			 lock_is_held(&rcu_lock_map) ||
 			 lock_is_held(&rcu_sched_lock_map),
@@ -1270,8 +1268,8 @@ void srcu_torture_stats_print(struct srcu_struct *ssp, char *tt, char *tf)
 		struct srcu_data *sdp;
 
 		sdp = per_cpu_ptr(ssp->sda, cpu);
-		u0 = data_race(sdp->srcu_unlock_count[!idx]);
-		u1 = data_race(sdp->srcu_unlock_count[idx]);
+		u0 = sdp->srcu_unlock_count[!idx];
+		u1 = sdp->srcu_unlock_count[idx];
 
 		/*
 		 * Make sure that a lock is always counted if the corresponding
@@ -1279,8 +1277,8 @@ void srcu_torture_stats_print(struct srcu_struct *ssp, char *tt, char *tf)
 		 */
 		smp_rmb();
 
-		l0 = data_race(sdp->srcu_lock_count[!idx]);
-		l1 = data_race(sdp->srcu_lock_count[idx]);
+		l0 = sdp->srcu_lock_count[!idx];
+		l1 = sdp->srcu_lock_count[idx];
 
 		c0 = l0 - u0;
 		c1 = l1 - u1;

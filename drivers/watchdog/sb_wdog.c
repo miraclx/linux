@@ -202,7 +202,7 @@ static long sbwdog_ioctl(struct file *file, unsigned int cmd,
 		timeout = time;
 		sbwdog_set(user_dog, timeout);
 		sbwdog_pet(user_dog);
-		fallthrough;
+		/* Fall through */
 
 	case WDIOC_GETTIMEOUT:
 		/*

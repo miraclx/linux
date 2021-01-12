@@ -27,6 +27,7 @@
 #include <linux/pagemap.h>
 #include <linux/uaccess.h>
 #include <linux/mem_encrypt.h>
+#include <asm/pgtable.h>
 #include <asm/io.h>
 #include "internal.h"
 

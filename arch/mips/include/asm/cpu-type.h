@@ -47,23 +47,17 @@ static inline int __pure __get_cpu_type(const int cpu_type)
 	case CPU_34K:
 	case CPU_1004K:
 	case CPU_74K:
-	case CPU_1074K:
 	case CPU_M14KC:
 	case CPU_M14KEC:
 	case CPU_INTERAPTIV:
 	case CPU_PROAPTIV:
-#endif
-
-#ifdef CONFIG_SYS_HAS_CPU_MIPS32_R5
-	case CPU_M5150:
 	case CPU_P5600:
+	case CPU_M5150:
 #endif
 
 #if defined(CONFIG_SYS_HAS_CPU_MIPS32_R2) || \
-    defined(CONFIG_SYS_HAS_CPU_MIPS32_R5) || \
     defined(CONFIG_SYS_HAS_CPU_MIPS32_R6) || \
     defined(CONFIG_SYS_HAS_CPU_MIPS64_R2) || \
-    defined(CONFIG_SYS_HAS_CPU_MIPS64_R5) || \
     defined(CONFIG_SYS_HAS_CPU_MIPS64_R6)
 	case CPU_QEMU_GENERIC:
 #endif

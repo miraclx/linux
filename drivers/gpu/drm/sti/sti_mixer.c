@@ -178,7 +178,7 @@ static struct drm_info_list mixer1_debugfs_files[] = {
 	{ "mixer_aux", mixer_dbg_show, 0, NULL },
 };
 
-void sti_mixer_debugfs_init(struct sti_mixer *mixer, struct drm_minor *minor)
+int sti_mixer_debugfs_init(struct sti_mixer *mixer, struct drm_minor *minor)
 {
 	unsigned int i;
 	struct drm_info_list *mixer_debugfs_files;
@@ -194,15 +194,15 @@ void sti_mixer_debugfs_init(struct sti_mixer *mixer, struct drm_minor *minor)
 		nb_files = ARRAY_SIZE(mixer1_debugfs_files);
 		break;
 	default:
-		return;
+		return -EINVAL;
 	}
 
 	for (i = 0; i < nb_files; i++)
 		mixer_debugfs_files[i].data = mixer;
 
-	drm_debugfs_create_files(mixer_debugfs_files,
-				 nb_files,
-				 minor->debugfs_root, minor);
+	return drm_debugfs_create_files(mixer_debugfs_files,
+					nb_files,
+					minor->debugfs_root, minor);
 }
 
 void sti_mixer_set_background_status(struct sti_mixer *mixer, bool enable)

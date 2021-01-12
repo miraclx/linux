@@ -159,6 +159,7 @@ ecn_payload_get()
 ecn_decap_test()
 {
 	local trap_name="decap_error"
+	local group_name="tunnel_drops"
 	local desc=$1; shift
 	local ecn_desc=$1; shift
 	local outer_tos=$1; shift
@@ -176,7 +177,7 @@ ecn_decap_test()
 		-t udp sp=12345,dp=$VXPORT,tos=$outer_tos,p=$payload -q &
 	mz_pid=$!
 
-	devlink_trap_exception_test $trap_name
+	devlink_trap_exception_test $trap_name $group_name
 
 	tc_check_packets "dev $swp1 egress" 101 0
 	check_err $? "Packets were not dropped"
@@ -227,6 +228,7 @@ short_payload_get()
 corrupted_packet_test()
 {
 	local trap_name="decap_error"
+	local group_name="tunnel_drops"
 	local desc=$1; shift
 	local payload_get=$1; shift
 	local mz_pid
@@ -244,7 +246,7 @@ corrupted_packet_test()
 		-B 192.0.2.17 -t udp sp=12345,dp=$VXPORT,p=$payload -q &
 	mz_pid=$!
 
-	devlink_trap_exception_test $trap_name
+	devlink_trap_exception_test $trap_name $group_name
 
 	tc_check_packets "dev $swp1 egress" 101 0
 	check_err $? "Packets were not dropped"
@@ -295,6 +297,7 @@ mc_smac_payload_get()
 overlay_smac_is_mc_test()
 {
 	local trap_name="overlay_smac_is_mc"
+	local group_name="tunnel_drops"
 	local mz_pid
 
 	RET=0
@@ -311,7 +314,7 @@ overlay_smac_is_mc_test()
 		-B 192.0.2.17 -t udp sp=12345,dp=$VXPORT,p=$payload -q &
 	mz_pid=$!
 
-	devlink_trap_drop_test $trap_name $swp1 101
+	devlink_trap_drop_test $trap_name $group_name $swp1 101
 
 	log_test "Overlay source MAC is multicast"
 

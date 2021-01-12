@@ -3,6 +3,7 @@
  * Copyright (C) 2017 SiFive
  */
 
+#include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 
 #ifdef CONFIG_SMP

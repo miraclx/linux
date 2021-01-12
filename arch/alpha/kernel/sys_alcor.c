@@ -23,6 +23,7 @@
 #include <asm/dma.h>
 #include <asm/mmu_context.h>
 #include <asm/irq.h>
+#include <asm/pgtable.h>
 #include <asm/core_cia.h>
 #include <asm/tlbflush.h>
 

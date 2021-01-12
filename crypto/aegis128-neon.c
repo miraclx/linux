@@ -14,10 +14,8 @@ void crypto_aegis128_encrypt_chunk_neon(void *state, void *dst, const void *src,
 					unsigned int size);
 void crypto_aegis128_decrypt_chunk_neon(void *state, void *dst, const void *src,
 					unsigned int size);
-int crypto_aegis128_final_neon(void *state, void *tag_xor,
-			       unsigned int assoclen,
-			       unsigned int cryptlen,
-			       unsigned int authsize);
+void crypto_aegis128_final_neon(void *state, void *tag_xor, uint64_t assoclen,
+				uint64_t cryptlen);
 
 int aegis128_have_aes_insn __ro_after_init;
 
@@ -62,18 +60,11 @@ void crypto_aegis128_decrypt_chunk_simd(union aegis_block *state, u8 *dst,
 	kernel_neon_end();
 }
 
-int crypto_aegis128_final_simd(union aegis_block *state,
-			       union aegis_block *tag_xor,
-			       unsigned int assoclen,
-			       unsigned int cryptlen,
-			       unsigned int authsize)
+void crypto_aegis128_final_simd(union aegis_block *state,
+				union aegis_block *tag_xor,
+				u64 assoclen, u64 cryptlen)
 {
-	int ret;
-
 	kernel_neon_begin();
-	ret = crypto_aegis128_final_neon(state, tag_xor, assoclen, cryptlen,
-					 authsize);
+	crypto_aegis128_final_neon(state, tag_xor, assoclen, cryptlen);
 	kernel_neon_end();
-
-	return ret;
 }

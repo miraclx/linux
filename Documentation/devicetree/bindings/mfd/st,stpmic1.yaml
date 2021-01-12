@@ -29,7 +29,8 @@ properties:
   onkey:
     type: object
 
-    $ref: ../input/input.yaml
+    allOf:
+      - $ref: ../input/input.yaml
 
     properties:
       compatible:
@@ -67,7 +68,8 @@ properties:
   watchdog:
     type: object
 
-    $ref: ../watchdog/watchdog.yaml
+    allOf:
+      - $ref: ../watchdog/watchdog.yaml
 
     properties:
       compatible:
@@ -113,8 +115,8 @@ properties:
             maxItems: 1
 
           st,mask-reset:
-            description: mask reset for this regulator, the regulator configuration
-              is maintained during pmic reset.
+            description: mask reset for this regulator,
+                         the regulator configuration is maintained during pmic reset.
             $ref: /schemas/types.yaml#/definitions/flag
 
           regulator-name: true
@@ -135,8 +137,8 @@ properties:
             maxItems: 1
 
           st,mask-reset:
-            description: mask reset for this regulator, the regulator configuration
-              is maintained during pmic reset.
+            description: mask reset for this regulator,
+                         the regulator configuration is maintained during pmic reset.
             $ref: /schemas/types.yaml#/definitions/flag
 
           regulator-name: true
@@ -154,8 +156,8 @@ properties:
             maxItems: 1
 
           st,mask-reset:
-            description: mask reset for this regulator, the regulator configuration
-              is maintained during pmic reset.
+            description: mask reset for this regulator,
+                         the regulator configuration is maintained during pmic reset.
             $ref: /schemas/types.yaml#/definitions/flag
 
           regulator-name: true
@@ -172,8 +174,8 @@ properties:
             maxItems: 1
 
           st,mask-reset:
-            description: mask reset for this regulator, the regulator configuration
-              is maintained during pmic reset.
+            description: mask reset for this regulator,
+                         the regulator configuration is maintained during pmic reset.
             $ref: /schemas/types.yaml#/definitions/flag
 
           regulator-name: true
@@ -188,7 +190,8 @@ properties:
         description: STPMIC1 voltage regulators supplies
 
       "^(buck[1-4]|ldo[1-6]|boost|vref_ddr|pwr_sw[1-2])$":
-        $ref: ../regulator/regulator.yaml
+        allOf:
+          - $ref: ../regulator/regulator.yaml
 
       "^ldo[1-2,5-6]$":
         type: object
@@ -198,8 +201,8 @@ properties:
             maxItems: 1
 
           st,mask-reset:
-            description: mask reset for this regulator, the regulator configuration
-              is maintained during pmic reset.
+            description: mask reset for this regulator,
+                         the regulator configuration is maintained during pmic reset.
             $ref: /schemas/types.yaml#/definitions/flag
 
           regulator-name: true
@@ -220,8 +223,8 @@ properties:
             maxItems: 1
 
           st,mask-reset:
-            description: mask reset for this regulator, the regulator configuration
-              is maintained during pmic reset.
+            description: mask reset for this regulator,
+                         the regulator configuration is maintained during pmic reset.
             $ref: /schemas/types.yaml#/definitions/flag
 
           regulator-name: true

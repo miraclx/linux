@@ -32,6 +32,7 @@
 #include "amdgpu_amdkfd.h"
 #include <linux/i2c.h>
 #include <linux/pci.h>
+#include "amdgpu_ras.h"
 
 /* error codes */
 #define I2C_OK                0
@@ -212,7 +213,6 @@ static uint32_t smu_v11_0_i2c_poll_rx_status(struct i2c_adapter *control)
 /**
  * smu_v11_0_i2c_transmit - Send a block of data over the I2C bus to a slave device.
  *
- * @control: I2C adapter reference
  * @address: The I2C address of the slave device.
  * @data: The data to transmit over the bus.
  * @numbytes: The amount of data to transmit.
@@ -314,9 +314,7 @@ Err:
 /**
  * smu_v11_0_i2c_receive - Receive a block of data over the I2C bus from a slave device.
  *
- * @control: I2C adapter reference
  * @address: The I2C address of the slave device.
- * @data: Placeholder to store received data.
  * @numbytes: The amount of data to transmit.
  * @i2c_flag: Flags for transmission
  *
@@ -511,9 +509,14 @@ static bool smu_v11_0_i2c_bus_lock(struct i2c_adapter *control)
 	struct amdgpu_device *adev = to_amdgpu_device(control);
 
 	/* Send  PPSMC_MSG_RequestI2CBus */
-	if (!amdgpu_dpm_smu_i2c_bus_access(adev, true))
+	if (!adev->powerplay.pp_funcs->smu_i2c_bus_access)
+		goto Fail;
+
+
+	if (!adev->powerplay.pp_funcs->smu_i2c_bus_access(adev->powerplay.pp_handle, true))
 		return true;
 
+Fail:
 	return false;
 }
 
@@ -521,19 +524,25 @@ static bool smu_v11_0_i2c_bus_unlock(struct i2c_adapter *control)
 {
 	struct amdgpu_device *adev = to_amdgpu_device(control);
 
+	/* Send  PPSMC_MSG_RequestI2CBus */
+	if (!adev->powerplay.pp_funcs->smu_i2c_bus_access)
+		goto Fail;
+
 	/* Send  PPSMC_MSG_ReleaseI2CBus */
-	if (!amdgpu_dpm_smu_i2c_bus_access(adev, false))
+	if (!adev->powerplay.pp_funcs->smu_i2c_bus_access(adev->powerplay.pp_handle,
+							     false))
 		return true;
 
+Fail:
 	return false;
 }
 
-/***************************** I2C GLUE ****************************/
+/***************************** EEPROM I2C GLUE ****************************/
 
-static uint32_t smu_v11_0_i2c_read_data(struct i2c_adapter *control,
-					uint8_t address,
-					uint8_t *data,
-					uint32_t numbytes)
+static uint32_t smu_v11_0_i2c_eeprom_read_data(struct i2c_adapter *control,
+					       uint8_t address,
+					       uint8_t *data,
+					       uint32_t numbytes)
 {
 	uint32_t  ret = 0;
 
@@ -553,10 +562,10 @@ Fail:
 	return ret;
 }
 
-static uint32_t smu_v11_0_i2c_write_data(struct i2c_adapter *control,
-					 uint8_t address,
-					 uint8_t *data,
-					 uint32_t numbytes)
+static uint32_t smu_v11_0_i2c_eeprom_write_data(struct i2c_adapter *control,
+						uint8_t address,
+						uint8_t *data,
+						uint32_t numbytes)
 {
 	uint32_t  ret;
 
@@ -583,13 +592,14 @@ static uint32_t smu_v11_0_i2c_write_data(struct i2c_adapter *control,
 static void lock_bus(struct i2c_adapter *i2c, unsigned int flags)
 {
 	struct amdgpu_device *adev = to_amdgpu_device(i2c);
+	struct amdgpu_ras_eeprom_control *control = &adev->psp.ras.ras->eeprom_control;
 
 	if (!smu_v11_0_i2c_bus_lock(i2c)) {
 		DRM_ERROR("Failed to lock the bus from SMU");
 		return;
 	}
 
-	adev->pm.bus_locked = true;
+	control->bus_locked = true;
 }
 
 static int trylock_bus(struct i2c_adapter *i2c, unsigned int flags)
@@ -601,13 +611,14 @@ static int trylock_bus(struct i2c_adapter *i2c, unsigned int flags)
 static void unlock_bus(struct i2c_adapter *i2c, unsigned int flags)
 {
 	struct amdgpu_device *adev = to_amdgpu_device(i2c);
+	struct amdgpu_ras_eeprom_control *control = &adev->psp.ras.ras->eeprom_control;
 
 	if (!smu_v11_0_i2c_bus_unlock(i2c)) {
 		DRM_ERROR("Failed to unlock the bus from SMU");
 		return;
 	}
 
-	adev->pm.bus_locked = false;
+	control->bus_locked = false;
 }
 
 static const struct i2c_lock_operations smu_v11_0_i2c_i2c_lock_ops = {
@@ -616,13 +627,14 @@ static const struct i2c_lock_operations smu_v11_0_i2c_i2c_lock_ops = {
 	.unlock_bus = unlock_bus,
 };
 
-static int smu_v11_0_i2c_xfer(struct i2c_adapter *i2c_adap,
+static int smu_v11_0_i2c_eeprom_i2c_xfer(struct i2c_adapter *i2c_adap,
 			      struct i2c_msg *msgs, int num)
 {
 	int i, ret;
 	struct amdgpu_device *adev = to_amdgpu_device(i2c_adap);
+	struct amdgpu_ras_eeprom_control *control = &adev->psp.ras.ras->eeprom_control;
 
-	if (!adev->pm.bus_locked) {
+	if (!control->bus_locked) {
 		DRM_ERROR("I2C bus unlocked, stopping transaction!");
 		return -EIO;
 	}
@@ -631,13 +643,13 @@ static int smu_v11_0_i2c_xfer(struct i2c_adapter *i2c_adap,
 
 	for (i = 0; i < num; i++) {
 		if (msgs[i].flags & I2C_M_RD)
-			ret = smu_v11_0_i2c_read_data(i2c_adap,
-						      (uint8_t)msgs[i].addr,
-						      msgs[i].buf, msgs[i].len);
+			ret = smu_v11_0_i2c_eeprom_read_data(i2c_adap,
+							(uint8_t)msgs[i].addr,
+							msgs[i].buf, msgs[i].len);
 		else
-			ret = smu_v11_0_i2c_write_data(i2c_adap,
-						       (uint8_t)msgs[i].addr,
-						       msgs[i].buf, msgs[i].len);
+			ret = smu_v11_0_i2c_eeprom_write_data(i2c_adap,
+							 (uint8_t)msgs[i].addr,
+							 msgs[i].buf, msgs[i].len);
 
 		if (ret != I2C_OK) {
 			num = -EIO;
@@ -649,18 +661,18 @@ static int smu_v11_0_i2c_xfer(struct i2c_adapter *i2c_adap,
 	return num;
 }
 
-static u32 smu_v11_0_i2c_func(struct i2c_adapter *adap)
+static u32 smu_v11_0_i2c_eeprom_i2c_func(struct i2c_adapter *adap)
 {
 	return I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL;
 }
 
 
-static const struct i2c_algorithm smu_v11_0_i2c_algo = {
-	.master_xfer = smu_v11_0_i2c_xfer,
-	.functionality = smu_v11_0_i2c_func,
+static const struct i2c_algorithm smu_v11_0_i2c_eeprom_i2c_algo = {
+	.master_xfer = smu_v11_0_i2c_eeprom_i2c_xfer,
+	.functionality = smu_v11_0_i2c_eeprom_i2c_func,
 };
 
-int smu_v11_0_i2c_control_init(struct i2c_adapter *control)
+int smu_v11_0_i2c_eeprom_control_init(struct i2c_adapter *control)
 {
 	struct amdgpu_device *adev = to_amdgpu_device(control);
 	int res;
@@ -668,8 +680,8 @@ int smu_v11_0_i2c_control_init(struct i2c_adapter *control)
 	control->owner = THIS_MODULE;
 	control->class = I2C_CLASS_SPD;
 	control->dev.parent = &adev->pdev->dev;
-	control->algo = &smu_v11_0_i2c_algo;
-	snprintf(control->name, sizeof(control->name), "AMDGPU SMU");
+	control->algo = &smu_v11_0_i2c_eeprom_i2c_algo;
+	snprintf(control->name, sizeof(control->name), "AMDGPU EEPROM");
 	control->lock_ops = &smu_v11_0_i2c_i2c_lock_ops;
 
 	res = i2c_add_adapter(control);
@@ -679,7 +691,7 @@ int smu_v11_0_i2c_control_init(struct i2c_adapter *control)
 	return res;
 }
 
-void smu_v11_0_i2c_control_fini(struct i2c_adapter *control)
+void smu_v11_0_i2c_eeprom_control_fini(struct i2c_adapter *control)
 {
 	i2c_del_adapter(control);
 }
@@ -707,9 +719,9 @@ bool smu_v11_0_i2c_test_bus(struct i2c_adapter *control)
 	smu_v11_0_i2c_init(control);
 
 	/* Write 0xde to address 0x0000 on the EEPROM */
-	ret = smu_v11_0_i2c_write_data(control, I2C_TARGET_ADDR, data, 6);
+	ret = smu_v11_0_i2c_eeprom_write_data(control, I2C_TARGET_ADDR, data, 6);
 
-	ret = smu_v11_0_i2c_read_data(control, I2C_TARGET_ADDR, data, 6);
+	ret = smu_v11_0_i2c_eeprom_read_data(control, I2C_TARGET_ADDR, data, 6);
 
 	smu_v11_0_i2c_fini(control);
 

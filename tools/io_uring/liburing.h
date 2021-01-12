@@ -10,7 +10,6 @@ extern "C" {
 #include <string.h>
 #include "../../include/uapi/linux/io_uring.h"
 #include <inttypes.h>
-#include <linux/swab.h>
 #include "barrier.h"
 
 /*
@@ -146,14 +145,11 @@ static inline void io_uring_prep_write_fixed(struct io_uring_sqe *sqe, int fd,
 }
 
 static inline void io_uring_prep_poll_add(struct io_uring_sqe *sqe, int fd,
-					  unsigned poll_mask)
+					  short poll_mask)
 {
 	memset(sqe, 0, sizeof(*sqe));
 	sqe->opcode = IORING_OP_POLL_ADD;
 	sqe->fd = fd;
-#if __BYTE_ORDER == __BIG_ENDIAN
-	poll_mask = __swahw32(poll_mask);
-#endif
 	sqe->poll_events = poll_mask;
 }
 

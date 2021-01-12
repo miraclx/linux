@@ -14,7 +14,7 @@
 
 #ifndef _BONDING_PRIV_H
 #define _BONDING_PRIV_H
-#include <generated/utsrelease.h>
+#include <linux/vermagic.h>
 
 #define DRV_NAME	"bonding"
 #define DRV_DESCRIPTION	"Ethernet Channel Bonding Driver"

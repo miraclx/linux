@@ -29,13 +29,6 @@ properties:
   reg:
     maxItems: 1
 
-  reg-io-width:
-    description: |
-      The size (in bytes) of the IO accesses that should be performed
-      on the device.
-    $ref: /schemas/types.yaml#/definitions/uint32
-    enum: [ 1, 4 ]
-
   clocks:
     minItems: 2
     maxItems: 5
@@ -58,8 +51,9 @@ properties:
 
   samsung,uart-fifosize:
     description: The fifo size supported by the UART channel.
-    $ref: /schemas/types.yaml#/definitions/uint32
-    enum: [16, 64, 256]
+    allOf:
+      - $ref: /schemas/types.yaml#/definitions/uint32
+      - enum: [16, 64, 256]
 
 required:
   - compatible
@@ -67,8 +61,6 @@ required:
   - clock-names
   - interrupts
   - reg
-
-additionalProperties: false
 
 allOf:
   - if:

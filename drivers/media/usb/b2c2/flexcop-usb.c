@@ -419,9 +419,10 @@ static void flexcop_usb_transfer_exit(struct flexcop_usb *fc_usb)
 			usb_free_urb(fc_usb->iso_urb[i]);
 		}
 
-	usb_free_coherent(fc_usb->udev, fc_usb->buffer_size,
-			  fc_usb->iso_buffer, fc_usb->dma_addr);
-
+	if (fc_usb->iso_buffer != NULL)
+		usb_free_coherent(fc_usb->udev,
+			fc_usb->buffer_size, fc_usb->iso_buffer,
+			fc_usb->dma_addr);
 }
 
 static int flexcop_usb_transfer_init(struct flexcop_usb *fc_usb)
@@ -512,8 +513,6 @@ static int flexcop_usb_init(struct flexcop_usb *fc_usb)
 
 	if (fc_usb->uintf->cur_altsetting->desc.bNumEndpoints < 1)
 		return -ENODEV;
-	if (!usb_endpoint_is_isoc_in(&fc_usb->uintf->cur_altsetting->endpoint[1].desc))
-		return -ENODEV;
 
 	switch (fc_usb->udev->speed) {
 	case USB_SPEED_LOW:
@@ -526,7 +525,7 @@ static int flexcop_usb_init(struct flexcop_usb *fc_usb)
 	case USB_SPEED_HIGH:
 		info("running at HIGH speed.");
 		break;
-	case USB_SPEED_UNKNOWN:
+	case USB_SPEED_UNKNOWN: /* fall through */
 	default:
 		err("cannot handle USB speed because it is unknown.");
 		return -ENODEV;

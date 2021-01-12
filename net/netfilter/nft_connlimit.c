@@ -280,4 +280,3 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Pablo Neira Ayuso");
 MODULE_ALIAS_NFT_EXPR("connlimit");
 MODULE_ALIAS_NFT_OBJ(NFT_OBJECT_CONNLIMIT);
-MODULE_DESCRIPTION("nftables connlimit rule support");

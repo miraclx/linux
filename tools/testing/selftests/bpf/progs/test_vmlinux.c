@@ -19,14 +19,12 @@ SEC("tp/syscalls/sys_enter_nanosleep")
 int handle__tp(struct trace_event_raw_sys_enter *args)
 {
 	struct __kernel_timespec *ts;
-	long tv_nsec;
 
 	if (args->id != __NR_nanosleep)
 		return 0;
 
 	ts = (void *)args->args[0];
-	if (bpf_probe_read_user(&tv_nsec, sizeof(ts->tv_nsec), &ts->tv_nsec) ||
-	    tv_nsec != MY_TV_NSEC)
+	if (BPF_CORE_READ(ts, tv_nsec) != MY_TV_NSEC)
 		return 0;
 
 	tp_called = true;
@@ -37,14 +35,12 @@ SEC("raw_tp/sys_enter")
 int BPF_PROG(handle__raw_tp, struct pt_regs *regs, long id)
 {
 	struct __kernel_timespec *ts;
-	long tv_nsec;
 
 	if (id != __NR_nanosleep)
 		return 0;
 
 	ts = (void *)PT_REGS_PARM1_CORE(regs);
-	if (bpf_probe_read_user(&tv_nsec, sizeof(ts->tv_nsec), &ts->tv_nsec) ||
-	    tv_nsec != MY_TV_NSEC)
+	if (BPF_CORE_READ(ts, tv_nsec) != MY_TV_NSEC)
 		return 0;
 
 	raw_tp_called = true;
@@ -55,34 +51,32 @@ SEC("tp_btf/sys_enter")
 int BPF_PROG(handle__tp_btf, struct pt_regs *regs, long id)
 {
 	struct __kernel_timespec *ts;
-	long tv_nsec;
 
 	if (id != __NR_nanosleep)
 		return 0;
 
 	ts = (void *)PT_REGS_PARM1_CORE(regs);
-	if (bpf_probe_read_user(&tv_nsec, sizeof(ts->tv_nsec), &ts->tv_nsec) ||
-	    tv_nsec != MY_TV_NSEC)
+	if (BPF_CORE_READ(ts, tv_nsec) != MY_TV_NSEC)
 		return 0;
 
 	tp_btf_called = true;
 	return 0;
 }
 
-SEC("kprobe/hrtimer_start_range_ns")
-int BPF_KPROBE(handle__kprobe, struct hrtimer *timer, ktime_t tim, u64 delta_ns,
-	       const enum hrtimer_mode mode)
+SEC("kprobe/hrtimer_nanosleep")
+int BPF_KPROBE(handle__kprobe,
+	       ktime_t rqtp, enum hrtimer_mode mode, clockid_t clockid)
 {
-	if (tim == MY_TV_NSEC)
+	if (rqtp == MY_TV_NSEC)
 		kprobe_called = true;
 	return 0;
 }
 
-SEC("fentry/hrtimer_start_range_ns")
-int BPF_PROG(handle__fentry, struct hrtimer *timer, ktime_t tim, u64 delta_ns,
-	     const enum hrtimer_mode mode)
+SEC("fentry/hrtimer_nanosleep")
+int BPF_PROG(handle__fentry,
+	     ktime_t rqtp, enum hrtimer_mode mode, clockid_t clockid)
 {
-	if (tim == MY_TV_NSEC)
+	if (rqtp == MY_TV_NSEC)
 		fentry_called = true;
 	return 0;
 }

@@ -14,9 +14,10 @@
 
 static struct dentry *qedf_dbg_root;
 
-/*
+/**
  * qedf_dbg_host_init - setup the debugfs file for the pf
- */
+ * @pf: the pf that is starting up
+ **/
 void
 qedf_dbg_host_init(struct qedf_dbg_ctx *qedf,
 		    const struct qedf_debugfs_ops *dops,
@@ -41,9 +42,10 @@ qedf_dbg_host_init(struct qedf_dbg_ctx *qedf,
 	}
 }
 
-/*
+/**
  * qedf_dbg_host_exit - clear out the pf's debugfs entries
- */
+ * @pf: the pf that is stopping
+ **/
 void
 qedf_dbg_host_exit(struct qedf_dbg_ctx *qedf_dbg)
 {
@@ -54,9 +56,9 @@ qedf_dbg_host_exit(struct qedf_dbg_ctx *qedf_dbg)
 	qedf_dbg->bdf_dentry = NULL;
 }
 
-/*
+/**
  * qedf_dbg_init - start up debugfs for the driver
- */
+ **/
 void
 qedf_dbg_init(char *drv_name)
 {
@@ -66,9 +68,9 @@ qedf_dbg_init(char *drv_name)
 	qedf_dbg_root = debugfs_create_dir(drv_name, NULL);
 }
 
-/*
+/**
  * qedf_dbg_exit - clean out the driver's debugfs entries
- */
+ **/
 void
 qedf_dbg_exit(void)
 {

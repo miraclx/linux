@@ -356,8 +356,10 @@ static int rc5t619_rtc_probe(struct platform_device *pdev)
 	int err;
 
 	rtc = devm_kzalloc(dev, sizeof(*rtc), GFP_KERNEL);
-	if (!rtc)
+	if (IS_ERR(rtc)) {
+		err = PTR_ERR(rtc);
 		return -ENOMEM;
+	}
 
 	rtc->rn5t618 = rn5t618;
 
@@ -426,7 +428,7 @@ static int rc5t619_rtc_probe(struct platform_device *pdev)
 		dev_warn(&pdev->dev, "rc5t619 interrupt is disabled\n");
 	}
 
-	return devm_rtc_register_device(rtc->rtc);
+	return rtc_register_device(rtc->rtc);
 }
 
 static struct platform_driver rc5t619_rtc_driver = {

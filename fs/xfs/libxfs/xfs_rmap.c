@@ -1514,7 +1514,7 @@ xfs_rmap_convert_shared(
 	 * record for our insertion point. This will also give us the record for
 	 * start block contiguity tests.
 	 */
-	error = xfs_rmap_lookup_le_range(cur, bno, owner, offset, oldext,
+	error = xfs_rmap_lookup_le_range(cur, bno, owner, offset, flags,
 			&PREV, &i);
 	if (error)
 		goto done;
@@ -2404,6 +2404,10 @@ xfs_rmap_finish_one(
 			return -EFSCORRUPTED;
 
 		rcur = xfs_rmapbt_init_cursor(mp, tp, agbp, agno);
+		if (!rcur) {
+			error = -ENOMEM;
+			goto out_cur;
+		}
 	}
 	*pcur = rcur;
 
@@ -2441,6 +2445,11 @@ xfs_rmap_finish_one(
 		ASSERT(0);
 		error = -EFSCORRUPTED;
 	}
+	return error;
+
+out_cur:
+	xfs_trans_brelse(tp, agbp);
+
 	return error;
 }
 
@@ -2496,15 +2505,12 @@ xfs_rmap_map_extent(
 	int			whichfork,
 	struct xfs_bmbt_irec	*PREV)
 {
-	enum xfs_rmap_intent_type type = XFS_RMAP_MAP;
-
 	if (!xfs_rmap_update_is_needed(tp->t_mountp, whichfork))
 		return;
 
-	if (whichfork != XFS_ATTR_FORK && xfs_is_reflink_inode(ip))
-		type = XFS_RMAP_MAP_SHARED;
-
-	__xfs_rmap_add(tp, type, ip->i_ino, whichfork, PREV);
+	__xfs_rmap_add(tp, xfs_is_reflink_inode(ip) ?
+			XFS_RMAP_MAP_SHARED : XFS_RMAP_MAP, ip->i_ino,
+			whichfork, PREV);
 }
 
 /* Unmap an extent out of a file. */
@@ -2515,15 +2521,12 @@ xfs_rmap_unmap_extent(
 	int			whichfork,
 	struct xfs_bmbt_irec	*PREV)
 {
-	enum xfs_rmap_intent_type type = XFS_RMAP_UNMAP;
-
 	if (!xfs_rmap_update_is_needed(tp->t_mountp, whichfork))
 		return;
 
-	if (whichfork != XFS_ATTR_FORK && xfs_is_reflink_inode(ip))
-		type = XFS_RMAP_UNMAP_SHARED;
-
-	__xfs_rmap_add(tp, type, ip->i_ino, whichfork, PREV);
+	__xfs_rmap_add(tp, xfs_is_reflink_inode(ip) ?
+			XFS_RMAP_UNMAP_SHARED : XFS_RMAP_UNMAP, ip->i_ino,
+			whichfork, PREV);
 }
 
 /*
@@ -2540,15 +2543,12 @@ xfs_rmap_convert_extent(
 	int			whichfork,
 	struct xfs_bmbt_irec	*PREV)
 {
-	enum xfs_rmap_intent_type type = XFS_RMAP_CONVERT;
-
 	if (!xfs_rmap_update_is_needed(mp, whichfork))
 		return;
 
-	if (whichfork != XFS_ATTR_FORK && xfs_is_reflink_inode(ip))
-		type = XFS_RMAP_CONVERT_SHARED;
-
-	__xfs_rmap_add(tp, type, ip->i_ino, whichfork, PREV);
+	__xfs_rmap_add(tp, xfs_is_reflink_inode(ip) ?
+			XFS_RMAP_CONVERT_SHARED : XFS_RMAP_CONVERT, ip->i_ino,
+			whichfork, PREV);
 }
 
 /* Schedule the creation of an rmap for non-file data. */

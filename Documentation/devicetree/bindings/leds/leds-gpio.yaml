@@ -24,7 +24,8 @@ patternProperties:
   "(^led-[0-9a-f]$|led)":
     type: object
 
-    $ref: common.yaml#
+    allOf:
+      - $ref: common.yaml#
 
     properties:
       gpios:

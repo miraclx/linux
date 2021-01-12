@@ -31,6 +31,7 @@
 #include <linux/uaccess.h>
 
 #include <asm/io.h>
+#include <asm/pgtable.h>
 #include <asm/unwinder.h>
 #include <asm/sections.h>
 
@@ -40,20 +41,18 @@ unsigned long __user *lwa_addr;
 
 void print_trace(void *data, unsigned long addr, int reliable)
 {
-	const char *loglvl = data;
-
-	printk("%s[<%p>] %s%pS\n", loglvl, (void *) addr, reliable ? "" : "? ",
+	pr_emerg("[<%p>] %s%pS\n", (void *) addr, reliable ? "" : "? ",
 	       (void *) addr);
 }
 
 /* displays a short stack trace */
-void show_stack(struct task_struct *task, unsigned long *esp, const char *loglvl)
+void show_stack(struct task_struct *task, unsigned long *esp)
 {
 	if (esp == NULL)
 		esp = (unsigned long *)&esp;
 
-	printk("%sCall trace:\n", loglvl);
-	unwind_stack((void *)loglvl, esp, print_trace);
+	pr_emerg("Call trace:\n");
+	unwind_stack(NULL, esp, print_trace);
 }
 
 void show_registers(struct pt_regs *regs)
@@ -97,7 +96,7 @@ void show_registers(struct pt_regs *regs)
 	if (in_kernel) {
 
 		printk("\nStack: ");
-		show_stack(NULL, (unsigned long *)esp, KERN_EMERG);
+		show_stack(NULL, (unsigned long *)esp);
 
 		printk("\nCode: ");
 		if (regs->pc < PAGE_OFFSET)
@@ -238,7 +237,9 @@ void __init trap_init(void)
 
 asmlinkage void do_trap(struct pt_regs *regs, unsigned long address)
 {
-	force_sig_fault(SIGTRAP, TRAP_BRKPT, (void __user *)regs->pc);
+	force_sig_fault(SIGTRAP, TRAP_TRACE, (void __user *)address);
+
+	regs->pc += 4;
 }
 
 asmlinkage void do_unaligned_access(struct pt_regs *regs, unsigned long address)

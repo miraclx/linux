@@ -102,12 +102,12 @@ static irqreturn_t fsia6b_serio_irq(struct serio *serio,
 					input_report_key(fsia6b->dev,
 							 sw_id++,
 							 sw_state == 0);
-					fallthrough;
+					/* fall-through */
 				case '2':
 					input_report_key(fsia6b->dev,
 							 sw_id++,
 							 sw_state == 1);
-					fallthrough;
+					/* fall-through */
 				case '1':
 					input_report_key(fsia6b->dev,
 							 sw_id++,

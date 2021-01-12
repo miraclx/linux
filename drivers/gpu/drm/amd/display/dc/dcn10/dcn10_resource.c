@@ -51,7 +51,6 @@
 #include "dce112/dce112_resource.h"
 #include "dcn10_hubp.h"
 #include "dcn10_hubbub.h"
-#include "dce/dce_panel_cntl.h"
 
 #include "soc15_hw_ip.h"
 #include "vega10_ip_offset.h"
@@ -328,18 +327,6 @@ static const struct dcn10_link_enc_shift le_shift = {
 
 static const struct dcn10_link_enc_mask le_mask = {
 		LINK_ENCODER_MASK_SH_LIST_DCN10(_MASK)
-};
-
-static const struct dce_panel_cntl_registers panel_cntl_regs[] = {
-	{ DCN_PANEL_CNTL_REG_LIST() }
-};
-
-static const struct dce_panel_cntl_shift panel_cntl_shift = {
-	DCE_PANEL_CNTL_MASK_SH_LIST(__SHIFT)
-};
-
-static const struct dce_panel_cntl_mask panel_cntl_mask = {
-	DCE_PANEL_CNTL_MASK_SH_LIST(_MASK)
 };
 
 static const struct dce110_aux_registers_shift aux_shift = {
@@ -798,7 +785,7 @@ static const struct encoder_feature_support link_enc_feature = {
 		.max_hdmi_deep_color = COLOR_DEPTH_121212,
 		.max_hdmi_pixel_clock = 600000,
 		.hdmi_ycbcr420_supported = true,
-		.dp_ycbcr420_supported = true,
+		.dp_ycbcr420_supported = false,
 		.flags.bits.IS_HBR2_CAPABLE = true,
 		.flags.bits.IS_HBR3_CAPABLE = true,
 		.flags.bits.IS_TPS3_CAPABLE = true,
@@ -828,23 +815,6 @@ struct link_encoder *dcn10_link_encoder_create(
 				      &le_mask);
 
 	return &enc10->base;
-}
-
-static struct panel_cntl *dcn10_panel_cntl_create(const struct panel_cntl_init_data *init_data)
-{
-	struct dce_panel_cntl *panel_cntl =
-		kzalloc(sizeof(struct dce_panel_cntl), GFP_KERNEL);
-
-	if (!panel_cntl)
-		return NULL;
-
-	dce_panel_cntl_construct(panel_cntl,
-			init_data,
-			&panel_cntl_regs[init_data->inst],
-			&panel_cntl_shift,
-			&panel_cntl_mask);
-
-	return &panel_cntl->base;
 }
 
 struct clock_source *dcn10_clock_source_create(
@@ -1121,6 +1091,24 @@ static enum dc_status build_mapped_resource(
 {
 	struct pipe_ctx *pipe_ctx = resource_get_head_pipe_for_stream(&context->res_ctx, stream);
 
+	/*TODO Seems unneeded anymore */
+	/*	if (old_context && resource_is_stream_unchanged(old_context, stream)) {
+			if (stream != NULL && old_context->streams[i] != NULL) {
+				 todo: shouldn't have to copy missing parameter here
+				resource_build_bit_depth_reduction_params(stream,
+						&stream->bit_depth_params);
+				stream->clamping.pixel_encoding =
+						stream->timing.pixel_encoding;
+
+				resource_build_bit_depth_reduction_params(stream,
+								&stream->bit_depth_params);
+				build_clamping_params(stream);
+
+				continue;
+			}
+		}
+	*/
+
 	if (!pipe_ctx)
 		return DC_ERROR_UNEXPECTED;
 
@@ -1213,7 +1201,6 @@ static enum dc_status dcn10_validate_global(struct dc *dc, struct dc_state *cont
 	bool video_large = false;
 	bool desktop_large = false;
 	bool dcc_disabled = false;
-	bool mpo_enabled = false;
 
 	for (i = 0; i < context->stream_count; i++) {
 		if (context->stream_status[i].plane_count == 0)
@@ -1221,9 +1208,6 @@ static enum dc_status dcn10_validate_global(struct dc *dc, struct dc_state *cont
 
 		if (context->stream_status[i].plane_count > 2)
 			return DC_FAIL_UNSUPPORTED_1;
-
-		if (context->stream_status[i].plane_count > 1)
-			mpo_enabled = true;
 
 		for (j = 0; j < context->stream_status[i].plane_count; j++) {
 			struct dc_plane_state *plane =
@@ -1247,10 +1231,6 @@ static enum dc_status dcn10_validate_global(struct dc *dc, struct dc_state *cont
 			}
 		}
 	}
-
-	/* Disable MPO in multi-display configurations. */
-	if (context->stream_count > 1 && mpo_enabled)
-		return DC_FAIL_UNSUPPORTED_1;
 
 	/*
 	 * Workaround: On DCN10 there is UMC issue that causes underflow when
@@ -1321,7 +1301,6 @@ static const struct dc_cap_funcs cap_funcs = {
 static const struct resource_funcs dcn10_res_pool_funcs = {
 	.destroy = dcn10_destroy_resource_pool,
 	.link_enc_create = dcn10_link_encoder_create,
-	.panel_cntl_create = dcn10_panel_cntl_create,
 	.validate_bandwidth = dcn_validate_bandwidth,
 	.acquire_idle_pipe_for_layer = dcn10_acquire_idle_pipe_for_layer,
 	.validate_plane = dcn10_validate_plane,
@@ -1337,47 +1316,6 @@ static uint32_t read_pipe_fuses(struct dc_context *ctx)
 	/* RV1 support max 4 pipes */
 	value = value & 0xf;
 	return value;
-}
-
-/*
- * Some architectures don't support soft-float (e.g. aarch64), on those
- * this function has to be called with hardfloat enabled, make sure not
- * to inline it so whatever fp stuff is done stays inside
- */
-static noinline void dcn10_resource_construct_fp(
-	struct dc *dc)
-{
-	if (dc->ctx->dce_version == DCN_VERSION_1_01) {
-		struct dcn_soc_bounding_box *dcn_soc = dc->dcn_soc;
-		struct dcn_ip_params *dcn_ip = dc->dcn_ip;
-		struct display_mode_lib *dml = &dc->dml;
-
-		dml->ip.max_num_dpp = 3;
-		/* TODO how to handle 23.84? */
-		dcn_soc->dram_clock_change_latency = 23;
-		dcn_ip->max_num_dpp = 3;
-	}
-	if (ASICREV_IS_RV1_F0(dc->ctx->asic_id.hw_internal_rev)) {
-		dc->dcn_soc->urgent_latency = 3;
-		dc->debug.disable_dmcu = true;
-		dc->dcn_soc->fabric_and_dram_bandwidth_vmax0p9 = 41.60f;
-	}
-
-
-	dc->dcn_soc->number_of_channels = dc->ctx->asic_id.vram_width / ddr4_dram_width;
-	ASSERT(dc->dcn_soc->number_of_channels < 3);
-	if (dc->dcn_soc->number_of_channels == 0)/*old sbios bug*/
-		dc->dcn_soc->number_of_channels = 2;
-
-	if (dc->dcn_soc->number_of_channels == 1) {
-		dc->dcn_soc->fabric_and_dram_bandwidth_vmax0p9 = 19.2f;
-		dc->dcn_soc->fabric_and_dram_bandwidth_vnom0p8 = 17.066f;
-		dc->dcn_soc->fabric_and_dram_bandwidth_vmid0p72 = 14.933f;
-		dc->dcn_soc->fabric_and_dram_bandwidth_vmin0p65 = 12.8f;
-		if (ASICREV_IS_RV1_F0(dc->ctx->asic_id.hw_internal_rev)) {
-			dc->dcn_soc->fabric_and_dram_bandwidth_vmax0p9 = 20.80f;
-		}
-	}
 }
 
 static bool dcn10_resource_construct(
@@ -1416,9 +1354,7 @@ static bool dcn10_resource_construct(
 	dc->caps.max_video_width = 3840;
 	dc->caps.max_downscale_ratio = 200;
 	dc->caps.i2c_speed_in_khz = 100;
-	dc->caps.i2c_speed_in_khz_hdcp = 100; /*1.4 w/a not applied by default*/
 	dc->caps.max_cursor_size = 256;
-	dc->caps.min_horizontal_blanking_period = 80;
 	dc->caps.max_slave_planes = 1;
 	dc->caps.is_apu = true;
 	dc->caps.post_blend_color_processing = false;
@@ -1426,41 +1362,6 @@ static bool dcn10_resource_construct(
 
 	/* Raven DP PHY HBR2 eye diagram pattern is not stable. Use TP4 */
 	dc->caps.force_dp_tps4_for_cp2520 = true;
-
-	/* Color pipeline capabilities */
-	dc->caps.color.dpp.dcn_arch = 1;
-	dc->caps.color.dpp.input_lut_shared = 1;
-	dc->caps.color.dpp.icsc = 1;
-	dc->caps.color.dpp.dgam_ram = 1;
-	dc->caps.color.dpp.dgam_rom_caps.srgb = 1;
-	dc->caps.color.dpp.dgam_rom_caps.bt2020 = 1;
-	dc->caps.color.dpp.dgam_rom_caps.gamma2_2 = 0;
-	dc->caps.color.dpp.dgam_rom_caps.pq = 0;
-	dc->caps.color.dpp.dgam_rom_caps.hlg = 0;
-	dc->caps.color.dpp.post_csc = 0;
-	dc->caps.color.dpp.gamma_corr = 0;
-	dc->caps.color.dpp.dgam_rom_for_yuv = 1;
-
-	dc->caps.color.dpp.hw_3d_lut = 0;
-	dc->caps.color.dpp.ogam_ram = 1; // RGAM on DCN1
-	dc->caps.color.dpp.ogam_rom_caps.srgb = 1;
-	dc->caps.color.dpp.ogam_rom_caps.bt2020 = 1;
-	dc->caps.color.dpp.ogam_rom_caps.gamma2_2 = 0;
-	dc->caps.color.dpp.ogam_rom_caps.pq = 0;
-	dc->caps.color.dpp.ogam_rom_caps.hlg = 0;
-	dc->caps.color.dpp.ocsc = 1;
-
-	/* no post-blend color operations */
-	dc->caps.color.mpc.gamut_remap = 0;
-	dc->caps.color.mpc.num_3dluts = 0;
-	dc->caps.color.mpc.shared_3d_lut = 0;
-	dc->caps.color.mpc.ogam_ram = 0;
-	dc->caps.color.mpc.ogam_rom_caps.srgb = 0;
-	dc->caps.color.mpc.ogam_rom_caps.bt2020 = 0;
-	dc->caps.color.mpc.ogam_rom_caps.gamma2_2 = 0;
-	dc->caps.color.mpc.ogam_rom_caps.pq = 0;
-	dc->caps.color.mpc.ogam_rom_caps.hlg = 0;
-	dc->caps.color.mpc.ocsc = 0;
 
 	if (dc->ctx->dce_environment == DCE_ENV_PRODUCTION_DRV)
 		dc->debug = debug_defaults_drv;
@@ -1534,15 +1435,37 @@ static bool dcn10_resource_construct(
 	memcpy(dc->dcn_ip, &dcn10_ip_defaults, sizeof(dcn10_ip_defaults));
 	memcpy(dc->dcn_soc, &dcn10_soc_defaults, sizeof(dcn10_soc_defaults));
 
-#if defined(CONFIG_ARM64)
-	/* Aarch64 does not support -msoft-float/-mfloat-abi=soft */
-	DC_FP_START();
-	dcn10_resource_construct_fp(dc);
-	DC_FP_END();
-#else
-	/* Other architectures we build for build this with soft-float */
-	dcn10_resource_construct_fp(dc);
-#endif
+	if (dc->ctx->dce_version == DCN_VERSION_1_01) {
+		struct dcn_soc_bounding_box *dcn_soc = dc->dcn_soc;
+		struct dcn_ip_params *dcn_ip = dc->dcn_ip;
+		struct display_mode_lib *dml = &dc->dml;
+
+		dml->ip.max_num_dpp = 3;
+		/* TODO how to handle 23.84? */
+		dcn_soc->dram_clock_change_latency = 23;
+		dcn_ip->max_num_dpp = 3;
+	}
+	if (ASICREV_IS_RV1_F0(dc->ctx->asic_id.hw_internal_rev)) {
+		dc->dcn_soc->urgent_latency = 3;
+		dc->debug.disable_dmcu = true;
+		dc->dcn_soc->fabric_and_dram_bandwidth_vmax0p9 = 41.60f;
+	}
+
+
+	dc->dcn_soc->number_of_channels = dc->ctx->asic_id.vram_width / ddr4_dram_width;
+	ASSERT(dc->dcn_soc->number_of_channels < 3);
+	if (dc->dcn_soc->number_of_channels == 0)/*old sbios bug*/
+		dc->dcn_soc->number_of_channels = 2;
+
+	if (dc->dcn_soc->number_of_channels == 1) {
+		dc->dcn_soc->fabric_and_dram_bandwidth_vmax0p9 = 19.2f;
+		dc->dcn_soc->fabric_and_dram_bandwidth_vnom0p8 = 17.066f;
+		dc->dcn_soc->fabric_and_dram_bandwidth_vmid0p72 = 14.933f;
+		dc->dcn_soc->fabric_and_dram_bandwidth_vmin0p65 = 12.8f;
+		if (ASICREV_IS_RV1_F0(dc->ctx->asic_id.hw_internal_rev)) {
+			dc->dcn_soc->fabric_and_dram_bandwidth_vmax0p9 = 20.80f;
+		}
+	}
 
 	pool->base.pp_smu = dcn10_pp_smu_create(ctx);
 

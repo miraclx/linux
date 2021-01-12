@@ -13,7 +13,7 @@
 
 #include <asm/tlb.h>
 
-#include <asm-generic/pgalloc.h>
+#include <asm-generic/pgalloc.h>	/* for pte_{alloc,free}_one */
 
 extern const char bad_pmd_string[];
 
@@ -39,6 +39,11 @@ static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmd, pgtable_t page
  * inside the pgd, so has no extra memory associated with it.
  */
 #define pmd_free(mm, x)			do { } while (0)
+
+static inline void pgd_free(struct mm_struct *mm, pgd_t *pgd)
+{
+        free_page((unsigned long) pgd);
+}
 
 static inline pgd_t * pgd_alloc(struct mm_struct *mm)
 {

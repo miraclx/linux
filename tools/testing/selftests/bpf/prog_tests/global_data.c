@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <test_progs.h>
-#include <network_helpers.h>
 
 static void test_global_data_number(struct bpf_object *obj, __u32 duration)
 {
 	int i, err, map_fd;
-	__u64 num;
+	uint64_t num;
 
 	map_fd = bpf_find_map(__func__, obj, "result_number");
 	if (CHECK_FAIL(map_fd < 0))
@@ -14,7 +13,7 @@ static void test_global_data_number(struct bpf_object *obj, __u32 duration)
 	struct {
 		char *name;
 		uint32_t key;
-		__u64 num;
+		uint64_t num;
 	} tests[] = {
 		{ "relocate .bss reference",     0, 0 },
 		{ "relocate .data reference",    1, 42 },
@@ -32,7 +31,7 @@ static void test_global_data_number(struct bpf_object *obj, __u32 duration)
 	for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
 		err = bpf_map_lookup_elem(map_fd, &tests[i].key, &num);
 		CHECK(err || num != tests[i].num, tests[i].name,
-		      "err %d result %llx expected %llx\n",
+		      "err %d result %lx expected %lx\n",
 		      err, num, tests[i].num);
 	}
 }

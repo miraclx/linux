@@ -52,7 +52,6 @@
 #include "bearer.h"
 #include "netlink.h"
 #include "msg.h"
-#include "udp_media.h"
 
 /* IANA assigned UDP port */
 #define UDP_PORT_DEFAULT	6118
@@ -64,11 +63,6 @@
  *
  * This is the bearer level originating address used in neighbor discovery
  * messages, and all fields should be in network byte order
- *
- * @proto: Ethernet protocol in use
- * @port: port being used
- * @ipv4: IPv4 address of neighbor
- * @ipv6: IPv6 address of neighbor
  */
 struct udp_media_addr {
 	__be16	proto;
@@ -93,7 +87,6 @@ struct udp_replicast {
  * @ubsock:	bearer associated socket
  * @ifindex:	local address scope
  * @work:	used to schedule deferred work on a bearer
- * @rcast:	associated udp_replicast container
  */
 struct udp_bearer {
 	struct tipc_bearer __rcu *bearer;
@@ -572,7 +565,7 @@ msg_full:
 
 /**
  * tipc_parse_udp_addr - build udp media address from netlink data
- * @nla:	netlink attribute containing sockaddr storage aligned address
+ * @nlattr:	netlink attribute containing sockaddr storage aligned address
  * @addr:	tipc media address to fill with address, port and protocol type
  * @scope_id:	IPv6 scope id pointer, not NULL indicates it's required
  */
@@ -667,7 +660,6 @@ static int tipc_udp_enable(struct net *net, struct tipc_bearer *b,
 	struct udp_tunnel_sock_cfg tuncfg = {NULL};
 	struct nlattr *opts[TIPC_NLA_UDP_MAX + 1];
 	u8 node_id[NODE_ID_LEN] = {0,};
-	struct net_device *dev;
 	int rmcast = 0;
 
 	ub = kzalloc(sizeof(*ub), GFP_ATOMIC);
@@ -722,6 +714,8 @@ static int tipc_udp_enable(struct net *net, struct tipc_bearer *b,
 	rcu_assign_pointer(ub->bearer, b);
 	tipc_udp_media_addr_set(&b->addr, &local);
 	if (local.proto == htons(ETH_P_IP)) {
+		struct net_device *dev;
+
 		dev = __ip_dev_find(net, local.ipv4.s_addr, false);
 		if (!dev) {
 			err = -ENODEV;
@@ -744,12 +738,6 @@ static int tipc_udp_enable(struct net *net, struct tipc_bearer *b,
 		b->mtu = b->media->mtu;
 #if IS_ENABLED(CONFIG_IPV6)
 	} else if (local.proto == htons(ETH_P_IPV6)) {
-		dev = ub->ifindex ? __dev_get_by_index(net, ub->ifindex) : NULL;
-		dev = ipv6_dev_find(net, &local.ipv6, dev);
-		if (!dev) {
-			err = -ENODEV;
-			goto err;
-		}
 		udp_conf.family = AF_INET6;
 		udp_conf.use_udp6_tx_checksums = true;
 		udp_conf.use_udp6_rx_checksums = true;
@@ -757,7 +745,6 @@ static int tipc_udp_enable(struct net *net, struct tipc_bearer *b,
 			udp_conf.local_ip6 = in6addr_any;
 		else
 			udp_conf.local_ip6 = local.ipv6;
-		ub->ifindex = dev->ifindex;
 		b->mtu = 1280;
 #endif
 	} else {
@@ -778,7 +765,7 @@ static int tipc_udp_enable(struct net *net, struct tipc_bearer *b,
 	if (err)
 		goto free;
 
-	/*
+	/**
 	 * The bcast media address port is used for all peers and the ip
 	 * is used if it's a multicast address.
 	 */

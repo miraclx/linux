@@ -150,7 +150,8 @@ static union ieee754dp _dp_maddf(union ieee754dp z, union ieee754dp x,
 
 	case CLPAIR(IEEE754_CLASS_DNORM, IEEE754_CLASS_DNORM):
 		DPDNORMX;
-		fallthrough;
+		/* fall through */
+
 	case CLPAIR(IEEE754_CLASS_NORM, IEEE754_CLASS_DNORM):
 		if (zc == IEEE754_CLASS_INF)
 			return ieee754dp_inf(zs);

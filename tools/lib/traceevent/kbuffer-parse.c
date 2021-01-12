@@ -361,7 +361,6 @@ translate_data(struct kbuffer *kbuf, void *data, void **rptr,
 		break;
 
 	case KBUFFER_TYPE_TIME_EXTEND:
-	case KBUFFER_TYPE_TIME_STAMP:
 		extend = read_4(kbuf, data);
 		data += 4;
 		extend <<= TS_SHIFT;
@@ -370,6 +369,10 @@ translate_data(struct kbuffer *kbuf, void *data, void **rptr,
 		*length = 0;
 		break;
 
+	case KBUFFER_TYPE_TIME_STAMP:
+		data += 12;
+		*length = 0;
+		break;
 	case 0:
 		*length = read_4(kbuf, data) - 4;
 		*length = (*length + 3) & ~3;
@@ -394,11 +397,7 @@ static unsigned int update_pointers(struct kbuffer *kbuf)
 
 	type_len = translate_data(kbuf, ptr, &ptr, &delta, &length);
 
-	if (type_len == KBUFFER_TYPE_TIME_STAMP)
-		kbuf->timestamp = delta;
-	else
-		kbuf->timestamp += delta;
-
+	kbuf->timestamp += delta;
 	kbuf->index = calc_index(kbuf, ptr);
 	kbuf->next = kbuf->index + length;
 
@@ -439,7 +438,7 @@ void *kbuffer_translate_data(int swap, void *data, unsigned int *size)
 	case KBUFFER_TYPE_TIME_EXTEND:
 	case KBUFFER_TYPE_TIME_STAMP:
 		return NULL;
-	}
+	};
 
 	*size = length;
 
@@ -455,9 +454,7 @@ static int __next_event(struct kbuffer *kbuf)
 		if (kbuf->next >= kbuf->size)
 			return -1;
 		type = update_pointers(kbuf);
-	} while (type == KBUFFER_TYPE_TIME_EXTEND ||
-		 type == KBUFFER_TYPE_TIME_STAMP ||
-		 type == KBUFFER_TYPE_PADDING);
+	} while (type == KBUFFER_TYPE_TIME_EXTEND || type == KBUFFER_TYPE_PADDING);
 
 	return 0;
 }
@@ -548,34 +545,6 @@ int kbuffer_load_subbuffer(struct kbuffer *kbuf, void *subbuffer)
 
 	return 0;
 }
-
-/**
- * kbuffer_subbuf_timestamp - read the timestamp from a sub buffer
- * @kbuf:      The kbuffer to load
- * @subbuf:    The subbuffer to read from.
- *
- * Return the timestamp from a subbuffer.
- */
-unsigned long long kbuffer_subbuf_timestamp(struct kbuffer *kbuf, void *subbuf)
-{
-	return kbuf->read_8(subbuf);
-}
-
-/**
- * kbuffer_ptr_delta - read the delta field from a record
- * @kbuf:      The kbuffer to load
- * @ptr:       The record in the buffe.
- *
- * Return the timestamp delta from a record
- */
-unsigned int kbuffer_ptr_delta(struct kbuffer *kbuf, void *ptr)
-{
-	unsigned int type_len_ts;
-
-	type_len_ts = read_4(kbuf, ptr);
-	return ts4host(kbuf, type_len_ts);
-}
-
 
 /**
  * kbuffer_read_event - read the next event in the kbuffer subbuffer

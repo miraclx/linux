@@ -35,6 +35,8 @@
 #include <asm/entry.h>
 #include <asm/ucontext.h>
 #include <linux/uaccess.h>
+#include <asm/pgtable.h>
+#include <asm/pgalloc.h>
 #include <linux/syscalls.h>
 #include <asm/cacheflush.h>
 #include <asm/syscalls.h>
@@ -157,8 +159,13 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	struct rt_sigframe __user *frame;
 	int err = 0, sig = ksig->sig;
 	unsigned long address = 0;
+#ifdef CONFIG_MMU
+	pgd_t *pgdp;
+	p4d_t *p4dp;
+	pud_t *pudp;
 	pmd_t *pmdp;
 	pte_t *ptep;
+#endif
 
 	frame = get_sigframe(ksig, regs, sizeof(*frame));
 
@@ -190,7 +197,11 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	regs->r15 = ((unsigned long)frame->tramp)-8;
 
 	address = ((unsigned long)frame->tramp);
-	pmdp = pmd_off(current->mm, address);
+#ifdef CONFIG_MMU
+	pgdp = pgd_offset(current->mm, address);
+	p4dp = p4d_offset(pgdp, address);
+	pudp = pud_offset(p4dp, address);
+	pmdp = pmd_offset(pudp, address);
 
 	preempt_disable();
 	ptep = pte_offset_map(pmdp, address);
@@ -205,6 +216,10 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	}
 	pte_unmap(ptep);
 	preempt_enable();
+#else
+	flush_icache_range(address, address + 8);
+	flush_dcache_range(address, address + 8);
+#endif
 	if (err)
 		return -EFAULT;
 
@@ -242,7 +257,7 @@ handle_restart(struct pt_regs *regs, struct k_sigaction *ka, int has_handler)
 			regs->r3 = -EINTR;
 			break;
 	}
-		fallthrough;
+	/* fallthrough */
 	case -ERESTARTNOINTR:
 do_restart:
 		/* offset of 4 bytes to re-execute trap (brki) instruction */
@@ -306,10 +321,9 @@ static void do_signal(struct pt_regs *regs, int in_syscall)
 
 asmlinkage void do_notify_resume(struct pt_regs *regs, int in_syscall)
 {
-	if (test_thread_flag(TIF_SIGPENDING) ||
-	    test_thread_flag(TIF_NOTIFY_SIGNAL))
+	if (test_thread_flag(TIF_SIGPENDING))
 		do_signal(regs, in_syscall);
 
-	if (test_thread_flag(TIF_NOTIFY_RESUME))
+	if (test_and_clear_thread_flag(TIF_NOTIFY_RESUME))
 		tracehook_notify_resume(regs);
 }

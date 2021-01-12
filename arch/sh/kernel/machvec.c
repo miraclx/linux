@@ -15,7 +15,6 @@
 #include <asm/setup.h>
 #include <asm/io.h>
 #include <asm/irq.h>
-#include <asm/processor.h>
 
 #define MV_NAME_SIZE 32
 
@@ -65,10 +64,10 @@ static int __init early_parse_mv(char *from)
 
 	mvp = get_mv_byname(mv_name);
 	if (unlikely(!mvp)) {
-		pr_info("Available vectors:\n\n\t'%s', ", sh_mv.mv_name);
+		printk("Available vectors:\n\n\t'%s', ", sh_mv.mv_name);
 		for_each_mv(mvp)
-			pr_cont("'%s', ", mvp->mv_name);
-		pr_cont("\n\n");
+			printk("'%s', ", mvp->mv_name);
+		printk("\n\n");
 		panic("Failed to select machvec '%s' -- halting.\n",
 		      mv_name);
 	} else
@@ -105,7 +104,7 @@ void __init sh_mv_setup(void)
 			sh_mv = *(struct sh_machine_vector *)&__machvec_start;
 	}
 
-	pr_notice("Booting machvec: %s\n", get_system_type());
+	printk(KERN_NOTICE "Booting machvec: %s\n", get_system_type());
 
 	/*
 	 * Manually walk the vec, fill in anything that the board hasn't yet

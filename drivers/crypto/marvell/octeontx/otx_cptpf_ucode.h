@@ -74,7 +74,7 @@ struct otx_cpt_ucode_ver_num {
 struct otx_cpt_ucode_hdr {
 	struct otx_cpt_ucode_ver_num ver_num;
 	u8 ver_str[OTX_CPT_UCODE_VER_STR_SZ];
-	__be32 code_length;
+	u32 code_length;
 	u32 padding[3];
 };
 

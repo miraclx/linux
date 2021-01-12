@@ -16,6 +16,7 @@
 
 #include <asm/fixmap.h>
 #include <asm/tlbflush.h>
+#include <asm/pgalloc.h>
 
 static void __iomem *__ioremap_caller(phys_addr_t phys_addr, size_t size,
 				      pgprot_t prot, void *caller)

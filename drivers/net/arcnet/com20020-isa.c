@@ -197,22 +197,22 @@ static int __init com20020isa_setup(char *s)
 	switch (ints[0]) {
 	default:		/* ERROR */
 		pr_info("Too many arguments\n");
-		fallthrough;
+		/* Fall through */
 	case 6:		/* Timeout */
 		timeout = ints[6];
-		fallthrough;
+		/* Fall through */
 	case 5:		/* CKP value */
 		clockp = ints[5];
-		fallthrough;
+		/* Fall through */
 	case 4:		/* Backplane flag */
 		backplane = ints[4];
-		fallthrough;
+		/* Fall through */
 	case 3:		/* Node ID */
 		node = ints[3];
-		fallthrough;
+		/* Fall through */
 	case 2:		/* IRQ */
 		irq = ints[2];
-		fallthrough;
+		/* Fall through */
 	case 1:		/* IO address */
 		io = ints[1];
 	}

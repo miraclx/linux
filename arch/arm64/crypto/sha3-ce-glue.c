@@ -94,7 +94,7 @@ static int sha3_final(struct shash_desc *desc, u8 *out)
 	if (digest_size & 4)
 		put_unaligned_le32(sctx->st[i], (__le32 *)digest);
 
-	memzero_explicit(sctx, sizeof(*sctx));
+	*sctx = (struct sha3_state){};
 	return 0;
 }
 

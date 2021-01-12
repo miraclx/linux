@@ -12,6 +12,7 @@
 #include <linux/compiler.h>
 #include <linux/netdevice.h>
 #include <linux/netlink.h>
+#include <linux/seq_file.h>
 #include <linux/skbuff.h>
 #include <linux/stddef.h>
 #include <linux/types.h>
@@ -34,13 +35,16 @@ static inline bool batadv_bla_is_loopdetect_mac(const uint8_t *mac)
 
 #ifdef CONFIG_BATMAN_ADV_BLA
 bool batadv_bla_rx(struct batadv_priv *bat_priv, struct sk_buff *skb,
-		   unsigned short vid, int packet_type);
+		   unsigned short vid, bool is_bcast);
 bool batadv_bla_tx(struct batadv_priv *bat_priv, struct sk_buff *skb,
 		   unsigned short vid);
 bool batadv_bla_is_backbone_gw(struct sk_buff *skb,
 			       struct batadv_orig_node *orig_node,
 			       int hdr_size);
+int batadv_bla_claim_table_seq_print_text(struct seq_file *seq, void *offset);
 int batadv_bla_claim_dump(struct sk_buff *msg, struct netlink_callback *cb);
+int batadv_bla_backbone_table_seq_print_text(struct seq_file *seq,
+					     void *offset);
 int batadv_bla_backbone_dump(struct sk_buff *msg, struct netlink_callback *cb);
 bool batadv_bla_is_backbone_gw_orig(struct batadv_priv *bat_priv, u8 *orig,
 				    unsigned short vid);
@@ -62,7 +66,7 @@ bool batadv_bla_check_claim(struct batadv_priv *bat_priv, u8 *addr,
 
 static inline bool batadv_bla_rx(struct batadv_priv *bat_priv,
 				 struct sk_buff *skb, unsigned short vid,
-				 int packet_type)
+				 bool is_bcast)
 {
 	return false;
 }
@@ -78,6 +82,18 @@ static inline bool batadv_bla_is_backbone_gw(struct sk_buff *skb,
 					     int hdr_size)
 {
 	return false;
+}
+
+static inline int batadv_bla_claim_table_seq_print_text(struct seq_file *seq,
+							void *offset)
+{
+	return 0;
+}
+
+static inline int batadv_bla_backbone_table_seq_print_text(struct seq_file *seq,
+							   void *offset)
+{
+	return 0;
 }
 
 static inline bool batadv_bla_is_backbone_gw_orig(struct batadv_priv *bat_priv,

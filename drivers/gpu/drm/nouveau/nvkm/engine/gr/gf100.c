@@ -741,7 +741,7 @@ gf100_gr_fecs_ctrl_ctxsw(struct gf100_gr *gr, u32 mthd)
 	return -ETIMEDOUT;
 }
 
-static int
+int
 gf100_gr_fecs_start_ctxsw(struct nvkm_gr *base)
 {
 	struct gf100_gr *gr = gf100_gr(base);
@@ -756,7 +756,7 @@ gf100_gr_fecs_start_ctxsw(struct nvkm_gr *base)
 	return ret;
 }
 
-static int
+int
 gf100_gr_fecs_stop_ctxsw(struct nvkm_gr *base)
 {
 	struct gf100_gr *gr = gf100_gr(base);
@@ -2032,7 +2032,7 @@ gf100_gr_fini(struct nvkm_gr *base, bool suspend)
 	return 0;
 }
 
-static void *
+void *
 gf100_gr_dtor(struct nvkm_gr *base)
 {
 	struct gf100_gr *gr = gf100_gr(base);
@@ -2103,7 +2103,7 @@ gf100_gr_new_(const struct gf100_gr_fwif *fwif,
 
 	fwif = nvkm_firmware_load(&gr->base.engine.subdev, fwif, "Gr", gr);
 	if (IS_ERR(fwif))
-		return PTR_ERR(fwif);
+		return -ENODEV;
 
 	gr->func = fwif->func;
 

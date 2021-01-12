@@ -80,9 +80,7 @@ _GLOBAL(exec_instr)
 	REST_NVGPRS(r31)
 
 	/* Placeholder for the test instruction */
-	.balign 64
 1:	nop
-	nop
 	patch_site 1b patch__exec_instr
 
 	/*

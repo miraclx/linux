@@ -721,7 +721,9 @@ static void s1d13xxxfb_fetch_hw_state(struct fb_info *info)
 		xres, yres, xres_virtual, yres_virtual, is_color, is_dual, is_tft);
 }
 
-static void __s1d13xxxfb_remove(struct platform_device *pdev)
+
+static int
+s1d13xxxfb_remove(struct platform_device *pdev)
 {
 	struct fb_info *info = platform_get_drvdata(pdev);
 	struct s1d13xxxfb_par *par = NULL;
@@ -747,14 +749,6 @@ static void __s1d13xxxfb_remove(struct platform_device *pdev)
 			   resource_size(&pdev->resource[0]));
 	release_mem_region(pdev->resource[1].start,
 			   resource_size(&pdev->resource[1]));
-}
-
-static int s1d13xxxfb_remove(struct platform_device *pdev)
-{
-	struct fb_info *info = platform_get_drvdata(pdev);
-
-	unregister_framebuffer(info);
-	__s1d13xxxfb_remove(pdev);
 	return 0;
 }
 
@@ -901,7 +895,7 @@ static int s1d13xxxfb_probe(struct platform_device *pdev)
 	return 0;
 
 bail:
-	__s1d13xxxfb_remove(pdev);
+	s1d13xxxfb_remove(pdev);
 	return ret;
 
 }

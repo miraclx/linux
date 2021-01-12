@@ -2,4 +2,3 @@
 obj-$(CONFIG_VDPA) += vdpa.o
 obj-$(CONFIG_VDPA_SIM) += vdpa_sim/
 obj-$(CONFIG_IFCVF)    += ifcvf/
-obj-$(CONFIG_MLX5_VDPA) += mlx5/

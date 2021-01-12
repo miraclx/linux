@@ -198,18 +198,6 @@ int hfi_session_init(struct venus_inst *inst, u32 pixfmt)
 	const struct hfi_ops *ops = core->ops;
 	int ret;
 
-	/*
-	 * If core shutdown is in progress or if we are in system
-	 * recovery, return an error as during system error recovery
-	 * session_init() can't pass successfully
-	 */
-	mutex_lock(&core->lock);
-	if (!core->ops || core->sys_error) {
-		mutex_unlock(&core->lock);
-		return -EIO;
-	}
-	mutex_unlock(&core->lock);
-
 	if (inst->state != INST_UNINIT)
 		return -EINVAL;
 
@@ -394,7 +382,7 @@ int hfi_session_unload_res(struct venus_inst *inst)
 }
 EXPORT_SYMBOL_GPL(hfi_session_unload_res);
 
-int hfi_session_flush(struct venus_inst *inst, u32 type, bool block)
+int hfi_session_flush(struct venus_inst *inst, u32 type)
 {
 	const struct hfi_ops *ops = inst->core->ops;
 	int ret;
@@ -405,11 +393,9 @@ int hfi_session_flush(struct venus_inst *inst, u32 type, bool block)
 	if (ret)
 		return ret;
 
-	if (block) {
-		ret = wait_session_msg(inst);
-		if (ret)
-			return ret;
-	}
+	ret = wait_session_msg(inst);
+	if (ret)
+		return ret;
 
 	return 0;
 }
@@ -528,9 +514,4 @@ int hfi_create(struct venus_core *core, const struct hfi_core_ops *ops)
 void hfi_destroy(struct venus_core *core)
 {
 	venus_hfi_destroy(core);
-}
-
-void hfi_reinit(struct venus_core *core)
-{
-	venus_hfi_queues_reinit(core);
 }

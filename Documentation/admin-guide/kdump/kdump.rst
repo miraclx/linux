@@ -509,12 +509,9 @@ ELF32-format headers using the --elf32-core-headers kernel option on the
 dump kernel.
 
 You can also use the Crash utility to analyze dump files in Kdump
-format. Crash is available at the following URL:
+format. Crash is available on Dave Anderson's site at the following URL:
 
-   https://github.com/crash-utility/crash
-
-Crash document can be found at:
-   https://crash-utility.github.io/
+   http://people.redhat.com/~anderson/
 
 Trigger Kdump on WARN()
 =======================
@@ -523,14 +520,6 @@ The kernel parameter, panic_on_warn, calls panic() in all WARN() paths.  This
 will cause a kdump to occur at the panic() call.  In cases where a user wants
 to specify this during runtime, /proc/sys/kernel/panic_on_warn can be set to 1
 to achieve the same behaviour.
-
-Trigger Kdump on add_taint()
-============================
-
-The kernel parameter panic_on_taint facilitates a conditional call to panic()
-from within add_taint() whenever the value set in this bitmask matches with the
-bit flag being set by add_taint().
-This will cause a kdump to occur at the add_taint()->panic() call.
 
 Contact
 =======

@@ -11,6 +11,7 @@
 #include <linux/uaccess.h>
 #include <linux/perf_event.h>
 
+#include <asm/pgtable.h>
 #include <asm/tlbflush.h>
 
 extern void die(const char *str, struct pt_regs *regs, long err);
@@ -121,19 +122,17 @@ void do_page_fault(unsigned long entry, unsigned long addr,
 	if (unlikely(faulthandler_disabled() || !mm))
 		goto no_context;
 
-	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, addr);
-
 	/*
 	 * As per x86, we may deadlock here. However, since the kernel only
 	 * validly references user space from well defined areas of the code,
 	 * we can bug out early if this is from code which shouldn't.
 	 */
-	if (unlikely(!mmap_read_trylock(mm))) {
+	if (unlikely(!down_read_trylock(&mm->mmap_sem))) {
 		if (!user_mode(regs) &&
 		    !search_exception_tables(instruction_pointer(regs)))
 			goto no_context;
 retry:
-		mmap_read_lock(mm);
+		down_read(&mm->mmap_sem);
 	} else {
 		/*
 		 * The above down_read_trylock() might have succeeded in which
@@ -208,11 +207,11 @@ good_area:
 	 * the fault.
 	 */
 
-	fault = handle_mm_fault(vma, addr, flags, regs);
+	fault = handle_mm_fault(vma, addr, flags);
 
 	/*
 	 * If we need to retry but a fatal signal is pending, handle the
-	 * signal first. We do not need to release the mmap_lock because it
+	 * signal first. We do not need to release the mmap_sem because it
 	 * would already be released in __lock_page_or_retry in mm/filemap.c.
 	 */
 	if (fault_signal_pending(fault, regs)) {
@@ -230,11 +229,26 @@ good_area:
 			goto bad_area;
 	}
 
+	/*
+	 * Major/minor page fault accounting is only done on the initial
+	 * attempt. If we go through a retry, it is extremely likely that the
+	 * page will be found in page cache at that point.
+	 */
+	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, addr);
 	if (flags & FAULT_FLAG_ALLOW_RETRY) {
+		if (fault & VM_FAULT_MAJOR) {
+			tsk->maj_flt++;
+			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ,
+				      1, regs, addr);
+		} else {
+			tsk->min_flt++;
+			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN,
+				      1, regs, addr);
+		}
 		if (fault & VM_FAULT_RETRY) {
 			flags |= FAULT_FLAG_TRIED;
 
-			/* No need to mmap_read_unlock(mm) as we would
+			/* No need to up_read(&mm->mmap_sem) as we would
 			 * have already released it in __lock_page_or_retry
 			 * in mm/filemap.c.
 			 */
@@ -242,7 +256,7 @@ good_area:
 		}
 	}
 
-	mmap_read_unlock(mm);
+	up_read(&mm->mmap_sem);
 	return;
 
 	/*
@@ -250,7 +264,7 @@ good_area:
 	 * Fix it, but check if it's kernel or user first..
 	 */
 bad_area:
-	mmap_read_unlock(mm);
+	up_read(&mm->mmap_sem);
 
 bad_area_nosemaphore:
 
@@ -310,14 +324,14 @@ no_context:
 	 */
 
 out_of_memory:
-	mmap_read_unlock(mm);
+	up_read(&mm->mmap_sem);
 	if (!user_mode(regs))
 		goto no_context;
 	pagefault_out_of_memory();
 	return;
 
 do_sigbus:
-	mmap_read_unlock(mm);
+	up_read(&mm->mmap_sem);
 
 	/* Kernel mode? Handle exceptions or die */
 	if (!user_mode(regs))

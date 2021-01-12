@@ -3,11 +3,11 @@
  * Copyright (C) 2002 Roman Zippel <zippel@linux-m68k.org>
  */
 
-#include <sys/types.h>
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <regex.h>
+#include <sys/utsname.h>
 
 #include "lkc.h"
 
@@ -15,21 +15,15 @@ struct symbol symbol_yes = {
 	.name = "y",
 	.curr = { "y", yes },
 	.flags = SYMBOL_CONST|SYMBOL_VALID,
-};
-
-struct symbol symbol_mod = {
+}, symbol_mod = {
 	.name = "m",
 	.curr = { "m", mod },
 	.flags = SYMBOL_CONST|SYMBOL_VALID,
-};
-
-struct symbol symbol_no = {
+}, symbol_no = {
 	.name = "n",
 	.curr = { "n", no },
 	.flags = SYMBOL_CONST|SYMBOL_VALID,
-};
-
-static struct symbol symbol_empty = {
+}, symbol_empty = {
 	.name = "",
 	.curr = { "", no },
 	.flags = SYMBOL_VALID,
@@ -37,7 +31,7 @@ static struct symbol symbol_empty = {
 
 struct symbol *sym_defconfig_list;
 struct symbol *modules_sym;
-static tristate modules_val;
+tristate modules_val;
 
 enum symbol_type sym_get_type(struct symbol *sym)
 {
@@ -837,7 +831,7 @@ struct symbol *sym_lookup(const char *name, int flags)
 	memset(symbol, 0, sizeof(*symbol));
 	symbol->name = new_name;
 	symbol->type = S_UNKNOWN;
-	symbol->flags = flags;
+	symbol->flags |= flags;
 
 	symbol->next = symbol_hash[hash];
 	symbol_hash[hash] = symbol;

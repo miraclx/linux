@@ -87,10 +87,8 @@ __mt76x02u_mcu_send_msg(struct mt76_dev *dev, struct sk_buff *skb,
 	u32 info;
 	int ret;
 
-	if (test_bit(MT76_REMOVED, &dev->phy.state)) {
-		ret = 0;
-		goto out;
-	}
+	if (test_bit(MT76_REMOVED, &dev->phy.state))
+		return 0;
 
 	if (wait_resp) {
 		seq = ++dev->mcu.msg_seq & 0xf;
@@ -113,7 +111,6 @@ __mt76x02u_mcu_send_msg(struct mt76_dev *dev, struct sk_buff *skb,
 	if (wait_resp)
 		ret = mt76x02u_mcu_wait_resp(dev, seq);
 
-out:
 	consume_skb(skb);
 
 	return ret;
@@ -126,7 +123,7 @@ mt76x02u_mcu_send_msg(struct mt76_dev *dev, int cmd, const void *data,
 	struct sk_buff *skb;
 	int err;
 
-	skb = mt76_mcu_msg_alloc(dev, data, len);
+	skb = mt76_mcu_msg_alloc(data, MT_CMD_HDR_LEN, len, 8);
 	if (!skb)
 		return -ENOMEM;
 
@@ -294,10 +291,7 @@ EXPORT_SYMBOL_GPL(mt76x02u_mcu_fw_send_data);
 void mt76x02u_init_mcu(struct mt76_dev *dev)
 {
 	static const struct mt76_mcu_ops mt76x02u_mcu_ops = {
-		.headroom = MT_CMD_HDR_LEN,
-		.tailroom = 8,
 		.mcu_send_msg = mt76x02u_mcu_send_msg,
-		.mcu_parse_response = mt76x02_mcu_parse_response,
 		.mcu_wr_rp = mt76x02u_mcu_wr_rp,
 		.mcu_rd_rp = mt76x02u_mcu_rd_rp,
 	};

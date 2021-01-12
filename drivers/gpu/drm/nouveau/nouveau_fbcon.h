@@ -31,8 +31,6 @@
 
 #include "nouveau_display.h"
 
-struct nouveau_vma;
-
 struct nouveau_fbdev {
 	struct drm_fb_helper helper; /* must be first */
 	unsigned int saved_flags;
@@ -43,7 +41,6 @@ struct nouveau_fbdev {
 	struct nvif_object gdi;
 	struct nvif_object blit;
 	struct nvif_object twod;
-	struct nouveau_vma *vma;
 
 	struct mutex hotplug_lock;
 	bool hotplug_waiting;

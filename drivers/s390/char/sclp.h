@@ -156,11 +156,7 @@ struct read_cpu_info_sccb {
 	u16	offset_configured;
 	u16	nr_standby;
 	u16	offset_standby;
-	/*
-	 * Without ext sccb, struct size is PAGE_SIZE.
-	 * With ext sccb, struct size is EXT_SCCB_READ_CPU.
-	 */
-	u8	reserved[];
+	u8	reserved[4096 - 16];
 } __attribute__((packed, aligned(PAGE_SIZE)));
 
 struct read_info_sccb {
@@ -203,7 +199,7 @@ struct read_info_sccb {
 	u8	byte_134;			/* 134 */
 	u8	cpudirq;		/* 135 */
 	u16	cbl;			/* 136-137 */
-	u8	_pad_138[EXT_SCCB_READ_SCP - 138];
+	u8	_pad_138[4096 - 138];	/* 138-4095 */
 } __packed __aligned(PAGE_SIZE);
 
 struct read_storage_sccb {
@@ -233,7 +229,7 @@ static inline void sclp_fill_core_info(struct sclp_core_info *info,
 #define SCLP_HAS_CPU_INFO	(sclp.facilities & 0x0800000000000000ULL)
 #define SCLP_HAS_CPU_RECONFIG	(sclp.facilities & 0x0400000000000000ULL)
 #define SCLP_HAS_PCI_RECONFIG	(sclp.facilities & 0x0000000040000000ULL)
-#define SCLP_HAS_AP_RECONFIG	(sclp.facilities & 0x0000000100000000ULL)
+
 
 struct gds_subvector {
 	u8	length;
@@ -309,7 +305,9 @@ int sclp_deactivate(void);
 int sclp_reactivate(void);
 int sclp_sync_request(sclp_cmdw_t command, void *sccb);
 int sclp_sync_request_timeout(sclp_cmdw_t command, void *sccb, int timeout);
+
 int sclp_sdias_init(void);
+void sclp_sdias_exit(void);
 
 enum {
 	sclp_init_state_uninitialized,
@@ -332,7 +330,7 @@ unsigned int sclp_early_con_check_vt220(struct init_sccb *sccb);
 int sclp_early_set_event_mask(struct init_sccb *sccb,
 			      sccb_mask_t receive_mask,
 			      sccb_mask_t send_mask);
-struct read_info_sccb * __init sclp_early_get_info(void);
+int sclp_early_get_info(struct read_info_sccb *info);
 
 /* useful inlines */
 

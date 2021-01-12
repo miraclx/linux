@@ -82,7 +82,6 @@ struct ad5755_chip_info {
  * @pwr_down:	bitmask which contains  hether a channel is powered down or not
  * @ctrl:	software shadow of the channel ctrl registers
  * @channels:	iio channel spec for the device
- * @lock:	lock to protect the data buffer during SPI ops
  * @data:	spi transfer buffers
  */
 struct ad5755_state {
@@ -91,7 +90,6 @@ struct ad5755_state {
 	unsigned int			pwr_down;
 	unsigned int			ctrl[AD5755_NUM_CHANNELS];
 	struct iio_chan_spec		channels[AD5755_NUM_CHANNELS];
-	struct mutex			lock;
 
 	/*
 	 * DMA (thus cache coherency maintenance) requires the
@@ -176,12 +174,11 @@ static int ad5755_write_ctrl_unlocked(struct iio_dev *indio_dev,
 static int ad5755_write(struct iio_dev *indio_dev, unsigned int reg,
 	unsigned int val)
 {
-	struct ad5755_state *st = iio_priv(indio_dev);
 	int ret;
 
-	mutex_lock(&st->lock);
+	mutex_lock(&indio_dev->mlock);
 	ret = ad5755_write_unlocked(indio_dev, reg, val);
-	mutex_unlock(&st->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret;
 }
@@ -189,12 +186,11 @@ static int ad5755_write(struct iio_dev *indio_dev, unsigned int reg,
 static int ad5755_write_ctrl(struct iio_dev *indio_dev, unsigned int channel,
 	unsigned int reg, unsigned int val)
 {
-	struct ad5755_state *st = iio_priv(indio_dev);
 	int ret;
 
-	mutex_lock(&st->lock);
+	mutex_lock(&indio_dev->mlock);
 	ret = ad5755_write_ctrl_unlocked(indio_dev, channel, reg, val);
-	mutex_unlock(&st->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret;
 }
@@ -215,7 +211,7 @@ static int ad5755_read(struct iio_dev *indio_dev, unsigned int addr)
 		},
 	};
 
-	mutex_lock(&st->lock);
+	mutex_lock(&indio_dev->mlock);
 
 	st->data[0].d32 = cpu_to_be32(AD5755_READ_FLAG | (addr << 16));
 	st->data[1].d32 = cpu_to_be32(AD5755_NOOP);
@@ -224,7 +220,7 @@ static int ad5755_read(struct iio_dev *indio_dev, unsigned int addr)
 	if (ret >= 0)
 		ret = be32_to_cpu(st->data[1].d32) & 0xffff;
 
-	mutex_unlock(&st->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret;
 }
@@ -250,7 +246,7 @@ static int ad5755_set_channel_pwr_down(struct iio_dev *indio_dev,
 	struct ad5755_state *st = iio_priv(indio_dev);
 	unsigned int mask = BIT(channel);
 
-	mutex_lock(&st->lock);
+	mutex_lock(&indio_dev->mlock);
 
 	if ((bool)(st->pwr_down & mask) == pwr_down)
 		goto out_unlock;
@@ -270,7 +266,7 @@ static int ad5755_set_channel_pwr_down(struct iio_dev *indio_dev,
 	}
 
 out_unlock:
-	mutex_unlock(&st->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return 0;
 }
@@ -744,12 +740,11 @@ static int ad5755_probe(struct spi_device *spi)
 	st->spi = spi;
 	st->pwr_down = 0xf;
 
+	indio_dev->dev.parent = &spi->dev;
 	indio_dev->name = spi_get_device_id(spi)->name;
 	indio_dev->info = &ad5755_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->num_channels = AD5755_NUM_CHANNELS;
-
-	mutex_init(&st->lock);
 
 	if (spi->dev.of_node)
 		pdata = ad5755_parse_dt(&spi->dev);

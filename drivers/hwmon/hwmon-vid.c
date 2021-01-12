@@ -49,15 +49,15 @@
  * The 13 specification corresponds to the Intel Pentium M series. There
  * doesn't seem to be any named specification for these. The conversion
  * tables are detailed directly in the various Pentium M datasheets:
- * https://www.intel.com/design/intarch/pentiumm/docs_pentiumm.htm
+ * http://www.intel.com/design/intarch/pentiumm/docs_pentiumm.htm
  *
  * The 14 specification corresponds to Intel Core series. There
  * doesn't seem to be any named specification for these. The conversion
  * tables are detailed directly in the various Pentium Core datasheets:
- * https://www.intel.com/design/mobile/datashts/309221.htm
+ * http://www.intel.com/design/mobile/datashts/309221.htm
  *
  * The 110 (VRM 11) specification corresponds to Intel Conroe based series.
- * https://www.intel.com/design/processor/applnots/313214.htm
+ * http://www.intel.com/design/processor/applnots/313214.htm
  */
 
 /*
@@ -96,7 +96,7 @@ int vid_from_reg(int val, u8 vrm)
 		val &= 0x1f;
 		if (val == 0x1f)
 			return 0;
-		fallthrough;
+				/* fall through */
 	case 25:		/* AMD NPT 0Fh */
 		val &= 0x3f;
 		return (val < 32) ? 1550 - 25 * val
@@ -122,7 +122,7 @@ int vid_from_reg(int val, u8 vrm)
 
 	case 84:		/* VRM 8.4 */
 		val &= 0x0f;
-		fallthrough;
+				/* fall through */
 	case 82:		/* VRM 8.2 */
 		val &= 0x1f;
 		return val == 0x1f ? 0 :

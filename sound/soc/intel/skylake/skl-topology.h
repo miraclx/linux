@@ -97,7 +97,7 @@ struct skl_audio_data_format {
 	u8 number_of_channels;
 	u8 valid_bit_depth;
 	u8 sample_type;
-	u8 reserved;
+	u8 reserved[1];
 } __packed;
 
 struct skl_base_cfg {
@@ -119,7 +119,7 @@ struct skl_cpr_gtw_cfg {
 struct skl_dma_control {
 	u32 node_id;
 	u32 config_length;
-	u32 config_data[];
+	u32 config_data[0];
 } __packed;
 
 struct skl_cpr_cfg {
@@ -152,7 +152,7 @@ struct skl_up_down_mixer_cfg {
 
 struct skl_algo_cfg {
 	struct skl_base_cfg  base_cfg;
-	char params[];
+	char params[0];
 } __packed;
 
 struct skl_base_outfmt_cfg {
@@ -306,7 +306,6 @@ struct skl_pipe {
 	struct skl_path_config configs[SKL_MAX_PATH_CONFIGS];
 	struct list_head w_list;
 	bool passthru;
-	u32 pipe_config_idx;
 };
 
 enum skl_module_state {
@@ -453,7 +452,7 @@ int skl_dsp_set_dma_control(struct skl_dev *skl, u32 *caps,
 void skl_tplg_set_be_dmic_config(struct snd_soc_dai *dai,
 	struct skl_pipe_params *params, int stream);
 int skl_tplg_init(struct snd_soc_component *component,
-				struct hdac_bus *bus);
+				struct hdac_bus *ebus);
 void skl_tplg_exit(struct snd_soc_component *component,
 				struct hdac_bus *bus);
 struct skl_module_cfg *skl_tplg_fe_get_cpr_module(
@@ -476,13 +475,13 @@ int skl_stop_pipe(struct skl_dev *skl, struct skl_pipe *pipe);
 
 int skl_reset_pipe(struct skl_dev *skl, struct skl_pipe *pipe);
 
-int skl_init_module(struct skl_dev *skl, struct skl_module_cfg *mconfig);
+int skl_init_module(struct skl_dev *skl, struct skl_module_cfg *module_config);
 
 int skl_bind_modules(struct skl_dev *skl, struct skl_module_cfg
-	*src_mcfg, struct skl_module_cfg *dst_mcfg);
+	*src_module, struct skl_module_cfg *dst_module);
 
 int skl_unbind_modules(struct skl_dev *skl, struct skl_module_cfg
-	*src_mcfg, struct skl_module_cfg *dst_mcfg);
+	*src_module, struct skl_module_cfg *dst_module);
 
 int skl_set_module_params(struct skl_dev *skl, u32 *params, int size,
 			u32 param_id, struct skl_module_cfg *mcfg);

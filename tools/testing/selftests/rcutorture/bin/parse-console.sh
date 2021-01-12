@@ -33,8 +33,8 @@ then
 fi
 cat /dev/null > $file.diags
 
-# Check for proper termination, except for rcuscale and refscale.
-if test "$TORTURE_SUITE" != rcuscale && test "$TORTURE_SUITE" != refscale
+# Check for proper termination, except that rcuperf runs don't indicate this.
+if test "$TORTURE_SUITE" != rcuperf
 then
 	# check for abject failure
 
@@ -44,30 +44,17 @@ then
 		tail -1 |
 		awk '
 		{
-			normalexit = 1;
-			for (i=NF-8;i<=NF;i++) {
-				if (i <= 0 || i !~ /^[0-9]*$/) {
-					bangstring = $0;
-					gsub(/^\[[^]]*] /, "", bangstring);
-					print bangstring;
-					normalexit = 0;
-					exit 0;
-				}
+			for (i=NF-8;i<=NF;i++)
 				sum+=$i;
-			}
 		}
-		END {
-			if (normalexit)
-				print sum " instances"
-		}'`
-		print_bug $title FAILURE, $nerrs
+		END { print sum }'`
+		print_bug $title FAILURE, $nerrs instances
 		exit
 	fi
 
 	grep --binary-files=text 'torture:.*ver:' $file |
 	egrep --binary-files=text -v '\(null\)|rtc: 000000000* ' |
 	sed -e 's/^(initramfs)[^]]*] //' -e 's/^\[[^]]*] //' |
-	sed -e 's/^.*ver: //' |
 	awk '
 	BEGIN	{
 		ver = 0;
@@ -75,13 +62,13 @@ then
 		}
 
 		{
-		if (!badseq && ($1 + 0 != $1 || $1 <= ver)) {
+		if (!badseq && ($5 + 0 != $5 || $5 <= ver)) {
 			badseqno1 = ver;
-			badseqno2 = $1;
+			badseqno2 = $5;
 			badseqnr = NR;
 			badseq = 1;
 		}
-		ver = $1
+		ver = $5
 		}
 
 	END	{
@@ -117,7 +104,10 @@ then
 	fi
 fi | tee -a $file.diags
 
-console-badness.sh < $file > $T.diags
+egrep 'Badness|WARNING:|Warn|BUG|===========|Call Trace:|Oops:|detected stalls on CPUs/tasks:|self-detected stall on CPU|Stall ended before state dump start|\?\?\? Writer stall state|rcu_.*kthread starved for' < $file |
+grep -v 'ODEBUG: ' |
+grep -v 'This means that this is a DEBUG kernel and it is' |
+grep -v 'Warning: unable to open an initial console' > $T.diags
 if test -s $T.diags
 then
 	print_warning "Assertion failure in $file $title"
@@ -133,7 +123,7 @@ then
 	then
 		summary="$summary  Warnings: $n_warn"
 	fi
-	n_bugs=`egrep -c '\bBUG|Oops:' $file`
+	n_bugs=`egrep -c 'BUG|Oops:' $file`
 	if test "$n_bugs" -ne 0
 	then
 		summary="$summary  Bugs: $n_bugs"

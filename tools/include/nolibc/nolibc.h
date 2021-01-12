@@ -107,7 +107,7 @@ static int errno;
 #endif
 
 /* errno codes all ensure that they will not conflict with a valid pointer
- * because they all correspond to the highest addressable memory page.
+ * because they all correspond to the highest addressable memry page.
  */
 #define MAX_ERRNO 4095
 
@@ -231,7 +231,7 @@ struct rusage {
 #define DT_SOCK   12
 
 /* all the *at functions */
-#ifndef AT_FDCWD
+#ifndef AT_FDWCD
 #define AT_FDCWD             -100
 #endif
 

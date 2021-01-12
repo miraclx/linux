@@ -33,10 +33,21 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
-	cgroup_fd = cgroup_setup_and_join(TEST_CGROUP);
+	if (setup_cgroup_environment()) {
+		printf("Failed to load DEV_CGROUP program\n");
+		goto err;
+	}
+
+	/* Create a cgroup, get fd, and join it */
+	cgroup_fd = create_and_get_cgroup(TEST_CGROUP);
 	if (cgroup_fd < 0) {
 		printf("Failed to create test cgroup\n");
-		goto out;
+		goto err;
+	}
+
+	if (join_cgroup(TEST_CGROUP)) {
+		printf("Failed to join cgroup\n");
+		goto err;
 	}
 
 	/* Attach bpf program */

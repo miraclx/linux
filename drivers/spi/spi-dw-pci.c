@@ -5,6 +5,7 @@
  * Copyright (c) 2009, 2014 Intel Corporation.
  */
 
+#include <linux/interrupt.h>
 #include <linux/pci.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
@@ -15,15 +16,6 @@
 
 #define DRIVER_NAME "dw_spi_pci"
 
-/* HW info for MRST Clk Control Unit, 32b reg per controller */
-#define MRST_SPI_CLK_BASE	100000000	/* 100m */
-#define MRST_CLK_SPI_REG	0xff11d86c
-#define CLK_SPI_BDIV_OFFSET	0
-#define CLK_SPI_BDIV_MASK	0x00000007
-#define CLK_SPI_CDIV_OFFSET	9
-#define CLK_SPI_CDIV_MASK	0x00000e00
-#define CLK_SPI_DISABLE_OFFSET	8
-
 struct spi_pci_desc {
 	int	(*setup)(struct dw_spi *);
 	u16	num_cs;
@@ -31,49 +23,19 @@ struct spi_pci_desc {
 	u32	max_freq;
 };
 
-static int spi_mid_init(struct dw_spi *dws)
-{
-	void __iomem *clk_reg;
-	u32 clk_cdiv;
-
-	clk_reg = ioremap(MRST_CLK_SPI_REG, 16);
-	if (!clk_reg)
-		return -ENOMEM;
-
-	/* Get SPI controller operating freq info */
-	clk_cdiv = readl(clk_reg + dws->bus_num * sizeof(u32));
-	clk_cdiv &= CLK_SPI_CDIV_MASK;
-	clk_cdiv >>= CLK_SPI_CDIV_OFFSET;
-	dws->max_freq = MRST_SPI_CLK_BASE / (clk_cdiv + 1);
-
-	iounmap(clk_reg);
-
-	dw_spi_dma_setup_mfld(dws);
-
-	return 0;
-}
-
-static int spi_generic_init(struct dw_spi *dws)
-{
-	dw_spi_dma_setup_generic(dws);
-
-	return 0;
-}
-
 static struct spi_pci_desc spi_pci_mid_desc_1 = {
-	.setup = spi_mid_init,
+	.setup = dw_spi_mid_init,
 	.num_cs = 5,
 	.bus_num = 0,
 };
 
 static struct spi_pci_desc spi_pci_mid_desc_2 = {
-	.setup = spi_mid_init,
+	.setup = dw_spi_mid_init,
 	.num_cs = 2,
 	.bus_num = 1,
 };
 
 static struct spi_pci_desc spi_pci_ehl_desc = {
-	.setup = spi_generic_init,
 	.num_cs = 2,
 	.bus_num = -1,
 	.max_freq = 100000000,
@@ -121,16 +83,18 @@ static int spi_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		if (desc->setup) {
 			ret = desc->setup(dws);
 			if (ret)
-				goto err_free_irq_vectors;
+				return ret;
 		}
 	} else {
-		ret = -ENODEV;
-		goto err_free_irq_vectors;
+		pci_free_irq_vectors(pdev);
+		return -ENODEV;
 	}
 
 	ret = dw_spi_add_host(&pdev->dev, dws);
-	if (ret)
-		goto err_free_irq_vectors;
+	if (ret) {
+		pci_free_irq_vectors(pdev);
+		return ret;
+	}
 
 	/* PCI hook and SPI hook use the same drv data */
 	pci_set_drvdata(pdev, dws);
@@ -144,10 +108,6 @@ static int spi_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	pm_runtime_allow(&pdev->dev);
 
 	return 0;
-
-err_free_irq_vectors:
-	pci_free_irq_vectors(pdev);
-	return ret;
 }
 
 static void spi_pci_remove(struct pci_dev *pdev)

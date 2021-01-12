@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0
 // Copyright(c) 2017-2019 Intel Corporation.
 
 #include <linux/device.h>

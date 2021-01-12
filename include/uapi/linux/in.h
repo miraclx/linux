@@ -123,7 +123,6 @@ struct in_addr {
 #define IP_CHECKSUM	23
 #define IP_BIND_ADDRESS_NO_PORT	24
 #define IP_RECVFRAGSIZE	25
-#define IP_RECVERR_RFC4884	26
 
 /* IP_MTU_DISCOVER values */
 #define IP_PMTUDISC_DONT		0	/* Never send DF frames */
@@ -135,7 +134,7 @@ struct in_addr {
  * this socket to prevent accepting spoofed ones.
  */
 #define IP_PMTUDISC_INTERFACE		4
-/* weaker version of IP_PMTUDISC_INTERFACE, which allows packets to get
+/* weaker version of IP_PMTUDISC_INTERFACE, which allos packets to get
  * fragmented if they exeed the interface mtu
  */
 #define IP_PMTUDISC_OMIT		5

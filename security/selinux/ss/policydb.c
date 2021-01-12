@@ -154,11 +154,6 @@ static struct policydb_compat_info policydb_compat[] = {
 		.sym_num	= SYM_NUM,
 		.ocon_num	= OCON_NUM,
 	},
-	{
-		.version	= POLICYDB_VERSION_COMP_FTRANS,
-		.sym_num	= SYM_NUM,
-		.ocon_num	= OCON_NUM,
-	},
 };
 
 static struct policydb_compat_info *policydb_lookup_compat(int version)
@@ -195,8 +190,8 @@ static int common_destroy(void *key, void *datum, void *p)
 	kfree(key);
 	if (datum) {
 		comdatum = datum;
-		hashtab_map(&comdatum->permissions.table, perm_destroy, NULL);
-		hashtab_destroy(&comdatum->permissions.table);
+		hashtab_map(comdatum->permissions.table, perm_destroy, NULL);
+		hashtab_destroy(comdatum->permissions.table);
 	}
 	kfree(datum);
 	return 0;
@@ -224,8 +219,8 @@ static int cls_destroy(void *key, void *datum, void *p)
 	kfree(key);
 	if (datum) {
 		cladatum = datum;
-		hashtab_map(&cladatum->permissions.table, perm_destroy, NULL);
-		hashtab_destroy(&cladatum->permissions.table);
+		hashtab_map(cladatum->permissions.table, perm_destroy, NULL);
+		hashtab_destroy(cladatum->permissions.table);
 		constraint = cladatum->constraints;
 		while (constraint) {
 			e = constraint->expr;
@@ -357,13 +352,6 @@ static int range_tr_destroy(void *key, void *datum, void *p)
 	return 0;
 }
 
-static int role_tr_destroy(void *key, void *datum, void *p)
-{
-	kfree(key);
-	kfree(datum);
-	return 0;
-}
-
 static void ocontext_destroy(struct ocontext *c, int i)
 {
 	if (!c)
@@ -400,7 +388,7 @@ static int roles_init(struct policydb *p)
 	if (!key)
 		goto out;
 
-	rc = symtab_insert(&p->p_roles, key, role);
+	rc = hashtab_insert(p->p_roles.table, key, role);
 	if (rc)
 		goto out;
 
@@ -411,7 +399,7 @@ out:
 	return rc;
 }
 
-static u32 filenametr_hash(const void *k)
+static u32 filenametr_hash(struct hashtab *h, const void *k)
 {
 	const struct filename_trans_key *ft = k;
 	unsigned long hash;
@@ -423,10 +411,10 @@ static u32 filenametr_hash(const void *k)
 	byte_num = 0;
 	while ((focus = ft->name[byte_num++]))
 		hash = partial_name_hash(focus, hash);
-	return hash;
+	return hash & (h->size - 1);
 }
 
-static int filenametr_cmp(const void *k1, const void *k2)
+static int filenametr_cmp(struct hashtab *h, const void *k1, const void *k2)
 {
 	const struct filename_trans_key *ft1 = k1;
 	const struct filename_trans_key *ft2 = k2;
@@ -444,26 +432,15 @@ static int filenametr_cmp(const void *k1, const void *k2)
 
 }
 
-static const struct hashtab_key_params filenametr_key_params = {
-	.hash = filenametr_hash,
-	.cmp = filenametr_cmp,
-};
-
-struct filename_trans_datum *policydb_filenametr_search(
-	struct policydb *p, struct filename_trans_key *key)
-{
-	return hashtab_search(&p->filename_trans, key, filenametr_key_params);
-}
-
-static u32 rangetr_hash(const void *k)
+static u32 rangetr_hash(struct hashtab *h, const void *k)
 {
 	const struct range_trans *key = k;
 
-	return key->source_type + (key->target_type << 3) +
-		(key->target_class << 5);
+	return (key->source_type + (key->target_type << 3) +
+		(key->target_class << 5)) & (h->size - 1);
 }
 
-static int rangetr_cmp(const void *k1, const void *k2)
+static int rangetr_cmp(struct hashtab *h, const void *k1, const void *k2)
 {
 	const struct range_trans *key1 = k1, *key2 = k2;
 	int v;
@@ -481,64 +458,26 @@ static int rangetr_cmp(const void *k1, const void *k2)
 	return v;
 }
 
-static const struct hashtab_key_params rangetr_key_params = {
-	.hash = rangetr_hash,
-	.cmp = rangetr_cmp,
-};
-
-struct mls_range *policydb_rangetr_search(struct policydb *p,
-					  struct range_trans *key)
-{
-	return hashtab_search(&p->range_tr, key, rangetr_key_params);
-}
-
-static u32 role_trans_hash(const void *k)
-{
-	const struct role_trans_key *key = k;
-
-	return key->role + (key->type << 3) + (key->tclass << 5);
-}
-
-static int role_trans_cmp(const void *k1, const void *k2)
-{
-	const struct role_trans_key *key1 = k1, *key2 = k2;
-	int v;
-
-	v = key1->role - key2->role;
-	if (v)
-		return v;
-
-	v = key1->type - key2->type;
-	if (v)
-		return v;
-
-	return key1->tclass - key2->tclass;
-}
-
-static const struct hashtab_key_params roletr_key_params = {
-	.hash = role_trans_hash,
-	.cmp = role_trans_cmp,
-};
-
-struct role_trans_datum *policydb_roletr_search(struct policydb *p,
-						struct role_trans_key *key)
-{
-	return hashtab_search(&p->role_tr, key, roletr_key_params);
-}
-
 /*
  * Initialize a policy database structure.
  */
-static void policydb_init(struct policydb *p)
+static int policydb_init(struct policydb *p)
 {
 	memset(p, 0, sizeof(*p));
 
 	avtab_init(&p->te_avtab);
 	cond_policydb_init(p);
 
+	p->filename_trans = hashtab_create(filenametr_hash, filenametr_cmp,
+					   (1 << 11));
+	if (!p->filename_trans)
+		return -ENOMEM;
+
 	ebitmap_init(&p->filename_trans_ttypes);
 	ebitmap_init(&p->policycaps);
 	ebitmap_init(&p->permissive_map);
+
+	return 0;
 }
 
 /*
@@ -700,7 +639,7 @@ static void symtab_hash_eval(struct symtab *s)
 	int i;
 
 	for (i = 0; i < SYM_NUM; i++)
-		hash_eval(&s[i].table, symtab_name[i]);
+		hash_eval(s[i].table, symtab_name[i]);
 }
 
 #else
@@ -771,7 +710,7 @@ static int policydb_index(struct policydb *p)
 		if (!p->sym_val_to_name[i])
 			return -ENOMEM;
 
-		rc = hashtab_map(&p->symtab[i].table, index_f[i], p);
+		rc = hashtab_map(p->symtab[i].table, index_f[i], p);
 		if (rc)
 			goto out;
 	}
@@ -789,11 +728,12 @@ void policydb_destroy(struct policydb *p)
 	struct genfs *g, *gtmp;
 	int i;
 	struct role_allow *ra, *lra = NULL;
+	struct role_trans *tr, *ltr = NULL;
 
 	for (i = 0; i < SYM_NUM; i++) {
 		cond_resched();
-		hashtab_map(&p->symtab[i].table, destroy_f[i], NULL);
-		hashtab_destroy(&p->symtab[i].table);
+		hashtab_map(p->symtab[i].table, destroy_f[i], NULL);
+		hashtab_destroy(p->symtab[i].table);
 	}
 
 	for (i = 0; i < SYM_NUM; i++)
@@ -835,8 +775,12 @@ void policydb_destroy(struct policydb *p)
 
 	cond_policydb_destroy(p);
 
-	hashtab_map(&p->role_tr, role_tr_destroy, NULL);
-	hashtab_destroy(&p->role_tr);
+	for (tr = p->role_tr; tr; tr = tr->next) {
+		cond_resched();
+		kfree(ltr);
+		ltr = tr;
+	}
+	kfree(ltr);
 
 	for (ra = p->role_allow; ra; ra = ra->next) {
 		cond_resched();
@@ -845,11 +789,11 @@ void policydb_destroy(struct policydb *p)
 	}
 	kfree(lra);
 
-	hashtab_map(&p->filename_trans, filenametr_destroy, NULL);
-	hashtab_destroy(&p->filename_trans);
+	hashtab_map(p->filename_trans, filenametr_destroy, NULL);
+	hashtab_destroy(p->filename_trans);
 
-	hashtab_map(&p->range_tr, range_tr_destroy, NULL);
-	hashtab_destroy(&p->range_tr);
+	hashtab_map(p->range_tr, range_tr_destroy, NULL);
+	hashtab_destroy(p->range_tr);
 
 	if (p->type_attr_map_array) {
 		for (i = 0; i < p->p_types.nprim; i++)
@@ -892,6 +836,11 @@ int policydb_load_isids(struct policydb *p, struct sidtab *s)
 		if (!name)
 			continue;
 
+		rc = context_add_hash(p, &c->context[0]);
+		if (rc) {
+			sidtab_destroy(s);
+			goto out;
+		}
 		rc = sidtab_set_initial(s, sid, &c->context[0]);
 		if (rc) {
 			pr_err("SELinux:  unable to load initial SID %s.\n",
@@ -1097,7 +1046,7 @@ static int str_read(char **strp, gfp_t flags, void *fp, u32 len)
 	return 0;
 }
 
-static int perm_read(struct policydb *p, struct symtab *s, void *fp)
+static int perm_read(struct policydb *p, struct hashtab *h, void *fp)
 {
 	char *key = NULL;
 	struct perm_datum *perdatum;
@@ -1120,7 +1069,7 @@ static int perm_read(struct policydb *p, struct symtab *s, void *fp)
 	if (rc)
 		goto bad;
 
-	rc = symtab_insert(s, key, perdatum);
+	rc = hashtab_insert(h, key, perdatum);
 	if (rc)
 		goto bad;
 
@@ -1130,7 +1079,7 @@ bad:
 	return rc;
 }
 
-static int common_read(struct policydb *p, struct symtab *s, void *fp)
+static int common_read(struct policydb *p, struct hashtab *h, void *fp)
 {
 	char *key = NULL;
 	struct common_datum *comdatum;
@@ -1160,12 +1109,12 @@ static int common_read(struct policydb *p, struct symtab *s, void *fp)
 		goto bad;
 
 	for (i = 0; i < nel; i++) {
-		rc = perm_read(p, &comdatum->permissions, fp);
+		rc = perm_read(p, comdatum->permissions.table, fp);
 		if (rc)
 			goto bad;
 	}
 
-	rc = symtab_insert(s, key, comdatum);
+	rc = hashtab_insert(h, key, comdatum);
 	if (rc)
 		goto bad;
 	return 0;
@@ -1294,7 +1243,7 @@ static int read_cons_helper(struct policydb *p,
 	return 0;
 }
 
-static int class_read(struct policydb *p, struct symtab *s, void *fp)
+static int class_read(struct policydb *p, struct hashtab *h, void *fp)
 {
 	char *key = NULL;
 	struct class_datum *cladatum;
@@ -1332,8 +1281,7 @@ static int class_read(struct policydb *p, struct symtab *s, void *fp)
 			goto bad;
 
 		rc = -EINVAL;
-		cladatum->comdatum = symtab_search(&p->p_commons,
-						   cladatum->comkey);
+		cladatum->comdatum = hashtab_search(p->p_commons.table, cladatum->comkey);
 		if (!cladatum->comdatum) {
 			pr_err("SELinux:  unknown common %s\n",
 			       cladatum->comkey);
@@ -1341,7 +1289,7 @@ static int class_read(struct policydb *p, struct symtab *s, void *fp)
 		}
 	}
 	for (i = 0; i < nel; i++) {
-		rc = perm_read(p, &cladatum->permissions, fp);
+		rc = perm_read(p, cladatum->permissions.table, fp);
 		if (rc)
 			goto bad;
 	}
@@ -1379,7 +1327,7 @@ static int class_read(struct policydb *p, struct symtab *s, void *fp)
 		cladatum->default_type = le32_to_cpu(buf[0]);
 	}
 
-	rc = symtab_insert(s, key, cladatum);
+	rc = hashtab_insert(h, key, cladatum);
 	if (rc)
 		goto bad;
 
@@ -1389,7 +1337,7 @@ bad:
 	return rc;
 }
 
-static int role_read(struct policydb *p, struct symtab *s, void *fp)
+static int role_read(struct policydb *p, struct hashtab *h, void *fp)
 {
 	char *key = NULL;
 	struct role_datum *role;
@@ -1436,7 +1384,7 @@ static int role_read(struct policydb *p, struct symtab *s, void *fp)
 		goto bad;
 	}
 
-	rc = symtab_insert(s, key, role);
+	rc = hashtab_insert(h, key, role);
 	if (rc)
 		goto bad;
 	return 0;
@@ -1445,7 +1393,7 @@ bad:
 	return rc;
 }
 
-static int type_read(struct policydb *p, struct symtab *s, void *fp)
+static int type_read(struct policydb *p, struct hashtab *h, void *fp)
 {
 	char *key = NULL;
 	struct type_datum *typdatum;
@@ -1483,7 +1431,7 @@ static int type_read(struct policydb *p, struct symtab *s, void *fp)
 	if (rc)
 		goto bad;
 
-	rc = symtab_insert(s, key, typdatum);
+	rc = hashtab_insert(h, key, typdatum);
 	if (rc)
 		goto bad;
 	return 0;
@@ -1519,7 +1467,7 @@ static int mls_read_level(struct mls_level *lp, void *fp)
 	return 0;
 }
 
-static int user_read(struct policydb *p, struct symtab *s, void *fp)
+static int user_read(struct policydb *p, struct hashtab *h, void *fp)
 {
 	char *key = NULL;
 	struct user_datum *usrdatum;
@@ -1560,7 +1508,7 @@ static int user_read(struct policydb *p, struct symtab *s, void *fp)
 			goto bad;
 	}
 
-	rc = symtab_insert(s, key, usrdatum);
+	rc = hashtab_insert(h, key, usrdatum);
 	if (rc)
 		goto bad;
 	return 0;
@@ -1569,7 +1517,7 @@ bad:
 	return rc;
 }
 
-static int sens_read(struct policydb *p, struct symtab *s, void *fp)
+static int sens_read(struct policydb *p, struct hashtab *h, void *fp)
 {
 	char *key = NULL;
 	struct level_datum *levdatum;
@@ -1601,7 +1549,7 @@ static int sens_read(struct policydb *p, struct symtab *s, void *fp)
 	if (rc)
 		goto bad;
 
-	rc = symtab_insert(s, key, levdatum);
+	rc = hashtab_insert(h, key, levdatum);
 	if (rc)
 		goto bad;
 	return 0;
@@ -1610,7 +1558,7 @@ bad:
 	return rc;
 }
 
-static int cat_read(struct policydb *p, struct symtab *s, void *fp)
+static int cat_read(struct policydb *p, struct hashtab *h, void *fp)
 {
 	char *key = NULL;
 	struct cat_datum *catdatum;
@@ -1634,7 +1582,7 @@ static int cat_read(struct policydb *p, struct symtab *s, void *fp)
 	if (rc)
 		goto bad;
 
-	rc = symtab_insert(s, key, catdatum);
+	rc = hashtab_insert(h, key, catdatum);
 	if (rc)
 		goto bad;
 	return 0;
@@ -1643,7 +1591,7 @@ bad:
 	return rc;
 }
 
-static int (*read_f[SYM_NUM]) (struct policydb *p, struct symtab *s, void *fp) =
+static int (*read_f[SYM_NUM]) (struct policydb *p, struct hashtab *h, void *fp) =
 {
 	common_read,
 	class_read,
@@ -1764,15 +1712,18 @@ static int policydb_bounds_sanity_check(struct policydb *p)
 	if (p->policyvers < POLICYDB_VERSION_BOUNDARY)
 		return 0;
 
-	rc = hashtab_map(&p->p_users.table, user_bounds_sanity_check, p);
+	rc = hashtab_map(p->p_users.table,
+			 user_bounds_sanity_check, p);
 	if (rc)
 		return rc;
 
-	rc = hashtab_map(&p->p_roles.table, role_bounds_sanity_check, p);
+	rc = hashtab_map(p->p_roles.table,
+			 role_bounds_sanity_check, p);
 	if (rc)
 		return rc;
 
-	rc = hashtab_map(&p->p_types.table, type_bounds_sanity_check, p);
+	rc = hashtab_map(p->p_types.table,
+			 type_bounds_sanity_check, p);
 	if (rc)
 		return rc;
 
@@ -1783,7 +1734,7 @@ u16 string_to_security_class(struct policydb *p, const char *name)
 {
 	struct class_datum *cladatum;
 
-	cladatum = symtab_search(&p->p_classes, name);
+	cladatum = hashtab_search(p->p_classes.table, name);
 	if (!cladatum)
 		return 0;
 
@@ -1802,9 +1753,11 @@ u32 string_to_av_perm(struct policydb *p, u16 tclass, const char *name)
 	cladatum = p->class_val_to_struct[tclass-1];
 	comdatum = cladatum->comdatum;
 	if (comdatum)
-		perdatum = symtab_search(&comdatum->permissions, name);
+		perdatum = hashtab_search(comdatum->permissions.table,
+					  name);
 	if (!perdatum)
-		perdatum = symtab_search(&cladatum->permissions, name);
+		perdatum = hashtab_search(cladatum->permissions.table,
+					  name);
 	if (!perdatum)
 		return 0;
 
@@ -1828,9 +1781,9 @@ static int range_read(struct policydb *p, void *fp)
 
 	nel = le32_to_cpu(buf[0]);
 
-	rc = hashtab_init(&p->range_tr, nel);
-	if (rc)
-		return rc;
+	p->range_tr = hashtab_create(rangetr_hash, rangetr_cmp, nel);
+	if (!p->range_tr)
+		return -ENOMEM;
 
 	for (i = 0; i < nel; i++) {
 		rc = -ENOMEM;
@@ -1873,14 +1826,14 @@ static int range_read(struct policydb *p, void *fp)
 			goto out;
 		}
 
-		rc = hashtab_insert(&p->range_tr, rt, r, rangetr_key_params);
+		rc = hashtab_insert(p->range_tr, rt, r);
 		if (rc)
 			goto out;
 
 		rt = NULL;
 		r = NULL;
 	}
-	hash_eval(&p->range_tr, "rangetr");
+	hash_eval(p->range_tr, "rangetr");
 	rc = 0;
 out:
 	kfree(rt);
@@ -1888,7 +1841,7 @@ out:
 	return rc;
 }
 
-static int filename_trans_read_helper_compat(struct policydb *p, void *fp)
+static int filename_trans_read_one(struct policydb *p, void *fp)
 {
 	struct filename_trans_key key, *ft = NULL;
 	struct filename_trans_datum *last, *datum = NULL;
@@ -1920,7 +1873,7 @@ static int filename_trans_read_helper_compat(struct policydb *p, void *fp)
 	otype = le32_to_cpu(buf[3]);
 
 	last = NULL;
-	datum = policydb_filenametr_search(p, &key);
+	datum = hashtab_search(p->filename_trans, &key);
 	while (datum) {
 		if (unlikely(ebitmap_get_bit(&datum->stypes, stype - 1))) {
 			/* conflicting/duplicate rules are ignored */
@@ -1950,8 +1903,7 @@ static int filename_trans_read_helper_compat(struct policydb *p, void *fp)
 			if (!ft)
 				goto out;
 
-			rc = hashtab_insert(&p->filename_trans, ft, datum,
-					    filenametr_key_params);
+			rc = hashtab_insert(p->filename_trans, ft, datum);
 			if (rc)
 				goto out;
 			name = NULL;
@@ -1972,95 +1924,6 @@ out:
 	return rc;
 }
 
-static int filename_trans_read_helper(struct policydb *p, void *fp)
-{
-	struct filename_trans_key *ft = NULL;
-	struct filename_trans_datum **dst, *datum, *first = NULL;
-	char *name = NULL;
-	u32 len, ttype, tclass, ndatum, i;
-	__le32 buf[3];
-	int rc;
-
-	/* length of the path component string */
-	rc = next_entry(buf, fp, sizeof(u32));
-	if (rc)
-		return rc;
-	len = le32_to_cpu(buf[0]);
-
-	/* path component string */
-	rc = str_read(&name, GFP_KERNEL, fp, len);
-	if (rc)
-		return rc;
-
-	rc = next_entry(buf, fp, sizeof(u32) * 3);
-	if (rc)
-		goto out;
-
-	ttype = le32_to_cpu(buf[0]);
-	tclass = le32_to_cpu(buf[1]);
-
-	ndatum = le32_to_cpu(buf[2]);
-	if (ndatum == 0) {
-		pr_err("SELinux:  Filename transition key with no datum\n");
-		rc = -ENOENT;
-		goto out;
-	}
-
-	dst = &first;
-	for (i = 0; i < ndatum; i++) {
-		rc = -ENOMEM;
-		datum = kmalloc(sizeof(*datum), GFP_KERNEL);
-		if (!datum)
-			goto out;
-
-		*dst = datum;
-
-		/* ebitmap_read() will at least init the bitmap */
-		rc = ebitmap_read(&datum->stypes, fp);
-		if (rc)
-			goto out;
-
-		rc = next_entry(buf, fp, sizeof(u32));
-		if (rc)
-			goto out;
-
-		datum->otype = le32_to_cpu(buf[0]);
-		datum->next = NULL;
-
-		dst = &datum->next;
-	}
-
-	rc = -ENOMEM;
-	ft = kmalloc(sizeof(*ft), GFP_KERNEL);
-	if (!ft)
-		goto out;
-
-	ft->ttype = ttype;
-	ft->tclass = tclass;
-	ft->name = name;
-
-	rc = hashtab_insert(&p->filename_trans, ft, first,
-			    filenametr_key_params);
-	if (rc == -EEXIST)
-		pr_err("SELinux:  Duplicate filename transition key\n");
-	if (rc)
-		goto out;
-
-	return ebitmap_set_bit(&p->filename_trans_ttypes, ttype, 1);
-
-out:
-	kfree(ft);
-	kfree(name);
-	while (first) {
-		datum = first;
-		first = first->next;
-
-		ebitmap_destroy(&datum->stypes);
-		kfree(datum);
-	}
-	return rc;
-}
-
 static int filename_trans_read(struct policydb *p, void *fp)
 {
 	u32 nel;
@@ -2075,30 +1938,14 @@ static int filename_trans_read(struct policydb *p, void *fp)
 		return rc;
 	nel = le32_to_cpu(buf[0]);
 
-	if (p->policyvers < POLICYDB_VERSION_COMP_FTRANS) {
-		p->compat_filename_trans_count = nel;
+	p->filename_trans_count = nel;
 
-		rc = hashtab_init(&p->filename_trans, (1 << 11));
+	for (i = 0; i < nel; i++) {
+		rc = filename_trans_read_one(p, fp);
 		if (rc)
 			return rc;
-
-		for (i = 0; i < nel; i++) {
-			rc = filename_trans_read_helper_compat(p, fp);
-			if (rc)
-				return rc;
-		}
-	} else {
-		rc = hashtab_init(&p->filename_trans, nel);
-		if (rc)
-			return rc;
-
-		for (i = 0; i < nel; i++) {
-			rc = filename_trans_read_helper(p, fp);
-			if (rc)
-				return rc;
-		}
 	}
-	hash_eval(&p->filename_trans, "filenametr");
+	hash_eval(p->filename_trans, "filenametr");
 	return 0;
 }
 
@@ -2404,16 +2251,17 @@ out:
 int policydb_read(struct policydb *p, void *fp)
 {
 	struct role_allow *ra, *lra;
-	struct role_trans_key *rtk = NULL;
-	struct role_trans_datum *rtd = NULL;
+	struct role_trans *tr, *ltr;
 	int i, j, rc;
 	__le32 buf[4];
-	u32 len, nprim, nel, perm;
+	u32 len, nprim, nel;
 
 	char *policydb_str;
 	struct policydb_compat_info *info;
 
-	policydb_init(p);
+	rc = policydb_init(p);
+	if (rc)
+		return rc;
 
 	/* Read the magic number and string length. */
 	rc = next_entry(buf, fp, sizeof(u32) * 2);
@@ -2541,7 +2389,7 @@ int policydb_read(struct policydb *p, void *fp)
 		}
 
 		for (j = 0; j < nel; j++) {
-			rc = read_f[i](p, &p->symtab[i], fp);
+			rc = read_f[i](p, p->symtab[i].table, fp);
 			if (rc)
 				goto bad;
 		}
@@ -2551,10 +2399,8 @@ int policydb_read(struct policydb *p, void *fp)
 
 	rc = -EINVAL;
 	p->process_class = string_to_security_class(p, "process");
-	if (!p->process_class) {
-		pr_err("SELinux: process class is required, not defined in policy\n");
+	if (!p->process_class)
 		goto bad;
-	}
 
 	rc = avtab_read(&p->te_avtab, fp, p);
 	if (rc)
@@ -2570,50 +2416,39 @@ int policydb_read(struct policydb *p, void *fp)
 	if (rc)
 		goto bad;
 	nel = le32_to_cpu(buf[0]);
-
-	rc = hashtab_init(&p->role_tr, nel);
-	if (rc)
-		goto bad;
+	ltr = NULL;
 	for (i = 0; i < nel; i++) {
 		rc = -ENOMEM;
-		rtk = kmalloc(sizeof(*rtk), GFP_KERNEL);
-		if (!rtk)
+		tr = kzalloc(sizeof(*tr), GFP_KERNEL);
+		if (!tr)
 			goto bad;
-
-		rc = -ENOMEM;
-		rtd = kmalloc(sizeof(*rtd), GFP_KERNEL);
-		if (!rtd)
-			goto bad;
-
+		if (ltr)
+			ltr->next = tr;
+		else
+			p->role_tr = tr;
 		rc = next_entry(buf, fp, sizeof(u32)*3);
 		if (rc)
 			goto bad;
 
 		rc = -EINVAL;
-		rtk->role = le32_to_cpu(buf[0]);
-		rtk->type = le32_to_cpu(buf[1]);
-		rtd->new_role = le32_to_cpu(buf[2]);
+		tr->role = le32_to_cpu(buf[0]);
+		tr->type = le32_to_cpu(buf[1]);
+		tr->new_role = le32_to_cpu(buf[2]);
 		if (p->policyvers >= POLICYDB_VERSION_ROLETRANS) {
 			rc = next_entry(buf, fp, sizeof(u32));
 			if (rc)
 				goto bad;
-			rtk->tclass = le32_to_cpu(buf[0]);
+			tr->tclass = le32_to_cpu(buf[0]);
 		} else
-			rtk->tclass = p->process_class;
+			tr->tclass = p->process_class;
 
 		rc = -EINVAL;
-		if (!policydb_role_isvalid(p, rtk->role) ||
-		    !policydb_type_isvalid(p, rtk->type) ||
-		    !policydb_class_isvalid(p, rtk->tclass) ||
-		    !policydb_role_isvalid(p, rtd->new_role))
+		if (!policydb_role_isvalid(p, tr->role) ||
+		    !policydb_type_isvalid(p, tr->type) ||
+		    !policydb_class_isvalid(p, tr->tclass) ||
+		    !policydb_role_isvalid(p, tr->new_role))
 			goto bad;
-
-		rc = hashtab_insert(&p->role_tr, rtk, rtd, roletr_key_params);
-		if (rc)
-			goto bad;
-
-		rtk = NULL;
-		rtd = NULL;
+		ltr = tr;
 	}
 
 	rc = next_entry(buf, fp, sizeof(u32));
@@ -2652,18 +2487,10 @@ int policydb_read(struct policydb *p, void *fp)
 		goto bad;
 
 	rc = -EINVAL;
-	perm = string_to_av_perm(p, p->process_class, "transition");
-	if (!perm) {
-		pr_err("SELinux: process transition permission is required, not defined in policy\n");
+	p->process_trans_perms = string_to_av_perm(p, p->process_class, "transition");
+	p->process_trans_perms |= string_to_av_perm(p, p->process_class, "dyntransition");
+	if (!p->process_trans_perms)
 		goto bad;
-	}
-	p->process_trans_perms = perm;
-	perm = string_to_av_perm(p, p->process_class, "dyntransition");
-	if (!perm) {
-		pr_err("SELinux: process dyntransition permission is required, not defined in policy\n");
-		goto bad;
-	}
-	p->process_trans_perms |= perm;
 
 	rc = ocontext_read(p, info, fp);
 	if (rc)
@@ -2677,7 +2504,6 @@ int policydb_read(struct policydb *p, void *fp)
 	if (rc)
 		goto bad;
 
-	rc = -ENOMEM;
 	p->type_attr_map_array = kvcalloc(p->p_types.nprim,
 					  sizeof(*p->type_attr_map_array),
 					  GFP_KERNEL);
@@ -2710,8 +2536,6 @@ int policydb_read(struct policydb *p, void *fp)
 out:
 	return rc;
 bad:
-	kfree(rtk);
-	kfree(rtd);
 	policydb_destroy(p);
 	goto out;
 }
@@ -2829,43 +2653,37 @@ static int cat_write(void *vkey, void *datum, void *ptr)
 	return 0;
 }
 
-static int role_trans_write_one(void *key, void *datum, void *ptr)
-{
-	struct role_trans_key *rtk = key;
-	struct role_trans_datum *rtd = datum;
-	struct policy_data *pd = ptr;
-	void *fp = pd->fp;
-	struct policydb *p = pd->p;
-	__le32 buf[3];
-	int rc;
-
-	buf[0] = cpu_to_le32(rtk->role);
-	buf[1] = cpu_to_le32(rtk->type);
-	buf[2] = cpu_to_le32(rtd->new_role);
-	rc = put_entry(buf, sizeof(u32), 3, fp);
-	if (rc)
-		return rc;
-	if (p->policyvers >= POLICYDB_VERSION_ROLETRANS) {
-		buf[0] = cpu_to_le32(rtk->tclass);
-		rc = put_entry(buf, sizeof(u32), 1, fp);
-		if (rc)
-			return rc;
-	}
-	return 0;
-}
-
 static int role_trans_write(struct policydb *p, void *fp)
 {
-	struct policy_data pd = { .p = p, .fp = fp };
-	__le32 buf[1];
+	struct role_trans *r = p->role_tr;
+	struct role_trans *tr;
+	__le32 buf[3];
+	size_t nel;
 	int rc;
 
-	buf[0] = cpu_to_le32(p->role_tr.nel);
+	nel = 0;
+	for (tr = r; tr; tr = tr->next)
+		nel++;
+	buf[0] = cpu_to_le32(nel);
 	rc = put_entry(buf, sizeof(u32), 1, fp);
 	if (rc)
 		return rc;
+	for (tr = r; tr; tr = tr->next) {
+		buf[0] = cpu_to_le32(tr->role);
+		buf[1] = cpu_to_le32(tr->type);
+		buf[2] = cpu_to_le32(tr->new_role);
+		rc = put_entry(buf, sizeof(u32), 3, fp);
+		if (rc)
+			return rc;
+		if (p->policyvers >= POLICYDB_VERSION_ROLETRANS) {
+			buf[0] = cpu_to_le32(tr->tclass);
+			rc = put_entry(buf, sizeof(u32), 1, fp);
+			if (rc)
+				return rc;
+		}
+	}
 
-	return hashtab_map(&p->role_tr, role_trans_write_one, &pd);
+	return 0;
 }
 
 static int role_allow_write(struct role_allow *r, void *fp)
@@ -2959,7 +2777,7 @@ static int common_write(void *vkey, void *datum, void *ptr)
 	buf[0] = cpu_to_le32(len);
 	buf[1] = cpu_to_le32(comdatum->value);
 	buf[2] = cpu_to_le32(comdatum->permissions.nprim);
-	buf[3] = cpu_to_le32(comdatum->permissions.table.nel);
+	buf[3] = cpu_to_le32(comdatum->permissions.table->nel);
 	rc = put_entry(buf, sizeof(u32), 4, fp);
 	if (rc)
 		return rc;
@@ -2968,7 +2786,7 @@ static int common_write(void *vkey, void *datum, void *ptr)
 	if (rc)
 		return rc;
 
-	rc = hashtab_map(&comdatum->permissions.table, perm_write, fp);
+	rc = hashtab_map(comdatum->permissions.table, perm_write, fp);
 	if (rc)
 		return rc;
 
@@ -3067,7 +2885,10 @@ static int class_write(void *vkey, void *datum, void *ptr)
 	buf[1] = cpu_to_le32(len2);
 	buf[2] = cpu_to_le32(cladatum->value);
 	buf[3] = cpu_to_le32(cladatum->permissions.nprim);
-	buf[4] = cpu_to_le32(cladatum->permissions.table.nel);
+	if (cladatum->permissions.table)
+		buf[4] = cpu_to_le32(cladatum->permissions.table->nel);
+	else
+		buf[4] = 0;
 	buf[5] = cpu_to_le32(ncons);
 	rc = put_entry(buf, sizeof(u32), 6, fp);
 	if (rc)
@@ -3083,7 +2904,7 @@ static int class_write(void *vkey, void *datum, void *ptr)
 			return rc;
 	}
 
-	rc = hashtab_map(&cladatum->permissions.table, perm_write, fp);
+	rc = hashtab_map(cladatum->permissions.table, perm_write, fp);
 	if (rc)
 		return rc;
 
@@ -3441,6 +3262,14 @@ static int genfs_write(struct policydb *p, void *fp)
 	return 0;
 }
 
+static int hashtab_cnt(void *key, void *data, void *ptr)
+{
+	int *cnt = ptr;
+	*cnt = *cnt + 1;
+
+	return 0;
+}
+
 static int range_write_helper(void *key, void *data, void *ptr)
 {
 	__le32 buf[2];
@@ -3472,26 +3301,32 @@ static int range_write_helper(void *key, void *data, void *ptr)
 static int range_write(struct policydb *p, void *fp)
 {
 	__le32 buf[1];
-	int rc;
+	int rc, nel;
 	struct policy_data pd;
 
 	pd.p = p;
 	pd.fp = fp;
 
-	buf[0] = cpu_to_le32(p->range_tr.nel);
+	/* count the number of entries in the hashtab */
+	nel = 0;
+	rc = hashtab_map(p->range_tr, hashtab_cnt, &nel);
+	if (rc)
+		return rc;
+
+	buf[0] = cpu_to_le32(nel);
 	rc = put_entry(buf, sizeof(u32), 1, fp);
 	if (rc)
 		return rc;
 
 	/* actually write all of the entries */
-	rc = hashtab_map(&p->range_tr, range_write_helper, &pd);
+	rc = hashtab_map(p->range_tr, range_write_helper, &pd);
 	if (rc)
 		return rc;
 
 	return 0;
 }
 
-static int filename_write_helper_compat(void *key, void *data, void *ptr)
+static int filename_write_helper(void *key, void *data, void *ptr)
 {
 	struct filename_trans_key *ft = key;
 	struct filename_trans_datum *datum = data;
@@ -3528,55 +3363,6 @@ static int filename_write_helper_compat(void *key, void *data, void *ptr)
 	return 0;
 }
 
-static int filename_write_helper(void *key, void *data, void *ptr)
-{
-	struct filename_trans_key *ft = key;
-	struct filename_trans_datum *datum;
-	void *fp = ptr;
-	__le32 buf[3];
-	int rc;
-	u32 ndatum, len = strlen(ft->name);
-
-	buf[0] = cpu_to_le32(len);
-	rc = put_entry(buf, sizeof(u32), 1, fp);
-	if (rc)
-		return rc;
-
-	rc = put_entry(ft->name, sizeof(char), len, fp);
-	if (rc)
-		return rc;
-
-	ndatum = 0;
-	datum = data;
-	do {
-		ndatum++;
-		datum = datum->next;
-	} while (unlikely(datum));
-
-	buf[0] = cpu_to_le32(ft->ttype);
-	buf[1] = cpu_to_le32(ft->tclass);
-	buf[2] = cpu_to_le32(ndatum);
-	rc = put_entry(buf, sizeof(u32), 3, fp);
-	if (rc)
-		return rc;
-
-	datum = data;
-	do {
-		rc = ebitmap_write(&datum->stypes, fp);
-		if (rc)
-			return rc;
-
-		buf[0] = cpu_to_le32(datum->otype);
-		rc = put_entry(buf, sizeof(u32), 1, fp);
-		if (rc)
-			return rc;
-
-		datum = datum->next;
-	} while (unlikely(datum));
-
-	return 0;
-}
-
 static int filename_trans_write(struct policydb *p, void *fp)
 {
 	__le32 buf[1];
@@ -3585,23 +3371,16 @@ static int filename_trans_write(struct policydb *p, void *fp)
 	if (p->policyvers < POLICYDB_VERSION_FILENAME_TRANS)
 		return 0;
 
-	if (p->policyvers < POLICYDB_VERSION_COMP_FTRANS) {
-		buf[0] = cpu_to_le32(p->compat_filename_trans_count);
-		rc = put_entry(buf, sizeof(u32), 1, fp);
-		if (rc)
-			return rc;
+	buf[0] = cpu_to_le32(p->filename_trans_count);
+	rc = put_entry(buf, sizeof(u32), 1, fp);
+	if (rc)
+		return rc;
 
-		rc = hashtab_map(&p->filename_trans,
-				 filename_write_helper_compat, fp);
-	} else {
-		buf[0] = cpu_to_le32(p->filename_trans.nel);
-		rc = put_entry(buf, sizeof(u32), 1, fp);
-		if (rc)
-			return rc;
+	rc = hashtab_map(p->filename_trans, filename_write_helper, fp);
+	if (rc)
+		return rc;
 
-		rc = hashtab_map(&p->filename_trans, filename_write_helper, fp);
-	}
-	return rc;
+	return 0;
 }
 
 /*
@@ -3688,12 +3467,12 @@ int policydb_write(struct policydb *p, void *fp)
 		pd.p = p;
 
 		buf[0] = cpu_to_le32(p->symtab[i].nprim);
-		buf[1] = cpu_to_le32(p->symtab[i].table.nel);
+		buf[1] = cpu_to_le32(p->symtab[i].table->nel);
 
 		rc = put_entry(buf, sizeof(u32), 2, fp);
 		if (rc)
 			return rc;
-		rc = hashtab_map(&p->symtab[i].table, write_f[i], &pd);
+		rc = hashtab_map(p->symtab[i].table, write_f[i], &pd);
 		if (rc)
 			return rc;
 	}

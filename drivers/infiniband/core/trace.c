@@ -9,4 +9,6 @@
 
 #define CREATE_TRACE_POINTS
 
+#include <rdma/ib_verbs.h>
+
 #include <trace/events/rdma_core.h>

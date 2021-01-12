@@ -800,21 +800,6 @@ static void byt_gpio_disable_free(struct pinctrl_dev *pctl_dev,
 	pm_runtime_put(vg->dev);
 }
 
-static void byt_gpio_direct_irq_check(struct intel_pinctrl *vg,
-				      unsigned int offset)
-{
-	void __iomem *conf_reg = byt_gpio_reg(vg, offset, BYT_CONF0_REG);
-
-	/*
-	 * Before making any direction modifications, do a check if gpio is set
-	 * for direct IRQ. On Bay Trail, setting GPIO to output does not make
-	 * sense, so let's at least inform the caller before they shoot
-	 * themselves in the foot.
-	 */
-	if (readl(conf_reg) & BYT_DIRECT_IRQ_EN)
-		dev_info_once(vg->dev, "Potential Error: Setting GPIO with direct_irq_en to output");
-}
-
 static int byt_gpio_set_direction(struct pinctrl_dev *pctl_dev,
 				  struct pinctrl_gpio_range *range,
 				  unsigned int offset,
@@ -822,6 +807,7 @@ static int byt_gpio_set_direction(struct pinctrl_dev *pctl_dev,
 {
 	struct intel_pinctrl *vg = pinctrl_dev_get_drvdata(pctl_dev);
 	void __iomem *val_reg = byt_gpio_reg(vg, offset, BYT_VAL_REG);
+	void __iomem *conf_reg = byt_gpio_reg(vg, offset, BYT_CONF0_REG);
 	unsigned long flags;
 	u32 value;
 
@@ -831,8 +817,14 @@ static int byt_gpio_set_direction(struct pinctrl_dev *pctl_dev,
 	value &= ~BYT_DIR_MASK;
 	if (input)
 		value |= BYT_OUTPUT_EN;
-	else
-		byt_gpio_direct_irq_check(vg, offset);
+	else if (readl(conf_reg) & BYT_DIRECT_IRQ_EN)
+		/*
+		 * Before making any direction modifications, do a check if gpio
+		 * is set for direct IRQ.  On baytrail, setting GPIO to output
+		 * does not make sense, so let's at least inform the caller before
+		 * they shoot themselves in the foot.
+		 */
+		dev_info_once(vg->dev, "Potential Error: Setting GPIO with direct_irq_en to output");
 
 	writel(value, val_reg);
 
@@ -1049,6 +1041,7 @@ static int byt_pin_config_set(struct pinctrl_dev *pctl_dev,
 			break;
 		case PIN_CONFIG_INPUT_DEBOUNCE:
 			debounce = readl(db_reg);
+			debounce &= ~BYT_DEBOUNCE_PULSE_MASK;
 
 			if (arg)
 				conf |= BYT_DEBOUNCE_EN;
@@ -1057,31 +1050,24 @@ static int byt_pin_config_set(struct pinctrl_dev *pctl_dev,
 
 			switch (arg) {
 			case 375:
-				debounce &= ~BYT_DEBOUNCE_PULSE_MASK;
 				debounce |= BYT_DEBOUNCE_PULSE_375US;
 				break;
 			case 750:
-				debounce &= ~BYT_DEBOUNCE_PULSE_MASK;
 				debounce |= BYT_DEBOUNCE_PULSE_750US;
 				break;
 			case 1500:
-				debounce &= ~BYT_DEBOUNCE_PULSE_MASK;
 				debounce |= BYT_DEBOUNCE_PULSE_1500US;
 				break;
 			case 3000:
-				debounce &= ~BYT_DEBOUNCE_PULSE_MASK;
 				debounce |= BYT_DEBOUNCE_PULSE_3MS;
 				break;
 			case 6000:
-				debounce &= ~BYT_DEBOUNCE_PULSE_MASK;
 				debounce |= BYT_DEBOUNCE_PULSE_6MS;
 				break;
 			case 12000:
-				debounce &= ~BYT_DEBOUNCE_PULSE_MASK;
 				debounce |= BYT_DEBOUNCE_PULSE_12MS;
 				break;
 			case 24000:
-				debounce &= ~BYT_DEBOUNCE_PULSE_MASK;
 				debounce |= BYT_DEBOUNCE_PULSE_24MS;
 				break;
 			default:
@@ -1179,50 +1165,19 @@ static int byt_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
 
 static int byt_gpio_direction_input(struct gpio_chip *chip, unsigned int offset)
 {
-	struct intel_pinctrl *vg = gpiochip_get_data(chip);
-	void __iomem *val_reg = byt_gpio_reg(vg, offset, BYT_VAL_REG);
-	unsigned long flags;
-	u32 reg;
-
-	raw_spin_lock_irqsave(&byt_lock, flags);
-
-	reg = readl(val_reg);
-	reg &= ~BYT_DIR_MASK;
-	reg |= BYT_OUTPUT_EN;
-	writel(reg, val_reg);
-
-	raw_spin_unlock_irqrestore(&byt_lock, flags);
-	return 0;
+	return pinctrl_gpio_direction_input(chip->base + offset);
 }
 
-/*
- * Note despite the temptation this MUST NOT be converted into a call to
- * pinctrl_gpio_direction_output() + byt_gpio_set() that does not work this
- * MUST be done as a single BYT_VAL_REG register write.
- * See the commit message of the commit adding this comment for details.
- */
 static int byt_gpio_direction_output(struct gpio_chip *chip,
 				     unsigned int offset, int value)
 {
-	struct intel_pinctrl *vg = gpiochip_get_data(chip);
-	void __iomem *val_reg = byt_gpio_reg(vg, offset, BYT_VAL_REG);
-	unsigned long flags;
-	u32 reg;
+	int ret = pinctrl_gpio_direction_output(chip->base + offset);
 
-	raw_spin_lock_irqsave(&byt_lock, flags);
+	if (ret)
+		return ret;
 
-	byt_gpio_direct_irq_check(vg, offset);
+	byt_gpio_set(chip, offset, value);
 
-	reg = readl(val_reg);
-	reg &= ~BYT_DIR_MASK;
-	if (value)
-		reg |= BYT_LEVEL;
-	else
-		reg &= ~BYT_LEVEL;
-
-	writel(reg, val_reg);
-
-	raw_spin_unlock_irqrestore(&byt_lock, flags);
 	return 0;
 }
 
@@ -1378,13 +1333,13 @@ static void byt_irq_unmask(struct irq_data *d)
 	switch (irqd_get_trigger_type(d)) {
 	case IRQ_TYPE_LEVEL_HIGH:
 		value |= BYT_TRIG_LVL;
-		fallthrough;
+		/* fall through */
 	case IRQ_TYPE_EDGE_RISING:
 		value |= BYT_TRIG_POS;
 		break;
 	case IRQ_TYPE_LEVEL_LOW:
 		value |= BYT_TRIG_LVL;
-		fallthrough;
+		/* fall through */
 	case IRQ_TYPE_EDGE_FALLING:
 		value |= BYT_TRIG_NEG;
 		break;
@@ -1551,7 +1506,8 @@ static int byt_gpio_probe(struct intel_pinctrl *vg)
 {
 	struct platform_device *pdev = to_platform_device(vg->dev);
 	struct gpio_chip *gc;
-	int irq, ret;
+	struct resource *irq_rc;
+	int ret;
 
 	/* Set up gpio chip */
 	vg->chip	= byt_gpio_chip;
@@ -1571,8 +1527,8 @@ static int byt_gpio_probe(struct intel_pinctrl *vg)
 #endif
 
 	/* set up interrupts  */
-	irq = platform_get_irq_optional(pdev, 0);
-	if (irq > 0) {
+	irq_rc = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
+	if (irq_rc && irq_rc->start) {
 		struct gpio_irq_chip *girq;
 
 		vg->irqchip.name = "BYT-GPIO",
@@ -1592,7 +1548,7 @@ static int byt_gpio_probe(struct intel_pinctrl *vg)
 					     sizeof(*girq->parents), GFP_KERNEL);
 		if (!girq->parents)
 			return -ENOMEM;
-		girq->parents[0] = irq;
+		girq->parents[0] = (unsigned int)irq_rc->start;
 		girq->default_type = IRQ_TYPE_NONE;
 		girq->handler = handle_bad_irq;
 	}
@@ -1641,14 +1597,28 @@ static const struct acpi_device_id byt_gpio_acpi_match[] = {
 
 static int byt_pinctrl_probe(struct platform_device *pdev)
 {
-	const struct intel_pinctrl_soc_data *soc_data;
+	const struct intel_pinctrl_soc_data *soc_data = NULL;
+	const struct intel_pinctrl_soc_data **soc_table;
 	struct device *dev = &pdev->dev;
+	struct acpi_device *acpi_dev;
 	struct intel_pinctrl *vg;
-	int ret;
+	int i, ret;
 
-	soc_data = intel_pinctrl_get_soc_data(pdev);
-	if (IS_ERR(soc_data))
-		return PTR_ERR(soc_data);
+	acpi_dev = ACPI_COMPANION(dev);
+	if (!acpi_dev)
+		return -ENODEV;
+
+	soc_table = (const struct intel_pinctrl_soc_data **)device_get_match_data(dev);
+
+	for (i = 0; soc_table[i]; i++) {
+		if (!strcmp(acpi_dev->pnp.unique_id, soc_table[i]->uid)) {
+			soc_data = soc_table[i];
+			break;
+		}
+	}
+
+	if (!soc_data)
+		return -ENODEV;
 
 	vg = devm_kzalloc(dev, sizeof(*vg), GFP_KERNEL);
 	if (!vg)
@@ -1788,8 +1758,9 @@ static struct platform_driver byt_gpio_driver = {
 	.driver         = {
 		.name			= "byt_gpio",
 		.pm			= &byt_gpio_pm_ops,
-		.acpi_match_table	= byt_gpio_acpi_match,
 		.suppress_bind_attrs	= true,
+
+		.acpi_match_table = ACPI_PTR(byt_gpio_acpi_match),
 	},
 };
 

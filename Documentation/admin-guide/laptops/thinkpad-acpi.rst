@@ -50,7 +50,6 @@ detailed description):
 	- WAN enable and disable
 	- UWB enable and disable
 	- LCD Shadow (PrivacyGuard) enable and disable
-	- Lap mode sensor
 
 A compatibility table by model and feature is maintained on the web
 site, http://ibm-acpi.sf.net/. I appreciate any success or failure
@@ -905,7 +904,7 @@ temperatures:
 The mapping of thermal sensors to physical locations varies depending on
 system-board model (and thus, on ThinkPad model).
 
-https://thinkwiki.org/wiki/Thermal_Sensors is a public wiki page that
+http://thinkwiki.org/wiki/Thermal_Sensors is a public wiki page that
 tries to track down these locations for various models.
 
 Most (newer?) models seem to follow this pattern:
@@ -926,7 +925,7 @@ For the R51 (source: Thomas Gruber):
 - 3:  Internal HDD
 
 For the T43, T43/p (source: Shmidoax/Thinkwiki.org)
-https://thinkwiki.org/wiki/Thermal_Sensors#ThinkPad_T43.2C_T43p
+http://thinkwiki.org/wiki/Thermal_Sensors#ThinkPad_T43.2C_T43p
 
 - 2:  System board, left side (near PCMCIA slot), reported as HDAPS temp
 - 3:  PCMCIA slot
@@ -936,7 +935,7 @@ https://thinkwiki.org/wiki/Thermal_Sensors#ThinkPad_T43.2C_T43p
 - 11: Power regulator, underside of system board, below F2 key
 
 The A31 has a very atypical layout for the thermal sensors
-(source: Milos Popovic, https://thinkwiki.org/wiki/Thermal_Sensors#ThinkPad_A31)
+(source: Milos Popovic, http://thinkwiki.org/wiki/Thermal_Sensors#ThinkPad_A31)
 
 - 1:  CPU
 - 2:  Main Battery: main sensor
@@ -1433,20 +1432,6 @@ The first command ensures the best viewing angle and the latter one turns
 on the feature, restricting the viewing angles.
 
 
-DYTC Lapmode sensor
--------------------
-
-sysfs: dytc_lapmode
-
-Newer thinkpads and mobile workstations have the ability to determine if
-the device is in deskmode or lapmode. This feature is used by user space
-to decide if WWAN transmission can be increased to maximum power and is
-also useful for understanding the different thermal modes available as
-they differ between desk and lap mode.
-
-The property is read-only. If the platform doesn't have support the sysfs
-class is not created.
-
 EXPERIMENTAL: UWB
 -----------------
 
@@ -1484,23 +1469,6 @@ and set.
 For more details about which buttons will appear depending on the mode, please
 review the laptop's user guide:
 http://www.lenovo.com/shop/americas/content/user_guides/x1carbon_2_ug_en.pdf
-
-Battery charge control
-----------------------
-
-sysfs attributes:
-/sys/class/power_supply/BAT*/charge_control_{start,end}_threshold
-
-These two attributes are created for those batteries that are supported by the
-driver. They enable the user to control the battery charge thresholds of the
-given battery. Both values may be read and set. `charge_control_start_threshold`
-accepts an integer between 0 and 99 (inclusive); this value represents a battery
-percentage level, below which charging will begin. `charge_control_end_threshold`
-accepts an integer between 1 and 100 (inclusive); this value represents a battery
-percentage level, above which charging will stop.
-
-The exact semantics of the attributes may be found in
-Documentation/ABI/testing/sysfs-class-power.
 
 Multiple Commands, Module Parameters
 ------------------------------------

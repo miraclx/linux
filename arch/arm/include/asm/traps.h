@@ -29,8 +29,7 @@ static inline int __in_irqentry_text(unsigned long ptr)
 }
 
 extern void __init early_trap_init(void *);
-extern void dump_backtrace_entry(unsigned long where, unsigned long from,
-				 unsigned long frame, const char *loglvl);
+extern void dump_backtrace_entry(unsigned long where, unsigned long from, unsigned long frame);
 extern void ptrace_break(struct pt_regs *regs);
 
 extern void *vectors_page;

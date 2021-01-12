@@ -143,6 +143,7 @@ static const struct versatile_panel_type versatile_panels[] = {
 			.vsync_start = 240 + 5,
 			.vsync_end = 240 + 5 + 6,
 			.vtotal = 240 + 5 + 6 + 5,
+			.vrefresh = 116,
 			.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
 		},
 	},
@@ -166,6 +167,7 @@ static const struct versatile_panel_type versatile_panels[] = {
 			.vsync_start = 480 + 11,
 			.vsync_end = 480 + 11 + 2,
 			.vtotal = 480 + 11 + 2 + 32,
+			.vrefresh = 60,
 			.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
 		},
 	},
@@ -188,6 +190,7 @@ static const struct versatile_panel_type versatile_panels[] = {
 			.vsync_start = 220 + 0,
 			.vsync_end = 220 + 0 + 2,
 			.vtotal = 220 + 0 + 2 + 1,
+			.vrefresh = 390,
 			.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
 		},
 		.bus_flags = DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE,
@@ -211,6 +214,7 @@ static const struct versatile_panel_type versatile_panels[] = {
 			.vsync_start = 320 + 2,
 			.vsync_end = 320 + 2 + 2,
 			.vtotal = 320 + 2 + 2 + 2,
+			.vrefresh = 116,
 			.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 		},
 		.bus_flags = DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE,
@@ -349,9 +353,7 @@ static int versatile_panel_probe(struct platform_device *pdev)
 	drm_panel_init(&vpanel->panel, dev, &versatile_panel_drm_funcs,
 		       DRM_MODE_CONNECTOR_DPI);
 
-	drm_panel_add(&vpanel->panel);
-
-	return 0;
+	return drm_panel_add(&vpanel->panel);
 }
 
 static const struct of_device_id versatile_panel_match[] = {

@@ -30,7 +30,6 @@
  * Definitions taken from spice-protocol, plus kernel driver specific bits.
  */
 
-#include <linux/dma-buf-map.h>
 #include <linux/dma-fence.h>
 #include <linux/firmware.h>
 #include <linux/platform_device.h>
@@ -50,8 +49,6 @@
 #include <drm/ttm/ttm_placement.h>
 
 #include "qxl_dev.h"
-
-struct dma_buf_map;
 
 #define DRIVER_AUTHOR		"Dave Airlie"
 
@@ -82,7 +79,8 @@ struct qxl_bo {
 	/* Protected by tbo.reserved */
 	struct ttm_place		placements[3];
 	struct ttm_placement		placement;
-	struct dma_buf_map		map;
+	struct ttm_bo_kmap_obj		kmap;
+	unsigned int pin_count;
 	void				*kptr;
 	unsigned int                    map_count;
 	int                             type;
@@ -136,6 +134,7 @@ struct qxl_memslot {
 	uint64_t	start_phys_addr;
 	uint64_t	size;
 	uint64_t	high_bits;
+	uint64_t        gpu_offset;
 };
 
 enum {
@@ -169,6 +168,20 @@ struct qxl_drm_image {
 	struct list_head chunk_list;
 };
 
+struct qxl_fb_image {
+	struct qxl_device *qdev;
+	uint32_t pseudo_palette[16];
+	struct fb_image fb_image;
+	uint32_t visual;
+};
+
+struct qxl_draw_fill {
+	struct qxl_device *qdev;
+	struct qxl_rect rect;
+	uint32_t color;
+	uint16_t rop;
+};
+
 /*
  * Debugfs
  */
@@ -176,6 +189,13 @@ struct qxl_debugfs {
 	struct drm_info_list	*files;
 	unsigned int num_files;
 };
+
+int qxl_debugfs_add_files(struct qxl_device *rdev,
+			     struct drm_info_list *files,
+			     unsigned int nfiles);
+int qxl_debugfs_fence_init(struct qxl_device *rdev);
+
+struct qxl_device;
 
 struct qxl_device {
 	struct drm_device ddev;
@@ -256,14 +276,11 @@ struct qxl_device {
 	int monitors_config_height;
 };
 
-#define to_qxl(dev) container_of(dev, struct qxl_device, ddev)
-
-int qxl_debugfs_fence_init(struct qxl_device *rdev);
-
 extern const struct drm_ioctl_desc qxl_ioctls[];
 extern int qxl_max_ioctl;
 
-int qxl_device_init(struct qxl_device *qdev, struct pci_dev *pdev);
+int qxl_device_init(struct qxl_device *qdev, struct drm_driver *drv,
+		    struct pci_dev *pdev);
 void qxl_device_fini(struct qxl_device *qdev);
 
 int qxl_modeset_init(struct qxl_device *qdev);
@@ -294,9 +311,10 @@ qxl_bo_physical_address(struct qxl_device *qdev, struct qxl_bo *bo,
 		(bo->tbo.mem.mem_type == TTM_PL_VRAM)
 		? &qdev->main_slot : &qdev->surfaces_slot;
 
-       /* TODO - need to hold one of the locks to read bo->tbo.mem.start */
+	WARN_ON_ONCE((bo->tbo.offset & slot->gpu_offset) != slot->gpu_offset);
 
-	return slot->high_bits | ((bo->tbo.mem.start << PAGE_SHIFT) + offset);
+	/* TODO - need to hold one of the locks to read tbo.offset */
+	return slot->high_bits | (bo->tbo.offset - slot->gpu_offset + offset);
 }
 
 /* qxl_display.c */
@@ -324,6 +342,7 @@ int qxl_gem_object_open(struct drm_gem_object *obj, struct drm_file *file_priv);
 void qxl_gem_object_close(struct drm_gem_object *obj,
 			  struct drm_file *file_priv);
 void qxl_bo_force_delete(struct qxl_device *qdev);
+int qxl_bo_kmap(struct qxl_bo *bo, void **ptr);
 
 /* qxl_dumb.c */
 int qxl_mode_dumb_create(struct drm_file *file_priv,
@@ -337,7 +356,7 @@ int qxl_mode_dumb_mmap(struct drm_file *filp,
 int qxl_ttm_init(struct qxl_device *qdev);
 void qxl_ttm_fini(struct qxl_device *qdev);
 int qxl_ttm_io_mem_reserve(struct ttm_bo_device *bdev,
-			   struct ttm_resource *mem);
+			   struct ttm_mem_reg *mem);
 
 /* qxl image */
 
@@ -423,8 +442,8 @@ int qxl_garbage_collect(struct qxl_device *qdev);
 
 /* debugfs */
 
-void qxl_debugfs_init(struct drm_minor *minor);
-void qxl_ttm_debugfs_init(struct qxl_device *qdev);
+int qxl_debugfs_init(struct drm_minor *minor);
+int qxl_ttm_debugfs_init(struct qxl_device *qdev);
 
 /* qxl_prime.c */
 int qxl_gem_prime_pin(struct drm_gem_object *obj);
@@ -433,9 +452,8 @@ struct sg_table *qxl_gem_prime_get_sg_table(struct drm_gem_object *obj);
 struct drm_gem_object *qxl_gem_prime_import_sg_table(
 	struct drm_device *dev, struct dma_buf_attachment *attach,
 	struct sg_table *sgt);
-int qxl_gem_prime_vmap(struct drm_gem_object *obj, struct dma_buf_map *map);
-void qxl_gem_prime_vunmap(struct drm_gem_object *obj,
-			  struct dma_buf_map *map);
+void *qxl_gem_prime_vmap(struct drm_gem_object *obj);
+void qxl_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr);
 int qxl_gem_prime_mmap(struct drm_gem_object *obj,
 				struct vm_area_struct *vma);
 
@@ -443,9 +461,9 @@ int qxl_gem_prime_mmap(struct drm_gem_object *obj,
 int qxl_irq_init(struct qxl_device *qdev);
 irqreturn_t qxl_irq_handler(int irq, void *arg);
 
-void qxl_debugfs_add_files(struct qxl_device *qdev,
-			   struct drm_info_list *files,
-			   unsigned int nfiles);
+int qxl_debugfs_add_files(struct qxl_device *qdev,
+			  struct drm_info_list *files,
+			  unsigned int nfiles);
 
 int qxl_surface_id_alloc(struct qxl_device *qdev,
 			 struct qxl_bo *surf);

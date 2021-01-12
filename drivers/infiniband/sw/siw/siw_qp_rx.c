@@ -139,8 +139,7 @@ static int siw_rx_pbl(struct siw_rx_stream *srx, int *pbl_idx,
 			break;
 
 		bytes = min(bytes, len);
-		if (siw_rx_kva(srx, (void *)(uintptr_t)buf_addr, bytes) ==
-		    bytes) {
+		if (siw_rx_kva(srx, (void *)buf_addr, bytes) == bytes) {
 			copied += bytes;
 			offset += bytes;
 			len -= bytes;
@@ -333,7 +332,7 @@ static struct siw_wqe *siw_rqe_get(struct siw_qp *qp)
 	struct siw_srq *srq;
 	struct siw_wqe *wqe = NULL;
 	bool srq_event = false;
-	unsigned long flags;
+	unsigned long uninitialized_var(flags);
 
 	srq = qp->srq;
 	if (srq) {
@@ -1215,7 +1214,7 @@ static int siw_rdmap_complete(struct siw_qp *qp, int error)
 	case RDMAP_SEND_SE:
 	case RDMAP_SEND_SE_INVAL:
 		wqe->rqe.flags |= SIW_WQE_SOLICITED;
-		fallthrough;
+		/* Fall through */
 
 	case RDMAP_SEND:
 	case RDMAP_SEND_INVAL:
@@ -1386,7 +1385,7 @@ int siw_tcp_rx_data(read_descriptor_t *rd_desc, struct sk_buff *skb,
 			 * DDP segment.
 			 */
 			qp->rx_fpdu->first_ddp_seg = 0;
-			fallthrough;
+			/* Fall through */
 
 		case SIW_GET_DATA_START:
 			/*

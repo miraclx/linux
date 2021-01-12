@@ -1,6 +1,7 @@
-// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+// SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2020 Facebook
-#include <vmlinux.h>
+#include "profiler.h"
+#include <linux/bpf.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
@@ -70,7 +71,7 @@ int BPF_PROG(fentry_XXX)
 static inline void
 fexit_update_maps(u32 id, struct bpf_perf_event_value *after)
 {
-	struct bpf_perf_event_value *before, diff;
+	struct bpf_perf_event_value *before, diff, *accum;
 
 	before = bpf_map_lookup_elem(&fentry_readings, &id);
 	/* only account samples with a valid fentry_reading */
@@ -95,7 +96,7 @@ int BPF_PROG(fexit_XXX)
 {
 	struct bpf_perf_event_value readings[MAX_NUM_MATRICS];
 	u32 cpu = bpf_get_smp_processor_id();
-	u32 i, zero = 0;
+	u32 i, one = 1, zero = 0;
 	int err;
 	u64 *count;
 
@@ -115,4 +116,4 @@ int BPF_PROG(fexit_XXX)
 	return 0;
 }
 
-char LICENSE[] SEC("license") = "Dual BSD/GPL";
+char LICENSE[] SEC("license") = "GPL";

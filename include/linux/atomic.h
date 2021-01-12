@@ -25,12 +25,6 @@
  * See Documentation/memory-barriers.txt for ACQUIRE/RELEASE definitions.
  */
 
-#define atomic_cond_read_acquire(v, c) smp_cond_load_acquire(&(v)->counter, (c))
-#define atomic_cond_read_relaxed(v, c) smp_cond_load_relaxed(&(v)->counter, (c))
-
-#define atomic64_cond_read_acquire(v, c) smp_cond_load_acquire(&(v)->counter, (c))
-#define atomic64_cond_read_relaxed(v, c) smp_cond_load_relaxed(&(v)->counter, (c))
-
 /*
  * The idea here is to build acquire/release variants by adding explicit
  * barriers on top of the relaxed variant. In the case where the relaxed
@@ -77,12 +71,7 @@
 	__ret;								\
 })
 
-#ifdef ARCH_ATOMIC
-#include <linux/atomic-arch-fallback.h>
-#include <asm-generic/atomic-instrumented.h>
-#else
 #include <linux/atomic-fallback.h>
-#endif
 
 #include <asm-generic/atomic-long.h>
 

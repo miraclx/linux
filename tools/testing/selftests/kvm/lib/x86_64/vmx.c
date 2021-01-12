@@ -379,16 +379,11 @@ void prepare_vmcs(struct vmx_pages *vmx, void *guest_rip, void *guest_rsp)
 	init_vmcs_guest_state(guest_rip, guest_rsp);
 }
 
-bool nested_vmx_supported(void)
+void nested_vmx_check_supported(void)
 {
 	struct kvm_cpuid_entry2 *entry = kvm_get_supported_cpuid_entry(1);
 
-	return entry->ecx & CPUID_VMX;
-}
-
-void nested_vmx_check_supported(void)
-{
-	if (!nested_vmx_supported()) {
+	if (!(entry->ecx & CPUID_VMX)) {
 		print_skip("nested VMX not enabled");
 		exit(KSFT_SKIP);
 	}
@@ -541,13 +536,4 @@ void prepare_eptp(struct vmx_pages *vmx, struct kvm_vm *vm,
 	vmx->eptp = (void *)vm_vaddr_alloc(vm, getpagesize(), 0x10000, 0, 0);
 	vmx->eptp_hva = addr_gva2hva(vm, (uintptr_t)vmx->eptp);
 	vmx->eptp_gpa = addr_gva2gpa(vm, (uintptr_t)vmx->eptp);
-}
-
-void prepare_virtualize_apic_accesses(struct vmx_pages *vmx, struct kvm_vm *vm,
-				      uint32_t eptp_memslot)
-{
-	vmx->apic_access = (void *)vm_vaddr_alloc(vm, getpagesize(),
-						  0x10000, 0, 0);
-	vmx->apic_access_hva = addr_gva2hva(vm, (uintptr_t)vmx->apic_access);
-	vmx->apic_access_gpa = addr_gva2gpa(vm, (uintptr_t)vmx->apic_access);
 }

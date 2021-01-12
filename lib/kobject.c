@@ -6,7 +6,7 @@
  * Copyright (c) 2006-2007 Greg Kroah-Hartman <greg@kroah.com>
  * Copyright (c) 2006-2007 Novell Inc.
  *
- * Please see the file Documentation/core-api/kobject.rst for critical information
+ * Please see the file Documentation/kobject.txt for critical information
  * about using the kobject interface.
  */
 
@@ -599,32 +599,6 @@ out:
 }
 EXPORT_SYMBOL_GPL(kobject_move);
 
-static void __kobject_del(struct kobject *kobj)
-{
-	struct kernfs_node *sd;
-	const struct kobj_type *ktype;
-
-	sd = kobj->sd;
-	ktype = get_ktype(kobj);
-
-	if (ktype)
-		sysfs_remove_groups(kobj, ktype->default_groups);
-
-	/* send "remove" if the caller did not do it but sent "add" */
-	if (kobj->state_add_uevent_sent && !kobj->state_remove_uevent_sent) {
-		pr_debug("kobject: '%s' (%p): auto cleanup 'remove' event\n",
-			 kobject_name(kobj), kobj);
-		kobject_uevent(kobj, KOBJ_REMOVE);
-	}
-
-	sysfs_remove_dir(kobj);
-	sysfs_put(sd);
-
-	kobj->state_in_sysfs = 0;
-	kobj_kset_leave(kobj);
-	kobj->parent = NULL;
-}
-
 /**
  * kobject_del() - Unlink kobject from hierarchy.
  * @kobj: object.
@@ -634,14 +608,25 @@ static void __kobject_del(struct kobject *kobj)
  */
 void kobject_del(struct kobject *kobj)
 {
-	struct kobject *parent;
+	struct kernfs_node *sd;
+	const struct kobj_type *ktype;
 
 	if (!kobj)
 		return;
 
-	parent = kobj->parent;
-	__kobject_del(kobj);
-	kobject_put(parent);
+	sd = kobj->sd;
+	ktype = get_ktype(kobj);
+
+	if (ktype)
+		sysfs_remove_groups(kobj, ktype->default_groups);
+
+	sysfs_remove_dir(kobj);
+	sysfs_put(sd);
+
+	kobj->state_in_sysfs = 0;
+	kobj_kset_leave(kobj);
+	kobject_put(kobj->parent);
+	kobj->parent = NULL;
 }
 EXPORT_SYMBOL(kobject_del);
 
@@ -678,7 +663,6 @@ EXPORT_SYMBOL(kobject_get_unless_zero);
  */
 static void kobject_cleanup(struct kobject *kobj)
 {
-	struct kobject *parent = kobj->parent;
 	struct kobj_type *t = get_ktype(kobj);
 	const char *name = kobj->name;
 
@@ -686,17 +670,21 @@ static void kobject_cleanup(struct kobject *kobj)
 		 kobject_name(kobj), kobj, __func__, kobj->parent);
 
 	if (t && !t->release)
-		pr_debug("kobject: '%s' (%p): does not have a release() function, it is broken and must be fixed. See Documentation/core-api/kobject.rst.\n",
+		pr_debug("kobject: '%s' (%p): does not have a release() function, it is broken and must be fixed. See Documentation/kobject.txt.\n",
 			 kobject_name(kobj), kobj);
+
+	/* send "remove" if the caller did not do it but sent "add" */
+	if (kobj->state_add_uevent_sent && !kobj->state_remove_uevent_sent) {
+		pr_debug("kobject: '%s' (%p): auto cleanup 'remove' event\n",
+			 kobject_name(kobj), kobj);
+		kobject_uevent(kobj, KOBJ_REMOVE);
+	}
 
 	/* remove from sysfs if the caller did not do it */
 	if (kobj->state_in_sysfs) {
 		pr_debug("kobject: '%s' (%p): auto cleanup kobject_del\n",
 			 kobject_name(kobj), kobj);
-		__kobject_del(kobj);
-	} else {
-		/* avoid dropping the parent reference unnecessarily */
-		parent = NULL;
+		kobject_del(kobj);
 	}
 
 	if (t && t->release) {
@@ -710,8 +698,6 @@ static void kobject_cleanup(struct kobject *kobj)
 		pr_debug("kobject: '%s': free name\n", name);
 		kfree_const(name);
 	}
-
-	kobject_put(parent);
 }
 
 #ifdef CONFIG_DEBUG_KOBJECT_RELEASE

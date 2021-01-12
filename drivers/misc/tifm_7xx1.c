@@ -207,9 +207,10 @@ static void tifm_7xx1_switch_media(struct work_struct *work)
 	spin_unlock_irqrestore(&fm->lock, flags);
 }
 
-static int __maybe_unused tifm_7xx1_suspend(struct device *dev_d)
+#ifdef CONFIG_PM
+
+static int tifm_7xx1_suspend(struct pci_dev *dev, pm_message_t state)
 {
-	struct pci_dev *dev = to_pci_dev(dev_d);
 	struct tifm_adapter *fm = pci_get_drvdata(dev);
 	int cnt;
 
@@ -220,13 +221,15 @@ static int __maybe_unused tifm_7xx1_suspend(struct device *dev_d)
 			tifm_7xx1_sock_power_off(fm->sockets[cnt]->addr);
 	}
 
-	device_wakeup_disable(dev_d);
+	pci_save_state(dev);
+	pci_enable_wake(dev, pci_choose_state(dev, state), 0);
+	pci_disable_device(dev);
+	pci_set_power_state(dev, pci_choose_state(dev, state));
 	return 0;
 }
 
-static int __maybe_unused tifm_7xx1_resume(struct device *dev_d)
+static int tifm_7xx1_resume(struct pci_dev *dev)
 {
-	struct pci_dev *dev = to_pci_dev(dev_d);
 	struct tifm_adapter *fm = pci_get_drvdata(dev);
 	int rc;
 	unsigned long timeout;
@@ -239,6 +242,11 @@ static int __maybe_unused tifm_7xx1_resume(struct device *dev_d)
 	if (WARN_ON(fm->num_sockets > ARRAY_SIZE(new_ids)))
 		return -ENXIO;
 
+	pci_set_power_state(dev, PCI_D0);
+	pci_restore_state(dev);
+	rc = pci_enable_device(dev);
+	if (rc)
+		return rc;
 	pci_set_master(dev);
 
 	dev_dbg(&dev->dev, "resuming host\n");
@@ -288,6 +296,13 @@ static int __maybe_unused tifm_7xx1_resume(struct device *dev_d)
 
 	return 0;
 }
+
+#else
+
+#define tifm_7xx1_suspend NULL
+#define tifm_7xx1_resume NULL
+
+#endif /* CONFIG_PM */
 
 static int tifm_7xx1_dummy_has_ms_pif(struct tifm_adapter *fm,
 				      struct tifm_dev *sock)
@@ -409,14 +424,13 @@ static const struct pci_device_id tifm_7xx1_pci_tbl[] = {
 	{ }
 };
 
-static SIMPLE_DEV_PM_OPS(tifm_7xx1_pm_ops, tifm_7xx1_suspend, tifm_7xx1_resume);
-
 static struct pci_driver tifm_7xx1_driver = {
 	.name = DRIVER_NAME,
 	.id_table = tifm_7xx1_pci_tbl,
 	.probe = tifm_7xx1_probe,
 	.remove = tifm_7xx1_remove,
-	.driver.pm = &tifm_7xx1_pm_ops,
+	.suspend = tifm_7xx1_suspend,
+	.resume = tifm_7xx1_resume,
 };
 
 module_pci_driver(tifm_7xx1_driver);

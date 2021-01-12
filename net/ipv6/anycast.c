@@ -183,7 +183,7 @@ int ipv6_sock_ac_drop(struct sock *sk, int ifindex, const struct in6_addr *addr)
 	return 0;
 }
 
-void __ipv6_sock_ac_close(struct sock *sk)
+void ipv6_sock_ac_close(struct sock *sk)
 {
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct net_device *dev = NULL;
@@ -191,7 +191,10 @@ void __ipv6_sock_ac_close(struct sock *sk)
 	struct net *net = sock_net(sk);
 	int	prev_index;
 
-	ASSERT_RTNL();
+	if (!np->ipv6_ac_list)
+		return;
+
+	rtnl_lock();
 	pac = np->ipv6_ac_list;
 	np->ipv6_ac_list = NULL;
 
@@ -208,16 +211,6 @@ void __ipv6_sock_ac_close(struct sock *sk)
 		sock_kfree_s(sk, pac, sizeof(*pac));
 		pac = next;
 	}
-}
-
-void ipv6_sock_ac_close(struct sock *sk)
-{
-	struct ipv6_pinfo *np = inet6_sk(sk);
-
-	if (!np->ipv6_ac_list)
-		return;
-	rtnl_lock();
-	__ipv6_sock_ac_close(sk);
 	rtnl_unlock();
 }
 
@@ -371,7 +364,7 @@ int __ipv6_dev_ac_dec(struct inet6_dev *idev, const struct in6_addr *addr)
 	ipv6_del_acaddr_hash(aca);
 	addrconf_leave_solict(idev, &aca->aca_addr);
 
-	ip6_del_rt(dev_net(idev->dev), aca->aca_rt, false);
+	ip6_del_rt(dev_net(idev->dev), aca->aca_rt);
 
 	aca_put(aca);
 	return 0;
@@ -400,7 +393,7 @@ void ipv6_ac_destroy_dev(struct inet6_dev *idev)
 
 		addrconf_leave_solict(idev, &aca->aca_addr);
 
-		ip6_del_rt(dev_net(idev->dev), aca->aca_rt, false);
+		ip6_del_rt(dev_net(idev->dev), aca->aca_rt);
 
 		aca_put(aca);
 

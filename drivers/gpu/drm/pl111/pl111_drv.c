@@ -10,11 +10,18 @@
  */
 
 /**
- * DOC: ARM PrimeCell PL110 and PL111 CLCD Driver
+ * DOC: ARM PrimeCell PL111 CLCD Driver
  *
- * The PL110/PL111 is a simple LCD controller that can support TFT
- * and STN displays. This driver exposes a standard KMS interface
- * for them.
+ * The PL111 is a simple LCD controller that can support TFT and STN
+ * displays.  This driver exposes a standard KMS interface for them.
+ *
+ * This driver uses the same Device Tree binding as the fbdev CLCD
+ * driver.  While the fbdev driver supports panels that may be
+ * connected to the CLCD internally to the CLCD driver, in DRM the
+ * panels get split out to drivers/gpu/drm/panels/.  This means that,
+ * in converting from using fbdev to using DRM, you also need to write
+ * a panel driver (which may be as simple as an entry in
+ * panel-simple.c).
  *
  * The driver currently doesn't expose the cursor.  The DRM API for
  * cursors requires support for 64x64 ARGB8888 cursor images, while
@@ -22,12 +29,15 @@
  * cursors.  While one could imagine trying to hack something together
  * to look at the ARGB8888 and program reasonable in monochrome, we
  * just don't expose the cursor at all instead, and leave cursor
- * support to the application software cursor layer.
+ * support to the X11 software cursor layer.
  *
  * TODO:
  *
  * - Fix race between setting plane base address and getting IRQ for
  *   vsync firing the pageflip completion.
+ *
+ * - Use the "max-memory-bandwidth" DT property to filter the
+ *   supported formats.
  *
  * - Read back hardware state at boot to skip reprogramming the
  *   hardware when doing a no-op modeset.
@@ -37,6 +47,7 @@
  */
 
 #include <linux/amba/bus.h>
+#include <linux/amba/clcd-regs.h>
 #include <linux/dma-buf.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -79,13 +90,10 @@ static int pl111_modeset_init(struct drm_device *dev)
 	struct drm_panel *panel = NULL;
 	struct drm_bridge *bridge = NULL;
 	bool defer = false;
-	int ret;
+	int ret = 0;
 	int i;
 
-	ret = drmm_mode_config_init(dev);
-	if (ret)
-		return ret;
-
+	drm_mode_config_init(dev);
 	mode_config = &dev->mode_config;
 	mode_config->funcs = &mode_config_funcs;
 	mode_config->min_width = 1;
@@ -146,7 +154,7 @@ static int pl111_modeset_init(struct drm_device *dev)
 						    DRM_MODE_CONNECTOR_Unknown);
 		if (IS_ERR(bridge)) {
 			ret = PTR_ERR(bridge);
-			goto finish;
+			goto out_config;
 		}
 	} else if (bridge) {
 		dev_info(dev->dev, "Using non-panel bridge\n");
@@ -189,6 +197,8 @@ static int pl111_modeset_init(struct drm_device *dev)
 out_bridge:
 	if (panel)
 		drm_panel_bridge_remove(bridge);
+out_config:
+	drm_mode_config_cleanup(dev);
 finish:
 	return ret;
 }
@@ -213,7 +223,7 @@ pl111_gem_import_sg_table(struct drm_device *dev,
 
 DEFINE_DRM_GEM_CMA_FOPS(drm_fops);
 
-static const struct drm_driver pl111_drm_driver = {
+static struct drm_driver pl111_drm_driver = {
 	.driver_features =
 		DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC,
 	.ioctls = NULL,
@@ -225,10 +235,14 @@ static const struct drm_driver pl111_drm_driver = {
 	.minor = 0,
 	.patchlevel = 0,
 	.dumb_create = drm_gem_cma_dumb_create,
+	.gem_free_object_unlocked = drm_gem_cma_free_object,
+	.gem_vm_ops = &drm_gem_cma_vm_ops,
 	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
 	.gem_prime_import_sg_table = pl111_gem_import_sg_table,
+	.gem_prime_get_sg_table	= drm_gem_cma_prime_get_sg_table,
 	.gem_prime_mmap = drm_gem_cma_prime_mmap,
+	.gem_prime_vmap = drm_gem_cma_prime_vmap,
 
 #if defined(CONFIG_DEBUG_FS)
 	.debugfs_init = pl111_debugfs_init,
@@ -329,6 +343,7 @@ static int pl111_amba_remove(struct amba_device *amba_dev)
 	drm_dev_unregister(drm);
 	if (priv->panel)
 		drm_panel_bridge_remove(priv->bridge);
+	drm_mode_config_cleanup(drm);
 	drm_dev_put(drm);
 	of_reserved_mem_device_release(dev);
 
@@ -429,7 +444,6 @@ static const struct amba_id pl111_id_table[] = {
 	},
 	{0, 0},
 };
-MODULE_DEVICE_TABLE(amba, pl111_id_table);
 
 static struct amba_driver pl111_amba_driver __maybe_unused = {
 	.drv = {

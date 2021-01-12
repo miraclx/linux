@@ -4,7 +4,7 @@
 #ifndef __ASM_CSKY_IO_H
 #define __ASM_CSKY_IO_H
 
-#include <linux/pgtable.h>
+#include <asm/pgtable.h>
 #include <linux/types.h>
 #include <linux/version.h>
 

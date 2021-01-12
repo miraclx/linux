@@ -29,8 +29,7 @@ static bool __kprobes aarch64_insn_is_steppable(u32 insn)
 		    aarch64_insn_is_msr_imm(insn) ||
 		    aarch64_insn_is_msr_reg(insn) ||
 		    aarch64_insn_is_exception(insn) ||
-		    aarch64_insn_is_eret(insn) ||
-		    aarch64_insn_is_eret_auth(insn))
+		    aarch64_insn_is_eret(insn))
 			return false;
 
 		/*
@@ -43,13 +42,11 @@ static bool __kprobes aarch64_insn_is_steppable(u32 insn)
 			     != AARCH64_INSN_SPCLREG_DAIF;
 
 		/*
-		 * The HINT instruction is steppable only if it is in whitelist
-		 * and the rest of other such instructions are blocked for
-		 * single stepping as they may cause exception or other
-		 * unintended behaviour.
+		 * The HINT instruction is is problematic when single-stepping,
+		 * except for the NOP case.
 		 */
 		if (aarch64_insn_is_hint(insn))
-			return aarch64_insn_is_steppable_hint(insn);
+			return aarch64_insn_is_nop(insn);
 
 		return true;
 	}

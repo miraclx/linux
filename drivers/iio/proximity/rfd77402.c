@@ -274,6 +274,7 @@ static int rfd77402_probe(struct i2c_client *client,
 	data->client = client;
 	mutex_init(&data->lock);
 
+	indio_dev->dev.parent = &client->dev;
 	indio_dev->info = &rfd77402_info;
 	indio_dev->channels = rfd77402_channels;
 	indio_dev->num_channels = ARRAY_SIZE(rfd77402_channels);

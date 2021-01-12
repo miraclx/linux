@@ -14,13 +14,7 @@ maintainers:
 
 properties:
   compatible:
-    oneOf:
-      - const: actions,owl-mmc
-      - items:
-          - enum:
-              - actions,s500-mmc
-              - actions,s700-mmc
-          - const: actions,owl-mmc
+    const: actions,owl-mmc
 
   reg:
     maxItems: 1
@@ -49,13 +43,11 @@ required:
   - dmas
   - dma-names
 
-unevaluatedProperties: false
-
 examples:
   - |
     mmc0: mmc@e0330000 {
         compatible = "actions,owl-mmc";
-        reg = <0xe0330000 0x4000>;
+        reg = <0x0 0xe0330000 0x0 0x4000>;
         interrupts = <0 42 4>;
         clocks = <&cmu 56>;
         resets = <&cmu 23>;

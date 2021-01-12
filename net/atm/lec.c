@@ -380,7 +380,7 @@ static int lec_atm_send(struct atm_vcc *vcc, struct sk_buff *skb)
 
 		if (mesg->content.normal.no_source_le_narp)
 			break;
-		fallthrough;
+		/* FALL THROUGH */
 	case l_arp_update:
 		lec_arp_update(priv, mesg->content.normal.mac_addr,
 			       mesg->content.normal.atm_addr,
@@ -954,8 +954,9 @@ static void *lec_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 {
 	struct lec_state *state = seq->private;
 
-	++*pos;
-	return lec_get_idx(state, 1);
+	v = lec_get_idx(state, 1);
+	*pos += !!PTR_ERR(v);
+	return v;
 }
 
 static int lec_seq_show(struct seq_file *seq, void *v)
@@ -1069,7 +1070,7 @@ module_exit(lane_module_cleanup);
 /*
  * LANE2: 3.1.3, LE_RESOLVE.request
  * Non force allocates memory and fills in *tlvs, fills in *sizeoftlvs.
- * If sizeoftlvs == NULL the default TLVs associated with this
+ * If sizeoftlvs == NULL the default TLVs associated with with this
  * lec will be used.
  * If dst_mac == NULL, targetless LE_ARP will be sent
  */
@@ -1535,8 +1536,10 @@ static struct lec_arp_table *make_entry(struct lec_priv *priv,
 	struct lec_arp_table *to_return;
 
 	to_return = kzalloc(sizeof(struct lec_arp_table), GFP_ATOMIC);
-	if (!to_return)
+	if (!to_return) {
+		pr_info("LEC: Arp entry kmalloc failed\n");
 		return NULL;
+	}
 	ether_addr_copy(to_return->mac_addr, mac_addr);
 	INIT_HLIST_NODE(&to_return->next);
 	timer_setup(&to_return->timer, lec_arp_expire_arp, 0);

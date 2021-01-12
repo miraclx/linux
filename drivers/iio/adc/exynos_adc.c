@@ -7,7 +7,6 @@
  *  Copyright (C) 2013 Naveen Krishna Chatradhi <ch.naveen@samsung.com>
  */
 
-#include <linux/compiler.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
@@ -136,21 +135,9 @@ struct exynos_adc {
 	u32			value;
 	unsigned int            version;
 
-	bool			ts_enabled;
-
 	bool			read_ts;
 	u32			ts_x;
 	u32			ts_y;
-
-	/*
-	 * Lock to protect from potential concurrent access to the
-	 * completion callback during a manual conversion. For this driver
-	 * a wait-callback is used to wait for the conversion result,
-	 * so in the meantime no other read request (or conversion start)
-	 * must be performed, otherwise it would interfere with the
-	 * current conversion result.
-	 */
-	struct mutex		lock;
 };
 
 struct exynos_adc_data {
@@ -462,6 +449,9 @@ static void exynos_adc_exynos7_init_hw(struct exynos_adc *info)
 {
 	u32 con1, con2;
 
+	if (info->data->needs_adc_phy)
+		regmap_write(info->pmu_map, info->data->phy_offset, 1);
+
 	con1 = ADC_V2_CON1_SOFT_RESET;
 	writel(con1, ADC_V2_CON1(info->regs));
 
@@ -541,21 +531,10 @@ static int exynos_read_raw(struct iio_dev *indio_dev,
 	unsigned long timeout;
 	int ret;
 
-	if (mask == IIO_CHAN_INFO_SCALE) {
-		ret = regulator_get_voltage(info->vdd);
-		if (ret < 0)
-			return ret;
-
-		/* Regulator voltage is in uV, but need mV */
-		*val = ret / 1000;
-		*val2 = info->data->mask;
-
-		return IIO_VAL_FRACTIONAL;
-	} else if (mask != IIO_CHAN_INFO_RAW) {
+	if (mask != IIO_CHAN_INFO_RAW)
 		return -EINVAL;
-	}
 
-	mutex_lock(&info->lock);
+	mutex_lock(&indio_dev->mlock);
 	reinit_completion(&info->completion);
 
 	/* Select the channel to be used and Trigger conversion */
@@ -575,7 +554,7 @@ static int exynos_read_raw(struct iio_dev *indio_dev,
 		ret = IIO_VAL_INT;
 	}
 
-	mutex_unlock(&info->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret;
 }
@@ -586,7 +565,7 @@ static int exynos_read_s3c64xx_ts(struct iio_dev *indio_dev, int *x, int *y)
 	unsigned long timeout;
 	int ret;
 
-	mutex_lock(&info->lock);
+	mutex_lock(&indio_dev->mlock);
 	info->read_ts = true;
 
 	reinit_completion(&info->completion);
@@ -611,7 +590,7 @@ static int exynos_read_s3c64xx_ts(struct iio_dev *indio_dev, int *x, int *y)
 	}
 
 	info->read_ts = false;
-	mutex_unlock(&info->lock);
+	mutex_unlock(&indio_dev->mlock);
 
 	return ret;
 }
@@ -654,7 +633,7 @@ static irqreturn_t exynos_ts_isr(int irq, void *dev_id)
 	bool pressed;
 	int ret;
 
-	while (READ_ONCE(info->ts_enabled)) {
+	while (info->input->users) {
 		ret = exynos_read_s3c64xx_ts(dev, &x, &y);
 		if (ret == -ETIMEDOUT)
 			break;
@@ -704,7 +683,6 @@ static const struct iio_info exynos_adc_iio_info = {
 	.channel = _index,				\
 	.address = _index,				\
 	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),	\
-	.info_mask_shared_by_all = BIT(IIO_CHAN_INFO_SCALE),	\
 	.datasheet_name = _id,				\
 }
 
@@ -734,7 +712,6 @@ static int exynos_adc_ts_open(struct input_dev *dev)
 {
 	struct exynos_adc *info = input_get_drvdata(dev);
 
-	WRITE_ONCE(info->ts_enabled, true);
 	enable_irq(info->tsirq);
 
 	return 0;
@@ -744,7 +721,6 @@ static void exynos_adc_ts_close(struct input_dev *dev)
 {
 	struct exynos_adc *info = input_get_drvdata(dev);
 
-	WRITE_ONCE(info->ts_enabled, false);
 	disable_irq(info->tsirq);
 }
 
@@ -859,9 +835,13 @@ static int exynos_adc_probe(struct platform_device *pdev)
 	}
 
 	info->vdd = devm_regulator_get(&pdev->dev, "vdd");
-	if (IS_ERR(info->vdd))
-		return dev_err_probe(&pdev->dev, PTR_ERR(info->vdd),
-				     "failed getting regulator");
+	if (IS_ERR(info->vdd)) {
+		if (PTR_ERR(info->vdd) != -EPROBE_DEFER)
+			dev_err(&pdev->dev,
+				"failed getting regulator, err = %ld\n",
+				PTR_ERR(info->vdd));
+		return PTR_ERR(info->vdd);
+	}
 
 	ret = regulator_enable(info->vdd);
 	if (ret)
@@ -878,12 +858,12 @@ static int exynos_adc_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, indio_dev);
 
 	indio_dev->name = dev_name(&pdev->dev);
+	indio_dev->dev.parent = &pdev->dev;
+	indio_dev->dev.of_node = pdev->dev.of_node;
 	indio_dev->info = &exynos_adc_iio_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = exynos_adc_iio_channels;
 	indio_dev->num_channels = info->data->num_channels;
-
-	mutex_init(&info->lock);
 
 	ret = request_irq(info->irq, exynos_adc_isr,
 					0, dev_name(&pdev->dev), info);

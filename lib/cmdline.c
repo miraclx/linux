@@ -35,37 +35,25 @@ static int get_range(char **str, int *pint, int n)
 /**
  *	get_option - Parse integer from an option string
  *	@str: option string
- *	@pint: (optional output) integer value parsed from @str
+ *	@pint: (output) integer value parsed from @str
  *
  *	Read an int from an option string; if available accept a subsequent
  *	comma as well.
- *
- *	When @pint is NULL the function can be used as a validator of
- *	the current option in the string.
  *
  *	Return values:
  *	0 - no int in string
  *	1 - int found, no subsequent comma
  *	2 - int found including a subsequent comma
  *	3 - hyphen found to denote a range
- *
- *	Leading hyphen without integer is no integer case, but we consume it
- *	for the sake of simplification.
  */
 
 int get_option(char **str, int *pint)
 {
 	char *cur = *str;
-	int value;
 
 	if (!cur || !(*cur))
 		return 0;
-	if (*cur == '-')
-		value = -simple_strtoull(++cur, str, 0);
-	else
-		value = simple_strtoull(cur, str, 0);
-	if (pint)
-		*pint = value;
+	*pint = simple_strtol(cur, str, 0);
 	if (cur == *str)
 		return 0;
 	if (**str == ',') {
@@ -144,28 +132,27 @@ unsigned long long memparse(const char *ptr, char **retptr)
 	case 'E':
 	case 'e':
 		ret <<= 10;
-		fallthrough;
+		/* fall through */
 	case 'P':
 	case 'p':
 		ret <<= 10;
-		fallthrough;
+		/* fall through */
 	case 'T':
 	case 't':
 		ret <<= 10;
-		fallthrough;
+		/* fall through */
 	case 'G':
 	case 'g':
 		ret <<= 10;
-		fallthrough;
+		/* fall through */
 	case 'M':
 	case 'm':
 		ret <<= 10;
-		fallthrough;
+		/* fall through */
 	case 'K':
 	case 'k':
 		ret <<= 10;
 		endptr++;
-		fallthrough;
 	default:
 		break;
 	}

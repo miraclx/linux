@@ -337,6 +337,7 @@ static int ti_pipe3_power_on(struct phy *x)
 {
 	u32 val;
 	u32 mask;
+	int ret;
 	unsigned long rate;
 	struct ti_pipe3 *phy = phy_get_drvdata(x);
 	bool rx_pending = false;
@@ -354,8 +355,8 @@ static int ti_pipe3_power_on(struct phy *x)
 	rate = rate / 1000000;
 	mask = OMAP_CTRL_PIPE3_PHY_PWRCTL_CLK_FREQ_MASK;
 	val = rate << OMAP_CTRL_PIPE3_PHY_PWRCTL_CLK_FREQ_SHIFT;
-	regmap_update_bits(phy->phy_power_syscon, phy->power_reg,
-			   mask, val);
+	ret = regmap_update_bits(phy->phy_power_syscon, phy->power_reg,
+				 mask, val);
 	/*
 	 * For PCIe, TX and RX must be powered on simultaneously.
 	 * For USB and SATA, TX must be powered on before RX
@@ -745,28 +746,35 @@ static int ti_pipe3_get_sysctrl(struct ti_pipe3 *phy)
 
 static int ti_pipe3_get_tx_rx_base(struct ti_pipe3 *phy)
 {
+	struct resource *res;
 	struct device *dev = phy->dev;
 	struct platform_device *pdev = to_platform_device(dev);
 
-	phy->phy_rx = devm_platform_ioremap_resource_byname(pdev, "phy_rx");
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+					   "phy_rx");
+	phy->phy_rx = devm_ioremap_resource(dev, res);
 	if (IS_ERR(phy->phy_rx))
 		return PTR_ERR(phy->phy_rx);
 
-	phy->phy_tx = devm_platform_ioremap_resource_byname(pdev, "phy_tx");
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+					   "phy_tx");
+	phy->phy_tx = devm_ioremap_resource(dev, res);
 
 	return PTR_ERR_OR_ZERO(phy->phy_tx);
 }
 
 static int ti_pipe3_get_pll_base(struct ti_pipe3 *phy)
 {
+	struct resource *res;
 	struct device *dev = phy->dev;
 	struct platform_device *pdev = to_platform_device(dev);
 
 	if (phy->mode == PIPE3_MODE_PCIE)
 		return 0;
 
-	phy->pll_ctrl_base =
-		devm_platform_ioremap_resource_byname(pdev, "pll_ctrl");
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+					   "pll_ctrl");
+	phy->pll_ctrl_base = devm_ioremap_resource(dev, res);
 	return PTR_ERR_OR_ZERO(phy->pll_ctrl_base);
 }
 

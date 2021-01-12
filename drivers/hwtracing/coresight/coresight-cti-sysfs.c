@@ -4,13 +4,7 @@
  * Author: Mike Leach <mike.leach@linaro.org>
  */
 
-#include <linux/atomic.h>
 #include <linux/coresight.h>
-#include <linux/device.h>
-#include <linux/io.h>
-#include <linux/kernel.h>
-#include <linux/spinlock.h>
-#include <linux/sysfs.h>
 
 #include "coresight-cti.h"
 
@@ -1042,8 +1036,8 @@ static int cti_create_con_sysfs_attr(struct device *dev,
 				     enum cti_conn_attr_type attr_type,
 				     int attr_idx)
 {
-	struct dev_ext_attribute *eattr;
-	char *name;
+	struct dev_ext_attribute *eattr = 0;
+	char *name = 0;
 
 	eattr = devm_kzalloc(dev, sizeof(struct dev_ext_attribute),
 				    GFP_KERNEL);
@@ -1065,13 +1059,6 @@ static int cti_create_con_sysfs_attr(struct device *dev,
 	}
 	eattr->var = con;
 	con->con_attrs[attr_idx] = &eattr->attr.attr;
-	/*
-	 * Initialize the dynamically allocated attribute
-	 * to avoid LOCKDEP splat. See include/linux/sysfs.h
-	 * for more details.
-	 */
-	sysfs_attr_init(con->con_attrs[attr_idx]);
-
 	return 0;
 }
 
@@ -1152,7 +1139,7 @@ static int cti_create_con_attr_set(struct device *dev, int con_idx,
 }
 
 /* create the array of group pointers for the CTI sysfs groups */
-static int cti_create_cons_groups(struct device *dev, struct cti_device *ctidev)
+int cti_create_cons_groups(struct device *dev, struct cti_device *ctidev)
 {
 	int nr_groups;
 
@@ -1169,8 +1156,8 @@ static int cti_create_cons_groups(struct device *dev, struct cti_device *ctidev)
 int cti_create_cons_sysfs(struct device *dev, struct cti_drvdata *drvdata)
 {
 	struct cti_device *ctidev = &drvdata->ctidev;
-	int err, con_idx = 0, i;
-	struct cti_trig_con *tc;
+	int err = 0, con_idx = 0, i;
+	struct cti_trig_con *tc = NULL;
 
 	err = cti_create_cons_groups(dev, ctidev);
 	if (err)

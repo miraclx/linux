@@ -52,7 +52,7 @@ struct hci_pinfo {
 	struct bt_sock    bt;
 	struct hci_dev    *hdev;
 	struct hci_filter filter;
-	__u8              cmsg_mask;
+	__u32             cmsg_mask;
 	unsigned short    channel;
 	unsigned long     flags;
 	__u32             cookie;
@@ -443,7 +443,8 @@ static struct sk_buff *create_monitor_event(struct hci_dev *hdev, int event)
 	case HCI_DEV_SETUP:
 		if (hdev->manufacturer == 0xffff)
 			return NULL;
-		fallthrough;
+
+		/* fall through */
 
 	case HCI_DEV_UP:
 		skb = bt_skb_alloc(HCI_MON_INDEX_INFO_SIZE, GFP_ATOMIC);
@@ -1398,7 +1399,7 @@ done:
 static void hci_sock_cmsg(struct sock *sk, struct msghdr *msg,
 			  struct sk_buff *skb)
 {
-	__u8 mask = hci_pi(sk)->cmsg_mask;
+	__u32 mask = hci_pi(sk)->cmsg_mask;
 
 	if (mask & HCI_CMSG_DIR) {
 		int incoming = bt_cb(skb)->incoming;
@@ -1578,13 +1579,11 @@ static int hci_mgmt_cmd(struct hci_mgmt_chan *chan, struct sock *sk,
 		}
 	}
 
-	if (!(handler->flags & HCI_MGMT_HDEV_OPTIONAL)) {
-		no_hdev = (handler->flags & HCI_MGMT_NO_HDEV);
-		if (no_hdev != !hdev) {
-			err = mgmt_cmd_status(sk, index, opcode,
-					      MGMT_STATUS_INVALID_INDEX);
-			goto done;
-		}
+	no_hdev = (handler->flags & HCI_MGMT_NO_HDEV);
+	if (no_hdev != !hdev) {
+		err = mgmt_cmd_status(sk, index, opcode,
+				      MGMT_STATUS_INVALID_INDEX);
+		goto done;
 	}
 
 	var_len = (handler->flags & HCI_MGMT_VAR_LEN);
@@ -1841,7 +1840,7 @@ drop:
 }
 
 static int hci_sock_setsockopt(struct socket *sock, int level, int optname,
-			       sockptr_t optval, unsigned int len)
+			       char __user *optval, unsigned int len)
 {
 	struct hci_ufilter uf = { .opcode = 0 };
 	struct sock *sk = sock->sk;
@@ -1861,7 +1860,7 @@ static int hci_sock_setsockopt(struct socket *sock, int level, int optname,
 
 	switch (optname) {
 	case HCI_DATA_DIR:
-		if (copy_from_sockptr(&opt, optval, sizeof(opt))) {
+		if (get_user(opt, (int __user *)optval)) {
 			err = -EFAULT;
 			break;
 		}
@@ -1873,7 +1872,7 @@ static int hci_sock_setsockopt(struct socket *sock, int level, int optname,
 		break;
 
 	case HCI_TIME_STAMP:
-		if (copy_from_sockptr(&opt, optval, sizeof(opt))) {
+		if (get_user(opt, (int __user *)optval)) {
 			err = -EFAULT;
 			break;
 		}
@@ -1895,7 +1894,7 @@ static int hci_sock_setsockopt(struct socket *sock, int level, int optname,
 		}
 
 		len = min_t(unsigned int, len, sizeof(uf));
-		if (copy_from_sockptr(&uf, optval, len)) {
+		if (copy_from_user(&uf, optval, len)) {
 			err = -EFAULT;
 			break;
 		}

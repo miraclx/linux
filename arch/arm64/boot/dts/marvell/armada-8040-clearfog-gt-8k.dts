@@ -276,7 +276,7 @@
 /* SFP */
 &cp0_eth0 {
 	status = "okay";
-	phy-mode = "10gbase-r";
+	phy-mode = "10gbase-kr";
 	managed = "in-band-status";
 	phys = <&cp0_comphy2 0>;
 	sfp = <&sfp_cp0_eth0>;
@@ -454,7 +454,10 @@
 	status = "okay";
 	phy-mode = "2500base-x";
 	phys = <&cp1_comphy5 2>;
-	managed = "in-band-status";
+	fixed-link {
+		speed = <2500>;
+		full-duplex;
+	};
 };
 
 &cp1_spi1 {

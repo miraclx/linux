@@ -14,11 +14,10 @@
  */
 
 #include <subcmd/parse-options.h>
-#include <string.h>
 #include "builtin.h"
-#include "objtool.h"
+#include "check.h"
 
-bool no_fp, no_unreachable, retpoline, module, backtrace, uaccess, stats, validate_dup, vmlinux;
+bool no_fp, no_unreachable, retpoline, module, backtrace, uaccess, stats;
 
 static const char * const check_usage[] = {
 	"objtool check [<options>] file.o",
@@ -33,16 +32,12 @@ const struct option check_options[] = {
 	OPT_BOOLEAN('b', "backtrace", &backtrace, "unwind on error"),
 	OPT_BOOLEAN('a', "uaccess", &uaccess, "enable uaccess checking"),
 	OPT_BOOLEAN('s', "stats", &stats, "print statistics"),
-	OPT_BOOLEAN('d', "duplicate", &validate_dup, "duplicate validation for vmlinux.o"),
-	OPT_BOOLEAN('l', "vmlinux", &vmlinux, "vmlinux.o validation"),
 	OPT_END(),
 };
 
 int cmd_check(int argc, const char **argv)
 {
-	const char *objname, *s;
-	struct objtool_file *file;
-	int ret;
+	const char *objname;
 
 	argc = parse_options(argc, argv, check_options, check_usage, 0);
 
@@ -51,20 +46,5 @@ int cmd_check(int argc, const char **argv)
 
 	objname = argv[0];
 
-	s = strstr(objname, "vmlinux.o");
-	if (s && !s[9])
-		vmlinux = true;
-
-	file = objtool_open_read(objname);
-	if (!file)
-		return 1;
-
-	ret = check(file);
-	if (ret)
-		return ret;
-
-	if (file->elf->changed)
-		return elf_write(file->elf);
-
-	return 0;
+	return check(objname, false);
 }

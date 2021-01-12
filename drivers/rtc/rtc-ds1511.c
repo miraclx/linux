@@ -466,11 +466,13 @@ static int ds1511_rtc_probe(struct platform_device *pdev)
 
 	pdata->rtc->ops = &ds1511_rtc_ops;
 
-	ret = devm_rtc_register_device(pdata->rtc);
+	pdata->rtc->nvram_old_abi = true;
+
+	ret = rtc_register_device(pdata->rtc);
 	if (ret)
 		return ret;
 
-	devm_rtc_nvmem_register(pdata->rtc, &ds1511_nvmem_cfg);
+	rtc_nvmem_register(pdata->rtc, &ds1511_nvmem_cfg);
 
 	/*
 	 * if the platform has an interrupt in mind for this device,

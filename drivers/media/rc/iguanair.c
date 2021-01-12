@@ -14,6 +14,7 @@
 #include <linux/completion.h>
 #include <media/rc-core.h>
 
+#define DRIVER_NAME "iguanair"
 #define BUF_SIZE 152
 
 struct iguanair {
@@ -25,6 +26,8 @@ struct iguanair {
 	uint16_t version;
 	uint8_t bufsize;
 	uint8_t cycle_overhead;
+
+	struct mutex lock;
 
 	/* receiver support */
 	bool receiver_on;
@@ -59,7 +62,7 @@ struct iguanair {
 #define MAX_IN_PACKET		8u
 #define MAX_OUT_PACKET		(sizeof(struct send_packet) + BUF_SIZE)
 #define TIMEOUT			1000
-#define RX_RESOLUTION		21
+#define RX_RESOLUTION		21333
 
 struct packet {
 	uint16_t start;
@@ -101,7 +104,7 @@ static void process_ir_data(struct iguanair *ir, unsigned len)
 			break;
 		case CMD_TX_OVERFLOW:
 			ir->tx_overflow = true;
-			fallthrough;
+			/* fall through */
 		case CMD_RECEIVER_OFF:
 		case CMD_RECEIVER_ON:
 		case CMD_SEND:
@@ -124,7 +127,7 @@ static void process_ir_data(struct iguanair *ir, unsigned len)
 		for (i = 0; i < 7; i++) {
 			if (ir->buf_in[i] == 0x80) {
 				rawir.pulse = false;
-				rawir.duration = 21845;
+				rawir.duration = US_TO_NS(21845);
 			} else {
 				rawir.pulse = (ir->buf_in[i] & 0x80) == 0;
 				rawir.duration = ((ir->buf_in[i] & 0x7f) + 1) *
@@ -281,6 +284,8 @@ static int iguanair_set_tx_carrier(struct rc_dev *dev, uint32_t carrier)
 	if (carrier < 25000 || carrier > 150000)
 		return -EINVAL;
 
+	mutex_lock(&ir->lock);
+
 	if (carrier != ir->carrier) {
 		uint32_t cycles, fours, sevens;
 
@@ -309,6 +314,8 @@ static int iguanair_set_tx_carrier(struct rc_dev *dev, uint32_t carrier)
 		ir->packet->busy4 = 110 - fours;
 	}
 
+	mutex_unlock(&ir->lock);
+
 	return 0;
 }
 
@@ -319,7 +326,9 @@ static int iguanair_set_tx_mask(struct rc_dev *dev, uint32_t mask)
 	if (mask > 15)
 		return 4;
 
+	mutex_lock(&ir->lock);
 	ir->packet->channels = mask << 4;
+	mutex_unlock(&ir->lock);
 
 	return 0;
 }
@@ -329,6 +338,8 @@ static int iguanair_tx(struct rc_dev *dev, unsigned *txbuf, unsigned count)
 	struct iguanair *ir = dev->priv;
 	unsigned int i, size, p, periods;
 	int rc;
+
+	mutex_lock(&ir->lock);
 
 	/* convert from us to carrier periods */
 	for (i = size = 0; i < count; i++) {
@@ -357,6 +368,8 @@ static int iguanair_tx(struct rc_dev *dev, unsigned *txbuf, unsigned count)
 		rc = -EOVERFLOW;
 
 out:
+	mutex_unlock(&ir->lock);
+
 	return rc ? rc : count;
 }
 
@@ -365,9 +378,13 @@ static int iguanair_open(struct rc_dev *rdev)
 	struct iguanair *ir = rdev->priv;
 	int rc;
 
+	mutex_lock(&ir->lock);
+
 	rc = iguanair_receiver(ir, true);
 	if (rc == 0)
 		ir->receiver_on = true;
+
+	mutex_unlock(&ir->lock);
 
 	return rc;
 }
@@ -377,10 +394,14 @@ static void iguanair_close(struct rc_dev *rdev)
 	struct iguanair *ir = rdev->priv;
 	int rc;
 
+	mutex_lock(&ir->lock);
+
 	rc = iguanair_receiver(ir, false);
 	ir->receiver_on = false;
 	if (rc && rc != -ENODEV)
 		dev_warn(ir->dev, "failed to disable receiver: %d\n", rc);
+
+	mutex_unlock(&ir->lock);
 }
 
 static int iguanair_probe(struct usb_interface *intf,
@@ -420,6 +441,7 @@ static int iguanair_probe(struct usb_interface *intf,
 	ir->rc = rc;
 	ir->dev = &intf->dev;
 	ir->udev = udev;
+	mutex_init(&ir->lock);
 
 	init_completion(&ir->completion);
 	pipeout = usb_sndintpipe(udev,
@@ -461,7 +483,7 @@ static int iguanair_probe(struct usb_interface *intf,
 	rc->s_tx_mask = iguanair_set_tx_mask;
 	rc->s_tx_carrier = iguanair_set_tx_carrier;
 	rc->tx_ir = iguanair_tx;
-	rc->driver_name = KBUILD_MODNAME;
+	rc->driver_name = DRIVER_NAME;
 	rc->map_name = RC_MAP_RC6_MCE;
 	rc->min_timeout = 1;
 	rc->timeout = IR_DEFAULT_TIMEOUT;
@@ -516,6 +538,8 @@ static int iguanair_suspend(struct usb_interface *intf, pm_message_t message)
 	struct iguanair *ir = usb_get_intfdata(intf);
 	int rc = 0;
 
+	mutex_lock(&ir->lock);
+
 	if (ir->receiver_on) {
 		rc = iguanair_receiver(ir, false);
 		if (rc)
@@ -525,13 +549,17 @@ static int iguanair_suspend(struct usb_interface *intf, pm_message_t message)
 	usb_kill_urb(ir->urb_in);
 	usb_kill_urb(ir->urb_out);
 
+	mutex_unlock(&ir->lock);
+
 	return rc;
 }
 
 static int iguanair_resume(struct usb_interface *intf)
 {
 	struct iguanair *ir = usb_get_intfdata(intf);
-	int rc;
+	int rc = 0;
+
+	mutex_lock(&ir->lock);
 
 	rc = usb_submit_urb(ir->urb_in, GFP_KERNEL);
 	if (rc)
@@ -543,6 +571,8 @@ static int iguanair_resume(struct usb_interface *intf)
 			dev_warn(ir->dev, "failed to enable receiver after resume\n");
 	}
 
+	mutex_unlock(&ir->lock);
+
 	return rc;
 }
 
@@ -552,7 +582,7 @@ static const struct usb_device_id iguanair_table[] = {
 };
 
 static struct usb_driver iguanair_driver = {
-	.name =	KBUILD_MODNAME,
+	.name =	DRIVER_NAME,
 	.probe = iguanair_probe,
 	.disconnect = iguanair_disconnect,
 	.suspend = iguanair_suspend,

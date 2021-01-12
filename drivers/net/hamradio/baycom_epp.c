@@ -500,7 +500,7 @@ static int transmit(struct baycom_state *bc, int cnt, unsigned char stat)
 				}
 				break;
 			}
-			fallthrough;
+			/* fall through */
 
 		default:
 			if (bc->hdlctx.calibrate <= 0)

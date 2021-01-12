@@ -45,20 +45,20 @@
 	leds {
 		compatible = "gpio-leds";
 
-		power_led: led-0 {
+		power {
 			gpios = <&gpio8 RK_PA2 GPIO_ACTIVE_LOW>;
 			label = "firefly:blue:power";
 			pinctrl-names = "default";
-			pinctrl-0 = <&power_led_pin>;
+			pinctrl-0 = <&power_led>;
 			panic-indicator;
 		};
 
-		work_led: led-1 {
+		work {
 			gpios = <&gpio8 RK_PA1 GPIO_ACTIVE_LOW>;
 			label = "firefly:blue:user";
 			linux,default-trigger = "rc-feedback";
 			pinctrl-names = "default";
-			pinctrl-0 = <&work_led_pin>;
+			pinctrl-0 = <&work_led>;
 		};
 	};
 
@@ -334,11 +334,11 @@
 	};
 
 	leds {
-		power_led_pin: power-led-pin {
+		power_led: power-led {
 			rockchip,pins = <8 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 
-		work_led_pin: work-led-pin {
+		work_led: work-led {
 			rockchip,pins = <8 RK_PA1 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};

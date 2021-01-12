@@ -41,11 +41,6 @@
 #include <asm/ppc-opcode.h>
 #include <asm/export.h>
 #include <asm/feature-fixups.h>
-#ifdef CONFIG_PPC_BOOK3S
-#include <asm/exception-64s.h>
-#else
-#include <asm/exception-64e.h>
-#endif
 
 /* The physical memory is laid out such that the secondary processor
  * spin code sits at 0x0000...0x00ff. On server, the vectors follow
@@ -305,6 +300,9 @@ _GLOBAL(fsl_secondary_thread_init)
 	rlwimi	r3, r3, 30, 2, 30
 	mtspr	SPRN_PIR, r3
 1:
+#endif
+
+_GLOBAL(generic_secondary_thread_init)
 	mr	r24,r3
 
 	/* turn on 64-bit mode */
@@ -314,12 +312,12 @@ _GLOBAL(fsl_secondary_thread_init)
 	bl	relative_toc
 	tovirt(r2,r2)
 
+#ifdef CONFIG_PPC_BOOK3E
 	/* Book3E initialization */
 	mr	r3,r24
 	bl	book3e_secondary_thread_init
+#endif
 	b	generic_secondary_common_init
-
-#endif /* CONFIG_PPC_BOOK3E */
 
 /*
  * On pSeries and most other platforms, secondary processors spin
@@ -422,10 +420,6 @@ generic_secondary_common_init:
 	/* From now on, r24 is expected to be logical cpuid */
 	mr	r24,r5
 
-	/* Create a temp kernel stack for use before relocation is on.	*/
-	ld	r1,PACAEMERGSP(r13)
-	subi	r1,r1,STACK_FRAME_OVERHEAD
-
 	/* See if we need to call a cpu state restore handler */
 	LOAD_REG_ADDR(r23, cur_cpu_spec)
 	ld	r23,0(r23)
@@ -453,6 +447,10 @@ generic_secondary_common_init:
 
 	sync				/* order paca.run and cur_cpu_spec */
 	isync				/* In case code patching happened */
+
+	/* Create a temp kernel stack for use before relocation is on.	*/
+	ld	r1,PACAEMERGSP(r13)
+	subi	r1,r1,STACK_FRAME_OVERHEAD
 
 	b	__secondary_start
 #endif /* SMP */
@@ -834,7 +832,7 @@ __secondary_start:
 
 	mtspr	SPRN_SRR0,r3
 	mtspr	SPRN_SRR1,r4
-	RFI_TO_KERNEL
+	RFI
 	b	.	/* prevent speculative execution */
 
 /* 
@@ -870,7 +868,8 @@ enable_64b_mode:
 	oris	r11,r11,0x8000		/* CM bit set, we'll set ICM later */
 	mtmsr	r11
 #else /* CONFIG_PPC_BOOK3E */
-	LOAD_REG_IMMEDIATE(r12, MSR_64BIT)
+	li	r12,(MSR_64BIT | MSR_ISF)@highest
+	sldi	r12,r12,48
 	or	r11,r11,r12
 	mtmsrd	r11
 	isync
@@ -948,8 +947,15 @@ start_here_multiplatform:
 	std	r0,0(r4)
 #endif
 
-	/* set up a stack pointer */
+	/* The following gets the stack set up with the regs */
+	/* pointing to the real addr of the kernel stack.  This is   */
+	/* all done to support the C function call below which sets  */
+	/* up the htab.  This is done because we have relocated the  */
+	/* kernel but are still running in real mode. */
+
 	LOAD_REG_ADDR(r3,init_thread_union)
+
+	/* set up a stack pointer */
 	LOAD_REG_IMMEDIATE(r1,THREAD_SIZE)
 	add	r1,r3,r1
 	li	r0,0
@@ -970,7 +976,7 @@ start_here_multiplatform:
 	ld	r4,PACAKMSR(r13)
 	mtspr	SPRN_SRR0,r3
 	mtspr	SPRN_SRR1,r4
-	RFI_TO_KERNEL
+	RFI
 	b	.	/* prevent speculative execution */
 
 	/* This is where all platforms converge execution */
@@ -994,7 +1000,7 @@ start_here_common:
 	bl	start_kernel
 
 	/* Not reached */
-0:	trap
+	trap
 	EMIT_BUG_ENTRY 0b, __FILE__, __LINE__, 0
 	.previous
 

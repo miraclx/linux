@@ -146,7 +146,7 @@ static int intelfb_alloc(struct drm_fb_helper *helper,
 	if (IS_ERR(obj))
 		obj = i915_gem_object_create_shmem(dev_priv, size);
 	if (IS_ERR(obj)) {
-		drm_err(&dev_priv->drm, "failed to allocate framebuffer\n");
+		DRM_ERROR("failed to allocate framebuffer\n");
 		return PTR_ERR(obj);
 	}
 
@@ -183,23 +183,21 @@ static int intelfb_create(struct drm_fb_helper *helper,
 	if (intel_fb &&
 	    (sizes->fb_width > intel_fb->base.width ||
 	     sizes->fb_height > intel_fb->base.height)) {
-		drm_dbg_kms(&dev_priv->drm,
-			    "BIOS fb too small (%dx%d), we require (%dx%d),"
-			    " releasing it\n",
-			    intel_fb->base.width, intel_fb->base.height,
-			    sizes->fb_width, sizes->fb_height);
+		DRM_DEBUG_KMS("BIOS fb too small (%dx%d), we require (%dx%d),"
+			      " releasing it\n",
+			      intel_fb->base.width, intel_fb->base.height,
+			      sizes->fb_width, sizes->fb_height);
 		drm_framebuffer_put(&intel_fb->base);
 		intel_fb = ifbdev->fb = NULL;
 	}
 	if (!intel_fb || drm_WARN_ON(dev, !intel_fb_obj(&intel_fb->base))) {
-		drm_dbg_kms(&dev_priv->drm,
-			    "no BIOS fb, allocating a new one\n");
+		DRM_DEBUG_KMS("no BIOS fb, allocating a new one\n");
 		ret = intelfb_alloc(helper, sizes);
 		if (ret)
 			return ret;
 		intel_fb = ifbdev->fb;
 	} else {
-		drm_dbg_kms(&dev_priv->drm, "re-using BIOS fb\n");
+		DRM_DEBUG_KMS("re-using BIOS fb\n");
 		prealloc = true;
 		sizes->fb_width = intel_fb->base.width;
 		sizes->fb_height = intel_fb->base.height;
@@ -222,7 +220,7 @@ static int intelfb_create(struct drm_fb_helper *helper,
 
 	info = drm_fb_helper_alloc_fbi(helper);
 	if (IS_ERR(info)) {
-		drm_err(&dev_priv->drm, "Failed to allocate fb_info\n");
+		DRM_ERROR("Failed to allocate fb_info\n");
 		ret = PTR_ERR(info);
 		goto out_unpin;
 	}
@@ -242,8 +240,7 @@ static int intelfb_create(struct drm_fb_helper *helper,
 
 	vaddr = i915_vma_pin_iomap(vma);
 	if (IS_ERR(vaddr)) {
-		drm_err(&dev_priv->drm,
-			"Failed to remap framebuffer into virtual memory\n");
+		DRM_ERROR("Failed to remap framebuffer into virtual memory\n");
 		ret = PTR_ERR(vaddr);
 		goto out_unpin;
 	}
@@ -261,9 +258,9 @@ static int intelfb_create(struct drm_fb_helper *helper,
 
 	/* Use default scratch pixmap (info->pixmap.flags = FB_PIXMAP_SYSTEM) */
 
-	drm_dbg_kms(&dev_priv->drm, "allocated %dx%d fb: 0x%08x\n",
-		    ifbdev->fb->base.width, ifbdev->fb->base.height,
-		    i915_ggtt_offset(vma));
+	DRM_DEBUG_KMS("allocated %dx%d fb: 0x%08x\n",
+		      ifbdev->fb->base.width, ifbdev->fb->base.height,
+		      i915_ggtt_offset(vma));
 	ifbdev->vma = vma;
 	ifbdev->vma_flags = flags;
 
@@ -312,7 +309,6 @@ static void intel_fbdev_destroy(struct intel_fbdev *ifbdev)
 static bool intel_fbdev_init_bios(struct drm_device *dev,
 				 struct intel_fbdev *ifbdev)
 {
-	struct drm_i915_private *i915 = to_i915(dev);
 	struct intel_framebuffer *fb = NULL;
 	struct drm_crtc *crtc;
 	struct intel_crtc *intel_crtc;
@@ -325,24 +321,21 @@ static bool intel_fbdev_init_bios(struct drm_device *dev,
 		intel_crtc = to_intel_crtc(crtc);
 
 		if (!crtc->state->active || !obj) {
-			drm_dbg_kms(&i915->drm,
-				    "pipe %c not active or no fb, skipping\n",
-				    pipe_name(intel_crtc->pipe));
+			DRM_DEBUG_KMS("pipe %c not active or no fb, skipping\n",
+				      pipe_name(intel_crtc->pipe));
 			continue;
 		}
 
 		if (obj->base.size > max_size) {
-			drm_dbg_kms(&i915->drm,
-				    "found possible fb from plane %c\n",
-				    pipe_name(intel_crtc->pipe));
+			DRM_DEBUG_KMS("found possible fb from plane %c\n",
+				      pipe_name(intel_crtc->pipe));
 			fb = to_intel_framebuffer(crtc->primary->state->fb);
 			max_size = obj->base.size;
 		}
 	}
 
 	if (!fb) {
-		drm_dbg_kms(&i915->drm,
-			    "no active fbs found, not using BIOS config\n");
+		DRM_DEBUG_KMS("no active fbs found, not using BIOS config\n");
 		goto out;
 	}
 
@@ -353,14 +346,13 @@ static bool intel_fbdev_init_bios(struct drm_device *dev,
 		intel_crtc = to_intel_crtc(crtc);
 
 		if (!crtc->state->active) {
-			drm_dbg_kms(&i915->drm,
-				    "pipe %c not active, skipping\n",
-				    pipe_name(intel_crtc->pipe));
+			DRM_DEBUG_KMS("pipe %c not active, skipping\n",
+				      pipe_name(intel_crtc->pipe));
 			continue;
 		}
 
-		drm_dbg_kms(&i915->drm, "checking plane %c for BIOS fb\n",
-			    pipe_name(intel_crtc->pipe));
+		DRM_DEBUG_KMS("checking plane %c for BIOS fb\n",
+			      pipe_name(intel_crtc->pipe));
 
 		/*
 		 * See if the plane fb we found above will fit on this
@@ -370,10 +362,9 @@ static bool intel_fbdev_init_bios(struct drm_device *dev,
 		cur_size = crtc->state->adjusted_mode.crtc_hdisplay;
 		cur_size = cur_size * fb->base.format->cpp[0];
 		if (fb->base.pitches[0] < cur_size) {
-			drm_dbg_kms(&i915->drm,
-				    "fb not wide enough for plane %c (%d vs %d)\n",
-				    pipe_name(intel_crtc->pipe),
-				    cur_size, fb->base.pitches[0]);
+			DRM_DEBUG_KMS("fb not wide enough for plane %c (%d vs %d)\n",
+				      pipe_name(intel_crtc->pipe),
+				      cur_size, fb->base.pitches[0]);
 			fb = NULL;
 			break;
 		}
@@ -381,32 +372,28 @@ static bool intel_fbdev_init_bios(struct drm_device *dev,
 		cur_size = crtc->state->adjusted_mode.crtc_vdisplay;
 		cur_size = intel_fb_align_height(&fb->base, 0, cur_size);
 		cur_size *= fb->base.pitches[0];
-		drm_dbg_kms(&i915->drm,
-			    "pipe %c area: %dx%d, bpp: %d, size: %d\n",
-			    pipe_name(intel_crtc->pipe),
-			    crtc->state->adjusted_mode.crtc_hdisplay,
-			    crtc->state->adjusted_mode.crtc_vdisplay,
-			    fb->base.format->cpp[0] * 8,
-			    cur_size);
+		DRM_DEBUG_KMS("pipe %c area: %dx%d, bpp: %d, size: %d\n",
+			      pipe_name(intel_crtc->pipe),
+			      crtc->state->adjusted_mode.crtc_hdisplay,
+			      crtc->state->adjusted_mode.crtc_vdisplay,
+			      fb->base.format->cpp[0] * 8,
+			      cur_size);
 
 		if (cur_size > max_size) {
-			drm_dbg_kms(&i915->drm,
-				    "fb not big enough for plane %c (%d vs %d)\n",
-				    pipe_name(intel_crtc->pipe),
-				    cur_size, max_size);
+			DRM_DEBUG_KMS("fb not big enough for plane %c (%d vs %d)\n",
+				      pipe_name(intel_crtc->pipe),
+				      cur_size, max_size);
 			fb = NULL;
 			break;
 		}
 
-		drm_dbg_kms(&i915->drm,
-			    "fb big enough for plane %c (%d >= %d)\n",
-			    pipe_name(intel_crtc->pipe),
-			    max_size, cur_size);
+		DRM_DEBUG_KMS("fb big enough for plane %c (%d >= %d)\n",
+			      pipe_name(intel_crtc->pipe),
+			      max_size, cur_size);
 	}
 
 	if (!fb) {
-		drm_dbg_kms(&i915->drm,
-			    "BIOS fb not suitable for all pipes, not using\n");
+		DRM_DEBUG_KMS("BIOS fb not suitable for all pipes, not using\n");
 		goto out;
 	}
 
@@ -428,7 +415,7 @@ static bool intel_fbdev_init_bios(struct drm_device *dev,
 	}
 
 
-	drm_dbg_kms(&i915->drm, "using BIOS fb for initial console\n");
+	DRM_DEBUG_KMS("using BIOS fb for initial console\n");
 	return true;
 
 out:
@@ -451,7 +438,8 @@ int intel_fbdev_init(struct drm_device *dev)
 	struct intel_fbdev *ifbdev;
 	int ret;
 
-	if (drm_WARN_ON(dev, !HAS_DISPLAY(dev_priv)))
+	if (drm_WARN_ON(dev, !HAS_DISPLAY(dev_priv) ||
+			!INTEL_DISPLAY_ENABLED(dev_priv)))
 		return -ENODEV;
 
 	ifbdev = kzalloc(sizeof(struct intel_fbdev), GFP_KERNEL);
@@ -534,9 +522,8 @@ void intel_fbdev_fini(struct drm_i915_private *dev_priv)
  * processing, fbdev will perform a full connector reprobe if a hotplug event
  * was received while HPD was suspended.
  */
-static void intel_fbdev_hpd_set_suspend(struct drm_i915_private *i915, int state)
+static void intel_fbdev_hpd_set_suspend(struct intel_fbdev *ifbdev, int state)
 {
-	struct intel_fbdev *ifbdev = i915->fbdev;
 	bool send_hpd = false;
 
 	mutex_lock(&ifbdev->hpd_lock);
@@ -546,7 +533,7 @@ static void intel_fbdev_hpd_set_suspend(struct drm_i915_private *i915, int state
 	mutex_unlock(&ifbdev->hpd_lock);
 
 	if (send_hpd) {
-		drm_dbg_kms(&i915->drm, "Handling delayed fbcon HPD event\n");
+		DRM_DEBUG_KMS("Handling delayed fbcon HPD event\n");
 		drm_fb_helper_hotplug_event(&ifbdev->helper);
 	}
 }
@@ -601,7 +588,7 @@ void intel_fbdev_set_suspend(struct drm_device *dev, int state, bool synchronous
 	drm_fb_helper_set_suspend(&ifbdev->helper, state);
 	console_unlock();
 
-	intel_fbdev_hpd_set_suspend(dev_priv, state);
+	intel_fbdev_hpd_set_suspend(ifbdev, state);
 }
 
 void intel_fbdev_output_poll_changed(struct drm_device *dev)

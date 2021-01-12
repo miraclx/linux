@@ -440,7 +440,7 @@ static void run_fsm(void)
 				pd_claimed = 1;
 				if (!pi_schedule_claimed(pi_current, run_fsm))
 					return;
-				fallthrough;
+				/* fall through */
 			case 1:
 				pd_claimed = 2;
 				pi_current->proto->connect(pi_current);
@@ -465,7 +465,7 @@ static void run_fsm(void)
 				if (stop)
 					return;
 				}
-				fallthrough;
+				/* fall through */
 			case Hold:
 				schedule_fsm();
 				return;

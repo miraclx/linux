@@ -1763,11 +1763,11 @@ static void mask_set_nlattr(struct nlattr *attr, u8 val)
  * does not include any don't care bit.
  * @net: Used to determine per-namespace field support.
  * @match: receives the extracted flow match information.
- * @nla_key: Netlink attribute holding nested %OVS_KEY_ATTR_* Netlink attribute
+ * @key: Netlink attribute holding nested %OVS_KEY_ATTR_* Netlink attribute
  * sequence. The fields should of the packet that triggered the creation
  * of this flow.
- * @nla_mask: Optional. Netlink attribute holding nested %OVS_KEY_ATTR_*
- * Netlink attribute specifies the mask field of the wildcarded flow.
+ * @mask: Optional. Netlink attribute holding nested %OVS_KEY_ATTR_* Netlink
+ * attribute specifies the mask field of the wildcarded flow.
  * @log: Boolean to allow kernel error logging.  Normally true, but when
  * probing for feature compatibility this should be passed in as false to
  * suppress unnecessary error logging.
@@ -2503,42 +2503,28 @@ static int validate_and_copy_dec_ttl(struct net *net,
 				     __be16 eth_type, __be16 vlan_tci,
 				     u32 mpls_label_count, bool log)
 {
-	const struct nlattr *attrs[OVS_DEC_TTL_ATTR_MAX + 1];
-	int start, action_start, err, rem;
-	const struct nlattr *a, *actions;
+	int start, err;
+	u32 nested = true;
 
-	memset(attrs, 0, sizeof(attrs));
-	nla_for_each_nested(a, attr, rem) {
-		int type = nla_type(a);
-
-		/* Ignore unknown attributes to be future proof. */
-		if (type > OVS_DEC_TTL_ATTR_MAX)
-			continue;
-
-		if (!type || attrs[type])
-			return -EINVAL;
-
-		attrs[type] = a;
-	}
-
-	actions = attrs[OVS_DEC_TTL_ATTR_ACTION];
-	if (rem || !actions || (nla_len(actions) && nla_len(actions) < NLA_HDRLEN))
-		return -EINVAL;
+	if (!nla_len(attr))
+		return ovs_nla_add_action(sfa, OVS_ACTION_ATTR_DEC_TTL,
+					  NULL, 0, log);
 
 	start = add_nested_action_start(sfa, OVS_ACTION_ATTR_DEC_TTL, log);
 	if (start < 0)
 		return start;
 
-	action_start = add_nested_action_start(sfa, OVS_DEC_TTL_ATTR_ACTION, log);
-	if (action_start < 0)
-		return action_start;
+	err = ovs_nla_add_action(sfa, OVS_DEC_TTL_ATTR_ACTION, &nested,
+				 sizeof(nested), log);
 
-	err = __ovs_nla_copy_actions(net, actions, key, sfa, eth_type,
+	if (err)
+		return err;
+
+	err = __ovs_nla_copy_actions(net, attr, key, sfa, eth_type,
 				     vlan_tci, mpls_label_count, log);
 	if (err)
 		return err;
 
-	add_nested_action_end(*sfa, action_start);
 	add_nested_action_end(*sfa, start);
 	return 0;
 }
@@ -3501,42 +3487,20 @@ out:
 static int dec_ttl_action_to_attr(const struct nlattr *attr,
 				  struct sk_buff *skb)
 {
-	struct nlattr *start, *action_start;
-	const struct nlattr *a;
-	int err = 0, rem;
+	int err = 0, rem = nla_len(attr);
+	struct nlattr *start;
 
 	start = nla_nest_start_noflag(skb, OVS_ACTION_ATTR_DEC_TTL);
+
 	if (!start)
 		return -EMSGSIZE;
 
-	nla_for_each_attr(a, nla_data(attr), nla_len(attr), rem) {
-		switch (nla_type(a)) {
-		case OVS_DEC_TTL_ATTR_ACTION:
+	err = ovs_nla_put_actions(nla_data(attr), rem, skb);
+	if (err)
+		nla_nest_cancel(skb, start);
+	else
+		nla_nest_end(skb, start);
 
-			action_start = nla_nest_start_noflag(skb, OVS_DEC_TTL_ATTR_ACTION);
-			if (!action_start) {
-				err = -EMSGSIZE;
-				goto out;
-			}
-
-			err = ovs_nla_put_actions(nla_data(a), nla_len(a), skb);
-			if (err)
-				goto out;
-
-			nla_nest_end(skb, action_start);
-			break;
-
-		default:
-			/* Ignore all other option to be future compatible */
-			break;
-		}
-	}
-
-	nla_nest_end(skb, start);
-	return 0;
-
-out:
-	nla_nest_cancel(skb, start);
 	return err;
 }
 

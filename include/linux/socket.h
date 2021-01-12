@@ -10,7 +10,6 @@
 #include <linux/compiler.h>		/* __user			*/
 #include <uapi/linux/socket.h>
 
-struct file;
 struct pid;
 struct cred;
 struct socket;
@@ -51,17 +50,7 @@ struct msghdr {
 	void		*msg_name;	/* ptr to socket address structure */
 	int		msg_namelen;	/* size of socket address structure */
 	struct iov_iter	msg_iter;	/* data */
-
-	/*
-	 * Ancillary data. msg_control_user is the user buffer used for the
-	 * recv* side when msg_control_is_user is set, msg_control is the kernel
-	 * buffer used for all other cases.
-	 */
-	union {
-		void		*msg_control;
-		void __user	*msg_control_user;
-	};
-	bool		msg_control_is_user : 1;
+	void		*msg_control;	/* ancillary data */
 	__kernel_size_t	msg_controllen;	/* ancillary data buffer length */
 	unsigned int	msg_flags;	/* flags on received message */
 	struct kiocb	*msg_iocb;	/* ptr to iocb for async requests */
@@ -105,10 +94,7 @@ struct cmsghdr {
 
 #define CMSG_ALIGN(len) ( ((len)+sizeof(long)-1) & ~(sizeof(long)-1) )
 
-#define CMSG_DATA(cmsg) \
-	((void *)(cmsg) + sizeof(struct cmsghdr))
-#define CMSG_USER_DATA(cmsg) \
-	((void __user *)(cmsg) + sizeof(struct cmsghdr))
+#define CMSG_DATA(cmsg)	((void *)((char *)(cmsg) + sizeof(struct cmsghdr)))
 #define CMSG_SPACE(len) (sizeof(struct cmsghdr) + CMSG_ALIGN(len))
 #define CMSG_LEN(len) (sizeof(struct cmsghdr) + (len))
 
@@ -436,7 +422,6 @@ extern int __sys_getpeername(int fd, struct sockaddr __user *usockaddr,
 			     int __user *usockaddr_len);
 extern int __sys_socketpair(int family, int type, int protocol,
 			    int __user *usockvec);
-extern int __sys_shutdown_sock(struct socket *sock, int how);
 extern int __sys_shutdown(int fd, int how);
 
 extern struct ns_common *get_net_ns(struct ns_common *ns);

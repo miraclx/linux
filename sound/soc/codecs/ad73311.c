@@ -2,7 +2,7 @@
 /*
  * ad73311.c  --  ALSA Soc AD73311 codec support
  *
- * Copyright:	Analog Devices Inc.
+ * Copyright:	Analog Device Inc.
  * Author:	Cliff Cai <cliff.cai@analog.com>
  */
 

@@ -8,11 +8,9 @@
 
 #include <linux/fs.h>
 #include <linux/f2fs_fs.h>
-#include <linux/fiemap.h>
 
 #include "f2fs.h"
 #include "node.h"
-#include <trace/events/f2fs.h>
 
 bool f2fs_may_inline_data(struct inode *inode)
 {
@@ -188,8 +186,7 @@ int f2fs_convert_inline_inode(struct inode *inode)
 	struct page *ipage, *page;
 	int err = 0;
 
-	if (!f2fs_has_inline_data(inode) ||
-			f2fs_hw_is_readonly(sbi) || f2fs_readonly(sbi->sb))
+	if (!f2fs_has_inline_data(inode))
 		return 0;
 
 	page = f2fs_grab_cache_page(inode->i_mapping, 0, false);
@@ -255,7 +252,7 @@ int f2fs_write_inline_data(struct inode *inode, struct page *page)
 	return 0;
 }
 
-int f2fs_recover_inline_data(struct inode *inode, struct page *npage)
+bool f2fs_recover_inline_data(struct inode *inode, struct page *npage)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	struct f2fs_inode *ri = NULL;
@@ -267,7 +264,7 @@ int f2fs_recover_inline_data(struct inode *inode, struct page *npage)
 	 * [prev.] [next] of inline_data flag
 	 *    o       o  -> recover inline_data
 	 *    o       x  -> remove inline_data, and then recover data blocks
-	 *    x       o  -> remove data blocks, and then recover inline_data
+	 *    x       o  -> remove inline_data, and then recover inline_data
 	 *    x       x  -> recover data blocks
 	 */
 	if (IS_INODE(npage))
@@ -277,8 +274,7 @@ int f2fs_recover_inline_data(struct inode *inode, struct page *npage)
 			ri && (ri->i_inline & F2FS_INLINE_DATA)) {
 process_inline:
 		ipage = f2fs_get_node_page(sbi, inode->i_ino);
-		if (IS_ERR(ipage))
-			return PTR_ERR(ipage);
+		f2fs_bug_on(sbi, IS_ERR(ipage));
 
 		f2fs_wait_on_page_writeback(ipage, NODE, true, true);
 
@@ -291,38 +287,33 @@ process_inline:
 
 		set_page_dirty(ipage);
 		f2fs_put_page(ipage, 1);
-		return 1;
+		return true;
 	}
 
 	if (f2fs_has_inline_data(inode)) {
 		ipage = f2fs_get_node_page(sbi, inode->i_ino);
-		if (IS_ERR(ipage))
-			return PTR_ERR(ipage);
+		f2fs_bug_on(sbi, IS_ERR(ipage));
 		f2fs_truncate_inline_inode(inode, ipage, 0);
-		stat_dec_inline_inode(inode);
 		clear_inode_flag(inode, FI_INLINE_DATA);
 		f2fs_put_page(ipage, 1);
 	} else if (ri && (ri->i_inline & F2FS_INLINE_DATA)) {
-		int ret;
-
-		ret = f2fs_truncate_blocks(inode, 0, false);
-		if (ret)
-			return ret;
-		stat_inc_inline_inode(inode);
+		if (f2fs_truncate_blocks(inode, 0, false))
+			return false;
 		goto process_inline;
 	}
-	return 0;
+	return false;
 }
 
 struct f2fs_dir_entry *f2fs_find_in_inline_dir(struct inode *dir,
-					const struct f2fs_filename *fname,
-					struct page **res_page)
+			struct fscrypt_name *fname, struct page **res_page)
 {
 	struct f2fs_sb_info *sbi = F2FS_SB(dir->i_sb);
+	struct qstr name = FSTR_TO_QSTR(&fname->disk_name);
 	struct f2fs_dir_entry *de;
 	struct f2fs_dentry_ptr d;
 	struct page *ipage;
 	void *inline_dentry;
+	f2fs_hash_t namehash;
 
 	ipage = f2fs_get_node_page(sbi, dir->i_ino);
 	if (IS_ERR(ipage)) {
@@ -330,15 +321,13 @@ struct f2fs_dir_entry *f2fs_find_in_inline_dir(struct inode *dir,
 		return NULL;
 	}
 
+	namehash = f2fs_dentry_hash(dir, &name, fname);
+
 	inline_dentry = inline_data_addr(dir, ipage);
 
 	make_dentry_ptr_inline(dir, &d, inline_dentry);
-	de = f2fs_find_target_dentry(&d, fname, NULL);
+	de = f2fs_find_target_dentry(fname, namehash, NULL, &d);
 	unlock_page(ipage);
-	if (IS_ERR(de)) {
-		*res_page = ERR_CAST(de);
-		de = NULL;
-	}
 	if (de)
 		*res_page = ipage;
 	else
@@ -454,7 +443,7 @@ static int f2fs_add_inline_entries(struct inode *dir, void *inline_dentry)
 
 	while (bit_pos < d.max) {
 		struct f2fs_dir_entry *de;
-		struct f2fs_filename fname;
+		struct qstr new_name;
 		nid_t ino;
 		umode_t fake_mode;
 
@@ -470,19 +459,14 @@ static int f2fs_add_inline_entries(struct inode *dir, void *inline_dentry)
 			continue;
 		}
 
-		/*
-		 * We only need the disk_name and hash to move the dentry.
-		 * We don't need the original or casefolded filenames.
-		 */
-		memset(&fname, 0, sizeof(fname));
-		fname.disk_name.name = d.filename[bit_pos];
-		fname.disk_name.len = le16_to_cpu(de->name_len);
-		fname.hash = de->hash_code;
+		new_name.name = d.filename[bit_pos];
+		new_name.len = le16_to_cpu(de->name_len);
 
 		ino = le32_to_cpu(de->ino);
 		fake_mode = f2fs_get_de_type(de) << S_SHIFT;
 
-		err = f2fs_add_regular_entry(dir, &fname, NULL, ino, fake_mode);
+		err = f2fs_add_regular_entry(dir, &new_name, NULL, NULL,
+							ino, fake_mode);
 		if (err)
 			goto punch_dentry_pages;
 
@@ -531,7 +515,7 @@ static int f2fs_move_rehashed_dirents(struct inode *dir, struct page *ipage,
 			!f2fs_has_inline_xattr(dir))
 		F2FS_I(dir)->i_inline_xattr_size = 0;
 
-	kfree(backup_dentry);
+	kvfree(backup_dentry);
 	return 0;
 recover:
 	lock_page(ipage);
@@ -542,7 +526,7 @@ recover:
 	set_page_dirty(ipage);
 	f2fs_put_page(ipage, 1);
 
-	kfree(backup_dentry);
+	kvfree(backup_dentry);
 	return err;
 }
 
@@ -559,7 +543,7 @@ int f2fs_try_convert_inline_dir(struct inode *dir, struct dentry *dentry)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(dir);
 	struct page *ipage;
-	struct f2fs_filename fname;
+	struct fscrypt_name fname;
 	void *inline_dentry = NULL;
 	int err = 0;
 
@@ -568,19 +552,19 @@ int f2fs_try_convert_inline_dir(struct inode *dir, struct dentry *dentry)
 
 	f2fs_lock_op(sbi);
 
-	err = f2fs_setup_filename(dir, &dentry->d_name, 0, &fname);
+	err = fscrypt_setup_filename(dir, &dentry->d_name, 0, &fname);
 	if (err)
 		goto out;
 
 	ipage = f2fs_get_node_page(sbi, dir->i_ino);
 	if (IS_ERR(ipage)) {
 		err = PTR_ERR(ipage);
-		goto out_fname;
+		goto out;
 	}
 
 	if (f2fs_has_enough_room(dir, ipage, &fname)) {
 		f2fs_put_page(ipage, 1);
-		goto out_fname;
+		goto out;
 	}
 
 	inline_dentry = inline_data_addr(dir, ipage);
@@ -588,22 +572,22 @@ int f2fs_try_convert_inline_dir(struct inode *dir, struct dentry *dentry)
 	err = do_convert_inline_dir(dir, ipage, inline_dentry);
 	if (!err)
 		f2fs_put_page(ipage, 1);
-out_fname:
-	f2fs_free_filename(&fname);
 out:
 	f2fs_unlock_op(sbi);
 	return err;
 }
 
-int f2fs_add_inline_entry(struct inode *dir, const struct f2fs_filename *fname,
-			  struct inode *inode, nid_t ino, umode_t mode)
+int f2fs_add_inline_entry(struct inode *dir, const struct qstr *new_name,
+				const struct qstr *orig_name,
+				struct inode *inode, nid_t ino, umode_t mode)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(dir);
 	struct page *ipage;
 	unsigned int bit_pos;
+	f2fs_hash_t name_hash;
 	void *inline_dentry = NULL;
 	struct f2fs_dentry_ptr d;
-	int slots = GET_DENTRY_SLOTS(fname->disk_name.len);
+	int slots = GET_DENTRY_SLOTS(new_name->len);
 	struct page *page = NULL;
 	int err = 0;
 
@@ -625,7 +609,8 @@ int f2fs_add_inline_entry(struct inode *dir, const struct f2fs_filename *fname,
 
 	if (inode) {
 		down_write(&F2FS_I(inode)->i_sem);
-		page = f2fs_init_inode_metadata(inode, dir, fname, ipage);
+		page = f2fs_init_inode_metadata(inode, dir, new_name,
+						orig_name, ipage);
 		if (IS_ERR(page)) {
 			err = PTR_ERR(page);
 			goto fail;
@@ -634,8 +619,8 @@ int f2fs_add_inline_entry(struct inode *dir, const struct f2fs_filename *fname,
 
 	f2fs_wait_on_page_writeback(ipage, NODE, true, true);
 
-	f2fs_update_dentry(ino, mode, &d, &fname->disk_name, fname->hash,
-			   bit_pos);
+	name_hash = f2fs_dentry_hash(dir, new_name, NULL);
+	f2fs_update_dentry(ino, mode, &d, new_name, name_hash, bit_pos);
 
 	set_page_dirty(ipage);
 
@@ -789,7 +774,6 @@ int f2fs_inline_data_fiemap(struct inode *inode,
 	byteaddr += (char *)inline_data_addr(inode, ipage) -
 					(char *)F2FS_INODE(ipage);
 	err = fiemap_fill_next_extent(fieinfo, start, byteaddr, ilen, flags);
-	trace_f2fs_fiemap(inode, start, byteaddr, ilen, flags, err);
 out:
 	f2fs_put_page(ipage, 1);
 	return err;

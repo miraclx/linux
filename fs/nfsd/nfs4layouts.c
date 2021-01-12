@@ -681,7 +681,7 @@ nfsd4_cb_layout_done(struct nfsd4_callback *cb, struct rpc_task *task)
 			rpc_delay(task, HZ/100); /* 10 mili-seconds */
 			return 0;
 		}
-		fallthrough;
+		/* Fallthrough */
 	default:
 		/*
 		 * Unknown error or non-responding client, we'll need to fence.

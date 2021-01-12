@@ -55,7 +55,6 @@
 *.ver
 *.xml
 *.xz
-*.zst
 *_MODULES
 *_vga16.c
 *~
@@ -252,7 +251,6 @@ vmlinux-*
 vmlinux.aout
 vmlinux.bin.all
 vmlinux.lds
-vmlinux.symvers
 vmlinuz
 voffset.h
 vsyscall.lds

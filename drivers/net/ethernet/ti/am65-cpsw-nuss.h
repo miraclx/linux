@@ -9,12 +9,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
-#include <linux/phy.h>
-#include <linux/platform_device.h>
-#include <linux/soc/ti/k3-ringacc.h>
-#include "am65-cpsw-qos.h"
-
-struct am65_cpts;
 
 #define HOST_PORT_NUM		0
 
@@ -41,12 +35,8 @@ struct am65_cpsw_port {
 	u32				port_id;
 	void __iomem			*port_base;
 	void __iomem			*stat_base;
-	void __iomem			*fetch_ram_base;
 	bool				disabled;
 	struct am65_cpsw_slave_data	slave;
-	bool				tx_ts_enabled;
-	bool				rx_ts_enabled;
-	struct am65_cpsw_qos		qos;
 };
 
 struct am65_cpsw_host {
@@ -60,7 +50,6 @@ struct am65_cpsw_tx_chn {
 	struct am65_cpsw_common	*common;
 	struct k3_cppi_desc_pool *desc_pool;
 	struct k3_udma_glue_tx_channel *tx_chn;
-	spinlock_t lock; /* protect TX rings in multi-port mode */
 	int irq;
 	u32 id;
 	u32 descs_num;
@@ -79,14 +68,11 @@ struct am65_cpsw_rx_chn {
 
 struct am65_cpsw_pdata {
 	u32	quirks;
-	enum k3_ring_mode fdqring_mode;
-	const char	*ale_dev_id;
 };
 
 struct am65_cpsw_common {
 	struct device		*dev;
-	struct device		*mdio_dev;
-	struct am65_cpsw_pdata	pdata;
+	const struct am65_cpsw_pdata *pdata;
 
 	void __iomem		*ss_base;
 	void __iomem		*cpsw_base;
@@ -95,7 +81,6 @@ struct am65_cpsw_common {
 	struct am65_cpsw_host   host;
 	struct am65_cpsw_port	*ports;
 	u32			disabled_ports_mask;
-	struct net_device	*dma_ndev;
 
 	int			usage_count; /* number of opened ports */
 	struct cpsw_ale		*ale;
@@ -111,10 +96,8 @@ struct am65_cpsw_common {
 
 	u32			nuss_ver;
 	u32			cpsw_ver;
-	unsigned long		bus_freq;
+
 	bool			pf_p0_rx_ptype_rrobin;
-	struct am65_cpts	*cpts;
-	int			est_enabled;
 };
 
 struct am65_cpsw_ndev_stats {

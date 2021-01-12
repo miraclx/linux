@@ -47,7 +47,6 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/vmalloc.h>
 #include <linux/init.h>
 #include <linux/completion.h>
 #include <linux/fb.h>
@@ -649,13 +648,13 @@ static int synthvid_connect_vsp(struct hv_device *hdev)
 		ret = synthvid_negotiate_ver(hdev, SYNTHVID_VERSION_WIN10);
 		if (!ret)
 			break;
-		fallthrough;
+		/* Fallthrough */
 	case VERSION_WIN8:
 	case VERSION_WIN8_1:
 		ret = synthvid_negotiate_ver(hdev, SYNTHVID_VERSION_WIN8);
 		if (!ret)
 			break;
-		fallthrough;
+		/* Fallthrough */
 	case VERSION_WS2008:
 	case VERSION_WIN7:
 		ret = synthvid_negotiate_ver(hdev, SYNTHVID_VERSION_WIN7);
@@ -1093,12 +1092,7 @@ static int hvfb_getmem(struct hv_device *hdev, struct fb_info *info)
 		goto err1;
 	}
 
-	/*
-	 * Map the VRAM cacheable for performance. This is also required for
-	 * VM Connect to display properly for ARM64 Linux VM, as the host also
-	 * maps the VRAM cacheable.
-	 */
-	fb_virt = ioremap_cache(par->mem->start, screen_fb_size);
+	fb_virt = ioremap(par->mem->start, screen_fb_size);
 	if (!fb_virt)
 		goto err2;
 
@@ -1120,15 +1114,8 @@ static int hvfb_getmem(struct hv_device *hdev, struct fb_info *info)
 getmem_done:
 	remove_conflicting_framebuffers(info->apertures,
 					KBUILD_MODNAME, false);
-
-	if (gen2vm) {
-		/* framebuffer is reallocated, clear screen_info to avoid misuse from kexec */
-		screen_info.lfb_size = 0;
-		screen_info.lfb_base = 0;
-		screen_info.orig_video_isVGA = 0;
-	} else {
+	if (!gen2vm)
 		pci_dev_put(pdev);
-	}
 	kfree(info->apertures);
 
 	return 0;

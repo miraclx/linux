@@ -90,10 +90,10 @@ fault:
 	if (unlikely(ret != -EFAULT))
 		 goto fail;
 
-	mmap_read_lock(current->mm);
-	ret = fixup_user_fault(current->mm, (unsigned long) uaddr,
+	down_read(&current->mm->mmap_sem);
+	ret = fixup_user_fault(current, current->mm, (unsigned long) uaddr,
 			       FAULT_FLAG_WRITE, NULL);
-	mmap_read_unlock(current->mm);
+	up_read(&current->mm->mmap_sem);
 
 	if (likely(!ret))
 		 goto again;
@@ -114,6 +114,17 @@ void arch_cpu_idle(void)
 		"sleep %0	\n"
 		:
 		:"I"(arg)); /* can't be "r" has to be embedded const */
+}
+
+#elif defined(CONFIG_EZNPS_MTM_EXT)	/* ARC700 variant in NPS */
+
+void arch_cpu_idle(void)
+{
+	/* only the calling HW thread needs to sleep */
+	__asm__ __volatile__(
+		".word %0	\n"
+		:
+		:"i"(CTOP_INST_HWSCHD_WFT_IE12));
 }
 
 #else	/* ARC700 */
@@ -162,9 +173,8 @@ asmlinkage void ret_from_fork(void);
  * |    user_r25    |
  * ------------------  <===== END of PAGE
  */
-int copy_thread(unsigned long clone_flags, unsigned long usp,
-		unsigned long kthread_arg, struct task_struct *p,
-		unsigned long tls)
+int copy_thread_tls(unsigned long clone_flags, unsigned long usp,
+	unsigned long kthread_arg, struct task_struct *p, unsigned long tls)
 {
 	struct pt_regs *c_regs;        /* child's pt_regs */
 	unsigned long *childksp;       /* to unwind out of __switch_to() */
@@ -267,6 +277,10 @@ void start_thread(struct pt_regs *regs, unsigned long pc, unsigned long usp)
 	 */
 	regs->status32 = STATUS_U_MASK | STATUS_L_MASK | ISA_INIT_STATUS_BITS;
 
+#ifdef CONFIG_EZNPS_MTM_EXT
+	regs->eflags = 0;
+#endif
+
 	fpu_init_task(regs);
 
 	/* bogus seed values for debugging */
@@ -279,6 +293,11 @@ void start_thread(struct pt_regs *regs, unsigned long pc, unsigned long usp)
  */
 void flush_thread(void)
 {
+}
+
+int dump_fpu(struct pt_regs *regs, elf_fpregset_t *fpu)
+{
+	return 0;
 }
 
 int elf_check_arch(const struct elf32_hdr *x)

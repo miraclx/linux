@@ -20,8 +20,7 @@
 enum verity_mode {
 	DM_VERITY_MODE_EIO,
 	DM_VERITY_MODE_LOGGING,
-	DM_VERITY_MODE_RESTART,
-	DM_VERITY_MODE_PANIC
+	DM_VERITY_MODE_RESTART
 };
 
 enum verity_block_type {

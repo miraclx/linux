@@ -57,8 +57,7 @@ struct perf_tool {
 			throttle,
 			unthrottle,
 			ksymbol,
-			bpf,
-			text_poke;
+			bpf;
 
 	event_attr_op	attr;
 	event_attr_op	event_update;

@@ -8,7 +8,6 @@
 #include <asm/processor.h>
 #include <asm/ppc_asm.h>
 #include <asm/vdso.h>
-#include <asm/vdso_datapage.h>
 #include <asm/asm-offsets.h>
 
 	.text
@@ -23,18 +22,16 @@
  */
 V_FUNCTION_BEGIN(__kernel_sync_dicache)
   .cfi_startproc
-BEGIN_FTR_SECTION
-	b	3f
-END_FTR_SECTION_IFSET(CPU_FTR_COHERENT_ICACHE)
 	mflr	r12
   .cfi_register lr,r12
-	get_datapage	r10
+	mr	r11,r3
+	bl	V_LOCAL_FUNC(__get_datapage)
 	mtlr	r12
-  .cfi_restore lr
+	mr	r10,r3
 
 	lwz	r7,CFG_DCACHE_BLOCKSZ(r10)
 	addi	r5,r7,-1
-	andc	r6,r3,r5		/* round low to line bdy */
+	andc	r6,r11,r5		/* round low to line bdy */
 	subf	r8,r6,r4		/* compute length */
 	add	r8,r8,r5		/* ensure we get enough */
 	lwz	r9,CFG_DCACHE_LOGBLOCKSZ(r10)
@@ -51,7 +48,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_COHERENT_ICACHE)
 
 	lwz	r7,CFG_ICACHE_BLOCKSZ(r10)
 	addi	r5,r7,-1
-	andc	r6,r3,r5		/* round low to line bdy */
+	andc	r6,r11,r5		/* round low to line bdy */
 	subf	r8,r6,r4		/* compute length */
 	add	r8,r8,r5
 	lwz	r9,CFG_ICACHE_LOGBLOCKSZ(r10)
@@ -65,11 +62,19 @@ END_FTR_SECTION_IFSET(CPU_FTR_COHERENT_ICACHE)
 	isync
 	li	r3,0
 	blr
-3:
+  .cfi_endproc
+V_FUNCTION_END(__kernel_sync_dicache)
+
+
+/*
+ * POWER5 version of __kernel_sync_dicache
+ */
+V_FUNCTION_BEGIN(__kernel_sync_dicache_p5)
+  .cfi_startproc
 	crclr	cr0*4+so
 	sync
 	isync
 	li	r3,0
 	blr
   .cfi_endproc
-V_FUNCTION_END(__kernel_sync_dicache)
+V_FUNCTION_END(__kernel_sync_dicache_p5)

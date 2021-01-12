@@ -212,8 +212,7 @@ struct media_pad {
  *    mutex held.
  */
 struct media_entity_operations {
-	int (*get_fwnode_pad)(struct media_entity *entity,
-			      struct fwnode_endpoint *endpoint);
+	int (*get_fwnode_pad)(struct fwnode_endpoint *endpoint);
 	int (*link_setup)(struct media_entity *entity,
 			  const struct media_pad *local,
 			  const struct media_pad *remote, u32 flags);
@@ -803,7 +802,7 @@ int __media_entity_setup_link(struct media_link *link, u32 flags);
  * @flags:	the requested new link flags
  *
  * The only configurable property is the %MEDIA_LNK_FL_ENABLED link flag
- * to enable/disable a link. Links marked with the
+ * flag to enable/disable a link. Links marked with the
  * %MEDIA_LNK_FL_IMMUTABLE link flag can not be enabled or disabled.
  *
  * When a link is enabled or disabled, the media framework calls the

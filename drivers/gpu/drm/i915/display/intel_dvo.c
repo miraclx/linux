@@ -183,8 +183,7 @@ static void intel_dvo_get_config(struct intel_encoder *encoder,
 	pipe_config->hw.adjusted_mode.crtc_clock = pipe_config->port_clock;
 }
 
-static void intel_disable_dvo(struct intel_atomic_state *state,
-			      struct intel_encoder *encoder,
+static void intel_disable_dvo(struct intel_encoder *encoder,
 			      const struct intel_crtc_state *old_crtc_state,
 			      const struct drm_connector_state *old_conn_state)
 {
@@ -198,8 +197,7 @@ static void intel_disable_dvo(struct intel_atomic_state *state,
 	intel_de_read(dev_priv, dvo_reg);
 }
 
-static void intel_enable_dvo(struct intel_atomic_state *state,
-			     struct intel_encoder *encoder,
+static void intel_enable_dvo(struct intel_encoder *encoder,
 			     const struct intel_crtc_state *pipe_config,
 			     const struct drm_connector_state *conn_state)
 {
@@ -274,8 +272,7 @@ static int intel_dvo_compute_config(struct intel_encoder *encoder,
 	return 0;
 }
 
-static void intel_dvo_pre_enable(struct intel_atomic_state *state,
-				 struct intel_encoder *encoder,
+static void intel_dvo_pre_enable(struct intel_encoder *encoder,
 				 const struct intel_crtc_state *pipe_config,
 				 const struct drm_connector_state *conn_state)
 {
@@ -313,15 +310,9 @@ static void intel_dvo_pre_enable(struct intel_atomic_state *state,
 static enum drm_connector_status
 intel_dvo_detect(struct drm_connector *connector, bool force)
 {
-	struct drm_i915_private *i915 = to_i915(connector->dev);
 	struct intel_dvo *intel_dvo = intel_attached_dvo(to_intel_connector(connector));
-
 	DRM_DEBUG_KMS("[CONNECTOR:%d:%s]\n",
 		      connector->base.id, connector->name);
-
-	if (!INTEL_DISPLAY_ENABLED(i915))
-		return connector_status_disconnected;
-
 	return intel_dvo->dev.dev_ops->detect(&intel_dvo->dev);
 }
 
@@ -330,7 +321,6 @@ static int intel_dvo_get_modes(struct drm_connector *connector)
 	struct drm_i915_private *dev_priv = to_i915(connector->dev);
 	const struct drm_display_mode *fixed_mode =
 		to_intel_connector(connector)->panel.fixed_mode;
-	int num_modes;
 
 	/*
 	 * We should probably have an i2c driver get_modes function for those
@@ -338,22 +328,21 @@ static int intel_dvo_get_modes(struct drm_connector *connector)
 	 * (TV-out, for example), but for now with just TMDS and LVDS,
 	 * that's not the case.
 	 */
-	num_modes = intel_ddc_get_modes(connector,
-					intel_gmbus_get_adapter(dev_priv, GMBUS_PIN_DPC));
-	if (num_modes)
-		return num_modes;
+	intel_ddc_get_modes(connector,
+			    intel_gmbus_get_adapter(dev_priv, GMBUS_PIN_DPC));
+	if (!list_empty(&connector->probed_modes))
+		return 1;
 
 	if (fixed_mode) {
 		struct drm_display_mode *mode;
-
 		mode = drm_mode_duplicate(connector->dev, fixed_mode);
 		if (mode) {
 			drm_mode_probed_add(connector, mode);
-			num_modes++;
+			return 1;
 		}
 	}
 
-	return num_modes;
+	return 0;
 }
 
 static const struct drm_connector_funcs intel_dvo_connector_funcs = {

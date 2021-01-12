@@ -169,7 +169,7 @@ static int videobuf_dma_contig_user_get(struct videobuf_dma_contig_memory *mem,
 	mem->size = PAGE_ALIGN(vb->size + offset);
 	ret = -EINVAL;
 
-	mmap_read_lock(mm);
+	down_read(&mm->mmap_sem);
 
 	vma = find_vma(mm, untagged_baddr);
 	if (!vma)
@@ -201,7 +201,7 @@ static int videobuf_dma_contig_user_get(struct videobuf_dma_contig_memory *mem,
 	}
 
 out_up:
-	mmap_read_unlock(current->mm);
+	up_read(&current->mm->mmap_sem);
 
 	return ret;
 }

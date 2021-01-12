@@ -26,6 +26,7 @@
 #include <linux/audit.h>
 
 #include <linux/uaccess.h>
+#include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/asm-offsets.h>
 
@@ -391,11 +392,31 @@ void do_syscall_trace_exit(struct pt_regs *regs)
 
 static int fpr_get(struct task_struct *target,
 		     const struct user_regset *regset,
-		     struct membuf to)
+		     unsigned int pos, unsigned int count,
+		     void *kbuf, void __user *ubuf)
 {
 	struct pt_regs *regs = task_regs(target);
+	__u64 *k = kbuf;
+	__u64 __user *u = ubuf;
+	__u64 reg;
 
-	return membuf_write(&to, regs->fr, ELF_NFPREG * sizeof(__u64));
+	pos /= sizeof(reg);
+	count /= sizeof(reg);
+
+	if (kbuf)
+		for (; count > 0 && pos < ELF_NFPREG; --count)
+			*k++ = regs->fr[pos++];
+	else
+		for (; count > 0 && pos < ELF_NFPREG; --count)
+			if (__put_user(regs->fr[pos++], u++))
+				return -EFAULT;
+
+	kbuf = k;
+	ubuf = u;
+	pos *= sizeof(reg);
+	count *= sizeof(reg);
+	return user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf,
+					ELF_NFPREG * sizeof(reg), -1);
 }
 
 static int fpr_set(struct task_struct *target,
@@ -507,14 +528,30 @@ static void set_reg(struct pt_regs *regs, int num, unsigned long val)
 
 static int gpr_get(struct task_struct *target,
 		     const struct user_regset *regset,
-		     struct membuf to)
+		     unsigned int pos, unsigned int count,
+		     void *kbuf, void __user *ubuf)
 {
 	struct pt_regs *regs = task_regs(target);
-	unsigned int pos;
+	unsigned long *k = kbuf;
+	unsigned long __user *u = ubuf;
+	unsigned long reg;
 
-	for (pos = 0; pos < ELF_NGREG; pos++)
-		membuf_store(&to, get_reg(regs, pos));
-	return 0;
+	pos /= sizeof(reg);
+	count /= sizeof(reg);
+
+	if (kbuf)
+		for (; count > 0 && pos < ELF_NGREG; --count)
+			*k++ = get_reg(regs, pos++);
+	else
+		for (; count > 0 && pos < ELF_NGREG; --count)
+			if (__put_user(get_reg(regs, pos++), u++))
+				return -EFAULT;
+	kbuf = k;
+	ubuf = u;
+	pos *= sizeof(reg);
+	count *= sizeof(reg);
+	return user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf,
+					ELF_NGREG * sizeof(reg), -1);
 }
 
 static int gpr_set(struct task_struct *target,
@@ -552,12 +589,12 @@ static const struct user_regset native_regsets[] = {
 	[REGSET_GENERAL] = {
 		.core_note_type = NT_PRSTATUS, .n = ELF_NGREG,
 		.size = sizeof(long), .align = sizeof(long),
-		.regset_get = gpr_get, .set = gpr_set
+		.get = gpr_get, .set = gpr_set
 	},
 	[REGSET_FP] = {
 		.core_note_type = NT_PRFPREG, .n = ELF_NFPREG,
 		.size = sizeof(__u64), .align = sizeof(__u64),
-		.regset_get = fpr_get, .set = fpr_set
+		.get = fpr_get, .set = fpr_set
 	}
 };
 
@@ -571,15 +608,31 @@ static const struct user_regset_view user_parisc_native_view = {
 
 static int gpr32_get(struct task_struct *target,
 		     const struct user_regset *regset,
-		     struct membuf to)
+		     unsigned int pos, unsigned int count,
+		     void *kbuf, void __user *ubuf)
 {
 	struct pt_regs *regs = task_regs(target);
-	unsigned int pos;
+	compat_ulong_t *k = kbuf;
+	compat_ulong_t __user *u = ubuf;
+	compat_ulong_t reg;
 
-	for (pos = 0; pos < ELF_NGREG; pos++)
-		membuf_store(&to, (compat_ulong_t)get_reg(regs, pos));
+	pos /= sizeof(reg);
+	count /= sizeof(reg);
 
-	return 0;
+	if (kbuf)
+		for (; count > 0 && pos < ELF_NGREG; --count)
+			*k++ = get_reg(regs, pos++);
+	else
+		for (; count > 0 && pos < ELF_NGREG; --count)
+			if (__put_user((compat_ulong_t) get_reg(regs, pos++), u++))
+				return -EFAULT;
+
+	kbuf = k;
+	ubuf = u;
+	pos *= sizeof(reg);
+	count *= sizeof(reg);
+	return user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf,
+					ELF_NGREG * sizeof(reg), -1);
 }
 
 static int gpr32_set(struct task_struct *target,
@@ -620,12 +673,12 @@ static const struct user_regset compat_regsets[] = {
 	[REGSET_GENERAL] = {
 		.core_note_type = NT_PRSTATUS, .n = ELF_NGREG,
 		.size = sizeof(compat_long_t), .align = sizeof(compat_long_t),
-		.regset_get = gpr32_get, .set = gpr32_set
+		.get = gpr32_get, .set = gpr32_set
 	},
 	[REGSET_FP] = {
 		.core_note_type = NT_PRFPREG, .n = ELF_NFPREG,
 		.size = sizeof(__u64), .align = sizeof(__u64),
-		.regset_get = fpr_get, .set = fpr_set
+		.get = fpr_get, .set = fpr_set
 	}
 };
 

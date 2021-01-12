@@ -360,7 +360,7 @@ static void musb_advance_schedule(struct musb *musb, struct urb *urb,
 				qh = first_qh(head);
 				break;
 			}
-			fallthrough;
+			/* fall through */
 
 		case USB_ENDPOINT_XFER_ISOC:
 		case USB_ENDPOINT_XFER_INT:
@@ -1019,7 +1019,7 @@ static bool musb_h_ep0_continue(struct musb *musb, u16 len, struct urb *urb)
 			musb->ep0_stage = MUSB_EP0_OUT;
 			more = true;
 		}
-		fallthrough;
+		/* FALLTHROUGH */
 	case MUSB_EP0_OUT:
 		fifo_count = min_t(size_t, qh->maxpacket,
 				   urb->transfer_buffer_length -
@@ -1774,15 +1774,9 @@ void musb_host_rx(struct musb *musb, u8 epnum)
 		status = -EPIPE;
 
 	} else if (rx_csr & MUSB_RXCSR_H_ERROR) {
-		dev_err(musb->controller, "ep%d RX three-strikes error", epnum);
+		musb_dbg(musb, "end %d RX proto error", epnum);
 
-		/*
-		 * The three-strikes error could only happen when the USB
-		 * device is not accessible, for example detached or powered
-		 * off. So return the fatal error -ESHUTDOWN so hopefully the
-		 * USB device drivers won't immediately resubmit the same URB.
-		 */
-		status = -ESHUTDOWN;
+		status = -EPROTO;
 		musb_writeb(epio, MUSB_RXINTERVAL, 0);
 
 		rx_csr &= ~MUSB_RXCSR_H_ERROR;
@@ -2222,7 +2216,7 @@ static int musb_urb_enqueue(
 			interval = max_t(u8, epd->bInterval, 1);
 			break;
 		}
-		fallthrough;
+		/* FALLTHROUGH */
 	case USB_ENDPOINT_XFER_ISOC:
 		/* ISO always uses logarithmic encoding */
 		interval = min_t(u8, epd->bInterval, 16);

@@ -140,11 +140,11 @@ static inline int setup_sgio_components(struct pci_dev *pdev,
 	case 3:
 		sg_ptr->u.s.len2 = cpu_to_be16(list[i * 4 + 2].size);
 		sg_ptr->ptr2 = cpu_to_be64(list[i * 4 + 2].dma_addr);
-		fallthrough;
+		/* Fall through */
 	case 2:
 		sg_ptr->u.s.len1 = cpu_to_be16(list[i * 4 + 1].size);
 		sg_ptr->ptr1 = cpu_to_be64(list[i * 4 + 1].dma_addr);
-		fallthrough;
+		/* Fall through */
 	case 1:
 		sg_ptr->u.s.len0 = cpu_to_be16(list[i * 4 + 0].size);
 		sg_ptr->ptr0 = cpu_to_be64(list[i * 4 + 0].dma_addr);
@@ -202,10 +202,11 @@ static inline int setup_sgio_list(struct pci_dev *pdev,
 	info->dlen = dlen;
 	info->in_buffer = (u8 *)info + info_len;
 
-	((__be16 *)info->in_buffer)[0] = cpu_to_be16(req->outcnt);
-	((__be16 *)info->in_buffer)[1] = cpu_to_be16(req->incnt);
+	((u16 *)info->in_buffer)[0] = req->outcnt;
+	((u16 *)info->in_buffer)[1] = req->incnt;
 	((u16 *)info->in_buffer)[2] = 0;
 	((u16 *)info->in_buffer)[3] = 0;
+	*(u64 *)info->in_buffer = cpu_to_be64p((u64 *)info->in_buffer);
 
 	/* Setup gather (input) components */
 	if (setup_sgio_components(pdev, req->in, req->incnt,
@@ -313,7 +314,7 @@ static int process_request(struct pci_dev *pdev, struct otx_cpt_req_info *req,
 							      GFP_ATOMIC;
 	ret = setup_sgio_list(pdev, &info, req, gfp);
 	if (unlikely(ret)) {
-		dev_err(&pdev->dev, "Setting up SG list failed\n");
+		dev_err(&pdev->dev, "Setting up SG list failed");
 		goto request_cleanup;
 	}
 	cpt_req->dlen = info->dlen;
@@ -366,6 +367,8 @@ static int process_request(struct pci_dev *pdev, struct otx_cpt_req_info *req,
 	iq_cmd.cmd.s.param2 = cpu_to_be16(cpt_req->param2);
 	iq_cmd.cmd.s.dlen   = cpu_to_be16(cpt_req->dlen);
 
+	/* 64-bit swap for microcode data reads, not needed for addresses*/
+	iq_cmd.cmd.u64 = cpu_to_be64(iq_cmd.cmd.u64);
 	iq_cmd.dptr = info->dptr_baddr;
 	iq_cmd.rptr = info->rptr_baddr;
 	iq_cmd.cptr.u64 = 0;
@@ -407,17 +410,17 @@ int otx_cpt_do_request(struct pci_dev *pdev, struct otx_cpt_req_info *req,
 	struct otx_cptvf *cptvf = pci_get_drvdata(pdev);
 
 	if (!otx_cpt_device_ready(cptvf)) {
-		dev_err(&pdev->dev, "CPT Device is not ready\n");
+		dev_err(&pdev->dev, "CPT Device is not ready");
 		return -ENODEV;
 	}
 
 	if ((cptvf->vftype == OTX_CPT_SE_TYPES) && (!req->ctrl.s.se_req)) {
-		dev_err(&pdev->dev, "CPTVF-%d of SE TYPE got AE request\n",
+		dev_err(&pdev->dev, "CPTVF-%d of SE TYPE got AE request",
 			cptvf->vfid);
 		return -EINVAL;
 	} else if ((cptvf->vftype == OTX_CPT_AE_TYPES) &&
 		   (req->ctrl.s.se_req)) {
-		dev_err(&pdev->dev, "CPTVF-%d of AE TYPE got SE request\n",
+		dev_err(&pdev->dev, "CPTVF-%d of AE TYPE got SE request",
 			cptvf->vfid);
 		return -EINVAL;
 	}
@@ -433,7 +436,7 @@ static int cpt_process_ccode(struct pci_dev *pdev,
 	u8 ccode = cpt_status->s.compcode;
 	union otx_cpt_error_code ecode;
 
-	ecode.u = be64_to_cpup((__be64 *)cpt_info->out_buffer);
+	ecode.u = be64_to_cpu(*((u64 *) cpt_info->out_buffer));
 	switch (ccode) {
 	case CPT_COMP_E_FAULT:
 		dev_err(&pdev->dev,
@@ -458,7 +461,7 @@ static int cpt_process_ccode(struct pci_dev *pdev,
 		/* check for timeout */
 		if (time_after_eq(jiffies, cpt_info->time_in +
 				  OTX_CPT_COMMAND_TIMEOUT * HZ))
-			dev_warn(&pdev->dev, "Request timed out 0x%p\n", req);
+			dev_warn(&pdev->dev, "Request timed out 0x%p", req);
 		else if (cpt_info->extra_time < OTX_CPT_TIME_IN_RESET_COUNT) {
 			cpt_info->time_in = jiffies;
 			cpt_info->extra_time++;

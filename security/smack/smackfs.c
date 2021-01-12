@@ -878,21 +878,11 @@ static ssize_t smk_set_cipso(struct file *file, const char __user *buf,
 	else
 		rule += strlen(skp->smk_known) + 1;
 
-	if (rule > data + count) {
-		rc = -EOVERFLOW;
-		goto out;
-	}
-
 	ret = sscanf(rule, "%d", &maplevel);
-	if (ret != 1 || maplevel < 0 || maplevel > SMACK_CIPSO_MAXLEVEL)
+	if (ret != 1 || maplevel > SMACK_CIPSO_MAXLEVEL)
 		goto out;
 
 	rule += SMK_DIGITLEN;
-	if (rule > data + count) {
-		rc = -EOVERFLOW;
-		goto out;
-	}
-
 	ret = sscanf(rule, "%d", &catlen);
 	if (ret != 1 || catlen > SMACK_CIPSO_MAXCATNUM)
 		goto out;
@@ -905,10 +895,6 @@ static ssize_t smk_set_cipso(struct file *file, const char __user *buf,
 
 	for (i = 0; i < catlen; i++) {
 		rule += SMK_DIGITLEN;
-		if (rule > data + count) {
-			rc = -EOVERFLOW;
-			goto out;
-		}
 		ret = sscanf(rule, "%u", &cat);
 		if (ret != 1 || cat > SMACK_CIPSO_MAXCATNUM)
 			goto out;
@@ -922,10 +908,6 @@ static ssize_t smk_set_cipso(struct file *file, const char __user *buf,
 		skp->smk_netlabel.attr.mls.cat = ncats.attr.mls.cat;
 		skp->smk_netlabel.attr.mls.lvl = ncats.attr.mls.lvl;
 		rc = count;
-		/*
-		 * This mapping may have been cached, so clear the cache.
-		 */
-		netlbl_cache_invalidate();
 	}
 
 out:
@@ -1942,7 +1924,7 @@ static void smk_list_swap_rcu(struct list_head *public,
  * smk_parse_label_list - parse list of Smack labels, separated by spaces
  *
  * @data: the string to parse
- * @list: destination list
+ * @private: destination list
  *
  * Returns zero on success or error code, as appropriate
  */
@@ -1973,7 +1955,7 @@ static int smk_parse_label_list(char *data, struct list_head *list)
 
 /**
  * smk_destroy_label_list - destroy a list of smack_known_list_elem
- * @list: header pointer of the list to destroy
+ * @head: header pointer of the list to destroy
  */
 void smk_destroy_label_list(struct list_head *list)
 {
@@ -2131,7 +2113,7 @@ static const struct file_operations smk_unconfined_ops = {
  * smk_read_logging - read() for /smack/logging
  * @filp: file pointer, not actually used
  * @buf: where to put the result
- * @count: maximum to send along
+ * @cn: maximum to send along
  * @ppos: where to start
  *
  * Returns number of bytes read or error code, as appropriate
@@ -2272,7 +2254,6 @@ static const struct file_operations smk_load_self_ops = {
  * @buf: data from user space
  * @count: bytes sent
  * @ppos: where to start - must be 0
- * @format: /smack/load or /smack/load2 or /smack/change-rule format.
  */
 static ssize_t smk_user_access(struct file *file, const char __user *buf,
 				size_t count, loff_t *ppos, int format)
@@ -2729,6 +2710,7 @@ static int smk_open_relabel_self(struct inode *inode, struct file *file)
 static ssize_t smk_write_relabel_self(struct file *file, const char __user *buf,
 				size_t count, loff_t *ppos)
 {
+	struct task_smack *tsp = smack_cred(current_cred());
 	char *data;
 	int rc;
 	LIST_HEAD(list_tmp);
@@ -2753,21 +2735,11 @@ static ssize_t smk_write_relabel_self(struct file *file, const char __user *buf,
 	kfree(data);
 
 	if (!rc || (rc == -EINVAL && list_empty(&list_tmp))) {
-		struct cred *new;
-		struct task_smack *tsp;
-
-		new = prepare_creds();
-		if (!new) {
-			rc = -ENOMEM;
-			goto out;
-		}
-		tsp = smack_cred(new);
 		smk_destroy_label_list(&tsp->smk_relabel);
 		list_splice(&list_tmp, &tsp->smk_relabel);
-		commit_creds(new);
 		return count;
 	}
-out:
+
 	smk_destroy_label_list(&list_tmp);
 	return rc;
 }
@@ -2955,6 +2927,15 @@ static struct file_system_type smk_fs_type = {
 
 static struct vfsmount *smackfs_mount;
 
+static int __init smk_preset_netlabel(struct smack_known *skp)
+{
+	skp->smk_netlabel.domain = skp->smk_known;
+	skp->smk_netlabel.flags =
+		NETLBL_SECATTR_DOMAIN | NETLBL_SECATTR_MLS_LVL;
+	return smk_netlbl_mls(smack_cipso_direct, skp->smk_known,
+				&skp->smk_netlabel, strlen(skp->smk_known));
+}
+
 /**
  * init_smk_fs - get the smackfs superblock
  *
@@ -2993,19 +2974,19 @@ static int __init init_smk_fs(void)
 	smk_cipso_doi();
 	smk_unlbl_ambient(NULL);
 
-	rc = smack_populate_secattr(&smack_known_floor);
+	rc = smk_preset_netlabel(&smack_known_floor);
 	if (err == 0 && rc < 0)
 		err = rc;
-	rc = smack_populate_secattr(&smack_known_hat);
+	rc = smk_preset_netlabel(&smack_known_hat);
 	if (err == 0 && rc < 0)
 		err = rc;
-	rc = smack_populate_secattr(&smack_known_huh);
+	rc = smk_preset_netlabel(&smack_known_huh);
 	if (err == 0 && rc < 0)
 		err = rc;
-	rc = smack_populate_secattr(&smack_known_star);
+	rc = smk_preset_netlabel(&smack_known_star);
 	if (err == 0 && rc < 0)
 		err = rc;
-	rc = smack_populate_secattr(&smack_known_web);
+	rc = smk_preset_netlabel(&smack_known_web);
 	if (err == 0 && rc < 0)
 		err = rc;
 

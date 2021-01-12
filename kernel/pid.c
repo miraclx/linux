@@ -42,8 +42,6 @@
 #include <linux/sched/signal.h>
 #include <linux/sched/task.h>
 #include <linux/idr.h>
-#include <net/sock.h>
-#include <uapi/linux/pidfd.h>
 
 struct pid init_struct_pid = {
 	.count		= REFCOUNT_INIT(1),
@@ -73,7 +71,7 @@ int pid_max_max = PID_MAX_LIMIT;
  * the scheme scales to up to 4 million PIDs, runtime.
  */
 struct pid_namespace init_pid_ns = {
-	.ns.count = REFCOUNT_INIT(2),
+	.kref = KREF_INIT(2),
 	.idr = IDR_INIT(init_pid_ns.idr),
 	.pid_allocated = PIDNS_ADDING,
 	.level = 0,
@@ -200,7 +198,7 @@ struct pid *alloc_pid(struct pid_namespace *ns, pid_t *set_tid,
 			if (tid != 1 && !tmp->child_reaper)
 				goto out_free;
 			retval = -EPERM;
-			if (!checkpoint_restore_ns_capable(tmp->user_ns))
+			if (!ns_capable(tmp->user_ns, CAP_SYS_ADMIN))
 				goto out_free;
 			set_tid_size--;
 		}
@@ -365,25 +363,6 @@ void change_pid(struct task_struct *task, enum pid_type type,
 	attach_pid(task, type);
 }
 
-void exchange_tids(struct task_struct *left, struct task_struct *right)
-{
-	struct pid *pid1 = left->thread_pid;
-	struct pid *pid2 = right->thread_pid;
-	struct hlist_head *head1 = &pid1->tasks[PIDTYPE_PID];
-	struct hlist_head *head2 = &pid2->tasks[PIDTYPE_PID];
-
-	/* Swap the single entry tid lists */
-	hlists_swap_heads_rcu(head1, head2);
-
-	/* Swap the per task_struct pid */
-	rcu_assign_pointer(left->thread_pid, pid2);
-	rcu_assign_pointer(right->thread_pid, pid1);
-
-	/* Swap the cached value */
-	WRITE_ONCE(left->pid, pid_nr(pid2));
-	WRITE_ONCE(right->pid, pid_nr(pid1));
-}
-
 /* transfer_pid is an optimization of attach_pid(new), detach_pid(old) */
 void transfer_pid(struct task_struct *old, struct task_struct *new,
 			   enum pid_type type)
@@ -497,7 +476,8 @@ pid_t __task_pid_nr_ns(struct task_struct *task, enum pid_type type,
 	rcu_read_lock();
 	if (!ns)
 		ns = task_active_pid_ns(current);
-	nr = pid_nr_ns(rcu_dereference(*task_pid_ptr(task, type)), ns);
+	if (likely(pid_alive(task)))
+		nr = pid_nr_ns(rcu_dereference(*task_pid_ptr(task, type)), ns);
 	rcu_read_unlock();
 
 	return nr;
@@ -520,30 +500,10 @@ struct pid *find_ge_pid(int nr, struct pid_namespace *ns)
 	return idr_get_next(&ns->idr, &nr);
 }
 
-struct pid *pidfd_get_pid(unsigned int fd, unsigned int *flags)
-{
-	struct fd f;
-	struct pid *pid;
-
-	f = fdget(fd);
-	if (!f.file)
-		return ERR_PTR(-EBADF);
-
-	pid = pidfd_pid(f.file);
-	if (!IS_ERR(pid)) {
-		get_pid(pid);
-		*flags = f.file->f_flags;
-	}
-
-	fdput(f);
-	return pid;
-}
-
 /**
  * pidfd_create() - Create a new pid file descriptor.
  *
- * @pid:   struct pid that the pidfd will reference
- * @flags: flags to pass
+ * @pid:  struct pid that the pidfd will reference
  *
  * This creates a new pid file descriptor with the O_CLOEXEC flag set.
  *
@@ -553,12 +513,12 @@ struct pid *pidfd_get_pid(unsigned int fd, unsigned int *flags)
  * Return: On success, a cloexec pidfd is returned.
  *         On error, a negative errno number will be returned.
  */
-static int pidfd_create(struct pid *pid, unsigned int flags)
+static int pidfd_create(struct pid *pid)
 {
 	int fd;
 
 	fd = anon_inode_getfd("[pidfd]", &pidfd_fops, get_pid(pid),
-			      flags | O_RDWR | O_CLOEXEC);
+			      O_RDWR | O_CLOEXEC);
 	if (fd < 0)
 		put_pid(pid);
 
@@ -586,7 +546,7 @@ SYSCALL_DEFINE2(pidfd_open, pid_t, pid, unsigned int, flags)
 	int fd;
 	struct pid *p;
 
-	if (flags & ~PIDFD_NONBLOCK)
+	if (flags)
 		return -EINVAL;
 
 	if (pid <= 0)
@@ -597,7 +557,7 @@ SYSCALL_DEFINE2(pidfd_open, pid_t, pid, unsigned int, flags)
 		return -ESRCH;
 
 	if (pid_has_task(p, PIDTYPE_TGID))
-		fd = pidfd_create(p, flags);
+		fd = pidfd_create(p);
 	else
 		fd = -EINVAL;
 
@@ -628,7 +588,7 @@ static struct file *__pidfd_fget(struct task_struct *task, int fd)
 	struct file *file;
 	int ret;
 
-	ret = down_read_killable(&task->signal->exec_update_lock);
+	ret = mutex_lock_killable(&task->signal->exec_update_mutex);
 	if (ret)
 		return ERR_PTR(ret);
 
@@ -637,7 +597,7 @@ static struct file *__pidfd_fget(struct task_struct *task, int fd)
 	else
 		file = ERR_PTR(-EPERM);
 
-	up_read(&task->signal->exec_update_lock);
+	mutex_unlock(&task->signal->exec_update_mutex);
 
 	return file ?: ERR_PTR(-EBADF);
 }
@@ -657,8 +617,17 @@ static int pidfd_getfd(struct pid *pid, int fd)
 	if (IS_ERR(file))
 		return PTR_ERR(file);
 
-	ret = receive_fd(file, O_CLOEXEC);
-	fput(file);
+	ret = security_file_receive(file);
+	if (ret) {
+		fput(file);
+		return ret;
+	}
+
+	ret = get_unused_fd_flags(O_CLOEXEC);
+	if (ret < 0)
+		fput(file);
+	else
+		fd_install(ret, file);
 
 	return ret;
 }

@@ -11,11 +11,12 @@
 #include <linux/of_address.h>
 #include <linux/platform_device.h>
 #include <linux/reset-controller.h>
-#include <linux/reset/reset-simple.h>
 #include <linux/reset/socfpga.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
+
+#include "reset-simple.h"
 
 #define SOCFPGA_NR_BANKS	8
 
@@ -44,7 +45,7 @@ static int a10_reset_init(struct device_node *np)
 	data->membase = ioremap(res.start, size);
 	if (!data->membase) {
 		ret = -ENOMEM;
-		goto release_region;
+		goto err_alloc;
 	}
 
 	if (of_property_read_u32(np, "altr,modrst-offset", &reg_offset))
@@ -59,14 +60,7 @@ static int a10_reset_init(struct device_node *np)
 	data->rcdev.of_node = np;
 	data->status_active_low = true;
 
-	ret = reset_controller_register(&data->rcdev);
-	if (ret)
-		pr_err("unable to register device\n");
-
-	return ret;
-
-release_region:
-	release_mem_region(res.start, size);
+	return reset_controller_register(&data->rcdev);
 
 err_alloc:
 	kfree(data);

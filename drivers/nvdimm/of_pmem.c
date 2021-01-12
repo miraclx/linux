@@ -90,7 +90,6 @@ static int of_pmem_region_remove(struct platform_device *pdev)
 
 static const struct of_device_id of_pmem_region_match[] = {
 	{ .compatible = "pmem-region" },
-	{ .compatible = "pmem-region-v2" },
 	{ },
 };
 

@@ -25,38 +25,16 @@ static inline void rcuwait_init(struct rcuwait *w)
 	w->task = NULL;
 }
 
-/*
- * Note: this provides no serialization and, just as with waitqueues,
- * requires care to estimate as to whether or not the wait is active.
- */
-static inline int rcuwait_active(struct rcuwait *w)
-{
-	return !!rcu_access_pointer(w->task);
-}
-
-extern int rcuwait_wake_up(struct rcuwait *w);
+extern void rcuwait_wake_up(struct rcuwait *w);
 
 /*
  * The caller is responsible for locking around rcuwait_wait_event(),
- * and [prepare_to/finish]_rcuwait() such that writes to @task are
- * properly serialized.
+ * such that writes to @task are properly serialized.
  */
-
-static inline void prepare_to_rcuwait(struct rcuwait *w)
-{
-	rcu_assign_pointer(w->task, current);
-}
-
-static inline void finish_rcuwait(struct rcuwait *w)
-{
-        rcu_assign_pointer(w->task, NULL);
-	__set_current_state(TASK_RUNNING);
-}
-
 #define rcuwait_wait_event(w, condition, state)				\
 ({									\
 	int __ret = 0;							\
-	prepare_to_rcuwait(w);						\
+	rcu_assign_pointer((w)->task, current);				\
 	for (;;) {							\
 		/*							\
 		 * Implicit barrier (A) pairs with (B) in		\
@@ -73,7 +51,9 @@ static inline void finish_rcuwait(struct rcuwait *w)
 									\
 		schedule();						\
 	}								\
-	finish_rcuwait(w);						\
+									\
+	WRITE_ONCE((w)->task, NULL);					\
+	__set_current_state(TASK_RUNNING);				\
 	__ret;								\
 })
 

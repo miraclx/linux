@@ -35,13 +35,6 @@ config RESET_AXS10X
 	help
 	  This enables the reset controller driver for AXS10x.
 
-config RESET_BCM6345
-	bool "BCM6345 Reset Controller"
-	depends on BMIPS_GENERIC || COMPILE_TEST
-	default BMIPS_GENERIC
-	help
-	  This enables the reset controller driver for BCM6345 SoCs.
-
 config RESET_BERLIN
 	bool "Berlin Reset Driver" if COMPILE_TEST
 	default ARCH_BERLIN
@@ -72,10 +65,9 @@ config RESET_HSDK
 	  This enables the reset controller driver for HSDK board.
 
 config RESET_IMX7
-	tristate "i.MX7/8 Reset Driver"
+	bool "i.MX7/8 Reset Driver" if COMPILE_TEST
 	depends on HAS_IOMEM
-	depends on SOC_IMX7D || (ARM64 && ARCH_MXC) || COMPILE_TEST
-	default y if SOC_IMX7D
+	default SOC_IMX7D || (ARM64 && ARCH_MXC)
 	select MFD_SYSCON
 	help
 	  This enables the reset controller driver for i.MX7 SoCs.
@@ -102,8 +94,7 @@ config RESET_LPC18XX
 	  This enables the reset controller driver for NXP LPC18xx/43xx SoCs.
 
 config RESET_MESON
-	tristate "Meson Reset Driver"
-	depends on ARCH_MESON || COMPILE_TEST
+	bool "Meson Reset Driver" if COMPILE_TEST
 	default ARCH_MESON
 	help
 	  This enables the reset driver for Amlogic Meson SoCs.
@@ -148,17 +139,6 @@ config RESET_QCOM_PDC
 	  for Qualcomm Technologies Inc SDM845 SoCs. Say Y if you want
 	  to control reset signals provided by PDC for Modem, Compute,
 	  Display, GPU, Debug, AOP, Sensors, Audio, SP and APPS.
-
-config RESET_RASPBERRYPI
-	tristate "Raspberry Pi 4 Firmware Reset Driver"
-	depends on RASPBERRYPI_FIRMWARE || (RASPBERRYPI_FIRMWARE=n && COMPILE_TEST)
-	default USB_XHCI_PCI
-	help
-	  Raspberry Pi 4's co-processor controls some of the board's HW
-	  initialization process, but it's up to Linux to trigger it when
-	  relevant. This driver provides a reset controller capable of
-	  interfacing with RPi4's co-processor and model these firmware
-	  initialization routines as reset lines.
 
 config RESET_SCMI
 	tristate "Reset driver controlled via ARM SCMI interface"

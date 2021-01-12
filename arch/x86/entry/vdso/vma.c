@@ -89,10 +89,26 @@ static void vdso_fix_landing(const struct vdso_image *image,
 static int vdso_mremap(const struct vm_special_mapping *sm,
 		struct vm_area_struct *new_vma)
 {
+	unsigned long new_size = new_vma->vm_end - new_vma->vm_start;
 	const struct vdso_image *image = current->mm->context.vdso_image;
+
+	if (image->size != new_size)
+		return -EINVAL;
 
 	vdso_fix_landing(image, new_vma);
 	current->mm->context.vdso = (void __user *)new_vma->vm_start;
+
+	return 0;
+}
+
+static int vvar_mremap(const struct vm_special_mapping *sm,
+		struct vm_area_struct *new_vma)
+{
+	const struct vdso_image *image = new_vma->vm_mm->context.vdso_image;
+	unsigned long new_size = new_vma->vm_end - new_vma->vm_start;
+
+	if (new_size != -image->sym_vvar_start)
+		return -EINVAL;
 
 	return 0;
 }
@@ -128,7 +144,8 @@ int vdso_join_timens(struct task_struct *task, struct time_namespace *ns)
 	struct mm_struct *mm = task->mm;
 	struct vm_area_struct *vma;
 
-	mmap_read_lock(mm);
+	if (down_write_killable(&mm->mmap_sem))
+		return -EINTR;
 
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		unsigned long size = vma->vm_end - vma->vm_start;
@@ -137,7 +154,7 @@ int vdso_join_timens(struct task_struct *task, struct time_namespace *ns)
 			zap_page_range(vma, vma->vm_start, size);
 	}
 
-	mmap_read_unlock(mm);
+	up_write(&mm->mmap_sem);
 	return 0;
 }
 #else
@@ -236,6 +253,7 @@ static const struct vm_special_mapping vdso_mapping = {
 static const struct vm_special_mapping vvar_mapping = {
 	.name = "[vvar]",
 	.fault = vvar_fault,
+	.mremap = vvar_mremap,
 };
 
 /*
@@ -250,7 +268,7 @@ static int map_vdso(const struct vdso_image *image, unsigned long addr)
 	unsigned long text_start;
 	int ret = 0;
 
-	if (mmap_write_lock_killable(mm))
+	if (down_write_killable(&mm->mmap_sem))
 		return -EINTR;
 
 	addr = get_unmapped_area(NULL, addr,
@@ -293,7 +311,7 @@ static int map_vdso(const struct vdso_image *image, unsigned long addr)
 	}
 
 up_fail:
-	mmap_write_unlock(mm);
+	up_write(&mm->mmap_sem);
 	return ret;
 }
 
@@ -355,7 +373,7 @@ int map_vdso_once(const struct vdso_image *image, unsigned long addr)
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
 
-	mmap_write_lock(mm);
+	down_write(&mm->mmap_sem);
 	/*
 	 * Check if we have already mapped vdso blob - fail to prevent
 	 * abusing from userspace install_speciall_mapping, which may
@@ -366,11 +384,11 @@ int map_vdso_once(const struct vdso_image *image, unsigned long addr)
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		if (vma_is_special_mapping(vma, &vdso_mapping) ||
 				vma_is_special_mapping(vma, &vvar_mapping)) {
-			mmap_write_unlock(mm);
+			up_write(&mm->mmap_sem);
 			return -EEXIST;
 		}
 	}
-	mmap_write_unlock(mm);
+	up_write(&mm->mmap_sem);
 
 	return map_vdso(image, addr);
 }
@@ -396,10 +414,10 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 
 #ifdef CONFIG_COMPAT
 int compat_arch_setup_additional_pages(struct linux_binprm *bprm,
-				       int uses_interp, bool x32)
+				       int uses_interp)
 {
 #ifdef CONFIG_X86_X32_ABI
-	if (x32) {
+	if (test_thread_flag(TIF_X32)) {
 		if (!vdso64_enabled)
 			return 0;
 		return map_vdso_randomized(&vdso_image_x32);
@@ -418,21 +436,6 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	return load_vdso32();
 }
 #endif
-
-bool arch_syscall_is_vdso_sigreturn(struct pt_regs *regs)
-{
-#if defined(CONFIG_X86_32) || defined(CONFIG_IA32_EMULATION)
-	const struct vdso_image *image = current->mm->context.vdso_image;
-	unsigned long vdso = (unsigned long) current->mm->context.vdso;
-
-	if (in_ia32_syscall() && image == &vdso_image_32) {
-		if (regs->ip == vdso + image->sym_vdso32_sigreturn_landing_pad ||
-		    regs->ip == vdso + image->sym_vdso32_rt_sigreturn_landing_pad)
-			return true;
-	}
-#endif
-	return false;
-}
 
 #ifdef CONFIG_X86_64
 static __init int vdso_setup(char *s)

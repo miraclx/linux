@@ -26,13 +26,10 @@
 #ifndef COLOR_MOD_COLOR_GAMMA_H_
 #define COLOR_MOD_COLOR_GAMMA_H_
 
-#include "color_table.h"
-
 struct dc_transfer_func;
 struct dc_gamma;
 struct dc_transfer_func_distributed_points;
 struct dc_rgb_fixed;
-struct dc_color_caps;
 enum dc_transfer_func_predefined;
 
 /* For SetRegamma ADL interface support
@@ -85,12 +82,6 @@ struct freesync_hdr_tf_params {
 	unsigned int skip_tm; // skip tm
 };
 
-struct calculate_buffer {
-	int buffer_index;
-	struct fixed31_32 buffer[NUM_PTS_IN_REGION];
-	struct fixed31_32 gamma_of_2;
-};
-
 struct translate_from_linear_space_args {
 	struct fixed31_32 arg;
 	struct fixed31_32 a0;
@@ -98,7 +89,6 @@ struct translate_from_linear_space_args {
 	struct fixed31_32 a2;
 	struct fixed31_32 a3;
 	struct fixed31_32 gamma;
-	struct calculate_buffer *cal_buffer;
 };
 
 void setup_x_points_distribution(void);
@@ -108,25 +98,19 @@ void precompute_de_pq(void);
 
 bool mod_color_calculate_regamma_params(struct dc_transfer_func *output_tf,
 		const struct dc_gamma *ramp, bool mapUserRamp, bool canRomBeUsed,
-		const struct freesync_hdr_tf_params *fs_params,
-		struct calculate_buffer *cal_buffer);
+		const struct freesync_hdr_tf_params *fs_params);
 
-bool mod_color_calculate_degamma_params(struct dc_color_caps *dc_caps,
-		struct dc_transfer_func *output_tf,
+bool mod_color_calculate_degamma_params(struct dc_transfer_func *output_tf,
 		const struct dc_gamma *ramp, bool mapUserRamp);
 
 bool mod_color_calculate_degamma_curve(enum dc_transfer_func_predefined trans,
 				struct dc_transfer_func_distributed_points *points);
 
 bool calculate_user_regamma_coeff(struct dc_transfer_func *output_tf,
-		const struct regamma_lut *regamma,
-		struct calculate_buffer *cal_buffer,
-		const struct dc_gamma *ramp);
+		const struct regamma_lut *regamma);
 
 bool calculate_user_regamma_ramp(struct dc_transfer_func *output_tf,
-		const struct regamma_lut *regamma,
-		struct calculate_buffer *cal_buffer,
-		const struct dc_gamma *ramp);
+		const struct regamma_lut *regamma);
 
 
 #endif /* COLOR_MOD_COLOR_GAMMA_H_ */

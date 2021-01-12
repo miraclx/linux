@@ -235,8 +235,6 @@ static int neigh_forced_gc(struct neigh_table *tbl)
 
 			write_lock(&n->lock);
 			if ((n->nud_state == NUD_FAILED) ||
-			    (tbl->is_multicast &&
-			     tbl->is_multicast(n->primary_key)) ||
 			    time_after(tref, n->updated))
 				remove = true;
 			write_unlock(&n->lock);
@@ -1084,8 +1082,8 @@ static void neigh_timer_handler(struct timer_list *t)
 	}
 
 	if (neigh->nud_state & NUD_IN_TIMER) {
-		if (time_before(next, jiffies + HZ/100))
-			next = jiffies + HZ/100;
+		if (time_before(next, jiffies + HZ/2))
+			next = jiffies + HZ/2;
 		if (!mod_timer(&neigh->timer, next))
 			neigh_hold(neigh);
 	}
@@ -1773,7 +1771,6 @@ static struct neigh_table *neigh_find_table(int family)
 }
 
 const struct nla_policy nda_policy[NDA_MAX+1] = {
-	[NDA_UNSPEC]		= { .strict_start_type = NDA_NH_ID },
 	[NDA_DST]		= { .type = NLA_BINARY, .len = MAX_ADDR_LEN },
 	[NDA_LLADDR]		= { .type = NLA_BINARY, .len = MAX_ADDR_LEN },
 	[NDA_CACHEINFO]		= { .len = sizeof(struct nda_cacheinfo) },
@@ -1784,8 +1781,6 @@ const struct nla_policy nda_policy[NDA_MAX+1] = {
 	[NDA_IFINDEX]		= { .type = NLA_U32 },
 	[NDA_MASTER]		= { .type = NLA_U32 },
 	[NDA_PROTOCOL]		= { .type = NLA_U8 },
-	[NDA_NH_ID]		= { .type = NLA_U32 },
-	[NDA_FDB_EXT_ATTRS]	= { .type = NLA_NESTED },
 };
 
 static int neigh_delete(struct sk_buff *skb, struct nlmsghdr *nlh,
@@ -3384,7 +3379,7 @@ EXPORT_SYMBOL(neigh_app_ns);
 static int unres_qlen_max = INT_MAX / SKB_TRUESIZE(ETH_FRAME_LEN);
 
 static int proc_unres_qlen(struct ctl_table *ctl, int write,
-			   void *buffer, size_t *lenp, loff_t *ppos)
+			   void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int size, ret;
 	struct ctl_table tmp = *ctl;
@@ -3448,8 +3443,8 @@ static void neigh_proc_update(struct ctl_table *ctl, int write)
 }
 
 static int neigh_proc_dointvec_zero_intmax(struct ctl_table *ctl, int write,
-					   void *buffer, size_t *lenp,
-					   loff_t *ppos)
+					   void __user *buffer,
+					   size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table tmp = *ctl;
 	int ret;
@@ -3462,8 +3457,8 @@ static int neigh_proc_dointvec_zero_intmax(struct ctl_table *ctl, int write,
 	return ret;
 }
 
-int neigh_proc_dointvec(struct ctl_table *ctl, int write, void *buffer,
-			size_t *lenp, loff_t *ppos)
+int neigh_proc_dointvec(struct ctl_table *ctl, int write,
+			void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int ret = proc_dointvec(ctl, write, buffer, lenp, ppos);
 
@@ -3472,7 +3467,8 @@ int neigh_proc_dointvec(struct ctl_table *ctl, int write, void *buffer,
 }
 EXPORT_SYMBOL(neigh_proc_dointvec);
 
-int neigh_proc_dointvec_jiffies(struct ctl_table *ctl, int write, void *buffer,
+int neigh_proc_dointvec_jiffies(struct ctl_table *ctl, int write,
+				void __user *buffer,
 				size_t *lenp, loff_t *ppos)
 {
 	int ret = proc_dointvec_jiffies(ctl, write, buffer, lenp, ppos);
@@ -3483,8 +3479,8 @@ int neigh_proc_dointvec_jiffies(struct ctl_table *ctl, int write, void *buffer,
 EXPORT_SYMBOL(neigh_proc_dointvec_jiffies);
 
 static int neigh_proc_dointvec_userhz_jiffies(struct ctl_table *ctl, int write,
-					      void *buffer, size_t *lenp,
-					      loff_t *ppos)
+					      void __user *buffer,
+					      size_t *lenp, loff_t *ppos)
 {
 	int ret = proc_dointvec_userhz_jiffies(ctl, write, buffer, lenp, ppos);
 
@@ -3493,7 +3489,8 @@ static int neigh_proc_dointvec_userhz_jiffies(struct ctl_table *ctl, int write,
 }
 
 int neigh_proc_dointvec_ms_jiffies(struct ctl_table *ctl, int write,
-				   void *buffer, size_t *lenp, loff_t *ppos)
+				   void __user *buffer,
+				   size_t *lenp, loff_t *ppos)
 {
 	int ret = proc_dointvec_ms_jiffies(ctl, write, buffer, lenp, ppos);
 
@@ -3503,8 +3500,8 @@ int neigh_proc_dointvec_ms_jiffies(struct ctl_table *ctl, int write,
 EXPORT_SYMBOL(neigh_proc_dointvec_ms_jiffies);
 
 static int neigh_proc_dointvec_unres_qlen(struct ctl_table *ctl, int write,
-					  void *buffer, size_t *lenp,
-					  loff_t *ppos)
+					  void __user *buffer,
+					  size_t *lenp, loff_t *ppos)
 {
 	int ret = proc_unres_qlen(ctl, write, buffer, lenp, ppos);
 
@@ -3513,8 +3510,8 @@ static int neigh_proc_dointvec_unres_qlen(struct ctl_table *ctl, int write,
 }
 
 static int neigh_proc_base_reachable_time(struct ctl_table *ctl, int write,
-					  void *buffer, size_t *lenp,
-					  loff_t *ppos)
+					  void __user *buffer,
+					  size_t *lenp, loff_t *ppos)
 {
 	struct neigh_parms *p = ctl->extra2;
 	int ret;

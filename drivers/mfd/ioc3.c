@@ -142,11 +142,10 @@ static int ioc3_irq_domain_setup(struct ioc3_priv_data *ipd, int irq)
 		goto err;
 
 	domain = irq_domain_create_linear(fn, 24, &ioc3_irq_domain_ops, ipd);
-	if (!domain) {
-		irq_domain_free_fwnode(fn);
+	if (!domain)
 		goto err;
-	}
 
+	irq_domain_free_fwnode(fn);
 	ipd->domain = domain;
 
 	irq_set_chained_handler_and_data(irq, ioc3_irq_handler, domain);
@@ -158,13 +157,13 @@ err:
 	return -ENOMEM;
 }
 
-static const struct resource ioc3_uarta_resources[] = {
+static struct resource ioc3_uarta_resources[] = {
 	DEFINE_RES_MEM(offsetof(struct ioc3, sregs.uarta),
 		       sizeof_field(struct ioc3, sregs.uarta)),
 	DEFINE_RES_IRQ(IOC3_IRQ_SERIAL_A)
 };
 
-static const struct resource ioc3_uartb_resources[] = {
+static struct resource ioc3_uartb_resources[] = {
 	DEFINE_RES_MEM(offsetof(struct ioc3, sregs.uartb),
 		       sizeof_field(struct ioc3, sregs.uartb)),
 	DEFINE_RES_IRQ(IOC3_IRQ_SERIAL_B)
@@ -213,7 +212,7 @@ static int ioc3_serial_setup(struct ioc3_priv_data *ipd)
 	return 0;
 }
 
-static const struct resource ioc3_kbd_resources[] = {
+static struct resource ioc3_kbd_resources[] = {
 	DEFINE_RES_MEM(offsetof(struct ioc3, serio),
 		       sizeof_field(struct ioc3, serio)),
 	DEFINE_RES_IRQ(IOC3_IRQ_KBD)
@@ -242,7 +241,7 @@ static int ioc3_kbd_setup(struct ioc3_priv_data *ipd)
 	return 0;
 }
 
-static const struct resource ioc3_eth_resources[] = {
+static struct resource ioc3_eth_resources[] = {
 	DEFINE_RES_MEM(offsetof(struct ioc3, eth),
 		       sizeof_field(struct ioc3, eth)),
 	DEFINE_RES_MEM(offsetof(struct ioc3, ssram),
@@ -250,7 +249,7 @@ static const struct resource ioc3_eth_resources[] = {
 	DEFINE_RES_IRQ(0)
 };
 
-static const struct resource ioc3_w1_resources[] = {
+static struct resource ioc3_w1_resources[] = {
 	DEFINE_RES_MEM(offsetof(struct ioc3, mcr),
 		       sizeof_field(struct ioc3, mcr)),
 };
@@ -294,7 +293,7 @@ static int ioc3_eth_setup(struct ioc3_priv_data *ipd)
 	return 0;
 }
 
-static const struct resource ioc3_m48t35_resources[] = {
+static struct resource ioc3_m48t35_resources[] = {
 	DEFINE_RES_MEM(IOC3_BYTEBUS_DEV0, M48T35_REG_SIZE)
 };
 
@@ -326,7 +325,7 @@ static struct ds1685_rtc_platform_data ip30_rtc_platform_data = {
 	.access_type = ds1685_reg_indirect,
 };
 
-static const struct resource ioc3_rtc_ds1685_resources[] = {
+static struct resource ioc3_rtc_ds1685_resources[] = {
 	DEFINE_RES_MEM(IOC3_BYTEBUS_DEV1, 1),
 	DEFINE_RES_MEM(IOC3_BYTEBUS_DEV2, 1),
 	DEFINE_RES_IRQ(0)
@@ -359,7 +358,7 @@ static int ioc3_ds1685_setup(struct ioc3_priv_data *ipd)
 };
 
 
-static const struct resource ioc3_leds_resources[] = {
+static struct resource ioc3_leds_resources[] = {
 	DEFINE_RES_MEM(offsetof(struct ioc3, gppr[0]),
 		       sizeof_field(struct ioc3, gppr[0])),
 	DEFINE_RES_MEM(offsetof(struct ioc3, gppr[1]),
@@ -616,10 +615,7 @@ static int ioc3_mfd_probe(struct pci_dev *pdev,
 		/* Remove all already added MFD devices */
 		mfd_remove_devices(&ipd->pdev->dev);
 		if (ipd->domain) {
-			struct fwnode_handle *fn = ipd->domain->fwnode;
-
 			irq_domain_remove(ipd->domain);
-			irq_domain_free_fwnode(fn);
 			free_irq(ipd->domain_irq, (void *)ipd);
 		}
 		pci_iounmap(pdev, regs);
@@ -646,10 +642,7 @@ static void ioc3_mfd_remove(struct pci_dev *pdev)
 	/* Release resources */
 	mfd_remove_devices(&ipd->pdev->dev);
 	if (ipd->domain) {
-		struct fwnode_handle *fn = ipd->domain->fwnode;
-
 		irq_domain_remove(ipd->domain);
-		irq_domain_free_fwnode(fn);
 		free_irq(ipd->domain_irq, (void *)ipd);
 	}
 	pci_iounmap(pdev, ipd->regs);

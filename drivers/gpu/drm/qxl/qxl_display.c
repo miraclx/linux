@@ -25,9 +25,7 @@
 
 #include <linux/crc32.h>
 #include <linux/delay.h>
-#include <linux/dma-buf-map.h>
 
-#include <drm/drm_drv.h>
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
@@ -164,8 +162,7 @@ static void qxl_update_offset_props(struct qxl_device *qdev)
 void qxl_display_read_client_monitors_config(struct qxl_device *qdev)
 {
 	struct drm_device *dev = &qdev->ddev;
-	struct drm_modeset_acquire_ctx ctx;
-	int status, retries, ret;
+	int status, retries;
 
 	for (retries = 0; retries < 10; retries++) {
 		status = qxl_display_copy_rom_client_monitors_config(qdev);
@@ -186,9 +183,9 @@ void qxl_display_read_client_monitors_config(struct qxl_device *qdev)
 		return;
 	}
 
-	DRM_MODESET_LOCK_ALL_BEGIN(dev, ctx, DRM_MODESET_ACQUIRE_INTERRUPTIBLE, ret);
+	drm_modeset_lock_all(dev);
 	qxl_update_offset_props(qdev);
-	DRM_MODESET_LOCK_ALL_END(dev, ctx, ret);
+	drm_modeset_unlock_all(dev);
 	if (!drm_helper_hpd_irq_event(dev)) {
 		/* notify that the monitor configuration changed, to
 		   adjust at the arbitrary resolution */
@@ -224,7 +221,7 @@ static int qxl_add_mode(struct drm_connector *connector,
 			bool preferred)
 {
 	struct drm_device *dev = connector->dev;
-	struct qxl_device *qdev = to_qxl(dev);
+	struct qxl_device *qdev = dev->dev_private;
 	struct drm_display_mode *mode = NULL;
 	int rc;
 
@@ -245,7 +242,7 @@ static int qxl_add_mode(struct drm_connector *connector,
 static int qxl_add_monitors_config_modes(struct drm_connector *connector)
 {
 	struct drm_device *dev = connector->dev;
-	struct qxl_device *qdev = to_qxl(dev);
+	struct qxl_device *qdev = dev->dev_private;
 	struct qxl_output *output = drm_connector_to_qxl_output(connector);
 	int h = output->index;
 	struct qxl_head *head;
@@ -313,7 +310,7 @@ static void qxl_crtc_update_monitors_config(struct drm_crtc *crtc,
 					    const char *reason)
 {
 	struct drm_device *dev = crtc->dev;
-	struct qxl_device *qdev = to_qxl(dev);
+	struct qxl_device *qdev = dev->dev_private;
 	struct qxl_crtc *qcrtc = to_qxl_crtc(crtc);
 	struct qxl_head head;
 	int oldcount, i = qcrtc->index;
@@ -373,7 +370,7 @@ static void qxl_crtc_update_monitors_config(struct drm_crtc *crtc,
 }
 
 static void qxl_crtc_atomic_flush(struct drm_crtc *crtc,
-				  struct drm_atomic_state *state)
+				  struct drm_crtc_state *old_crtc_state)
 {
 	qxl_crtc_update_monitors_config(crtc, "flush");
 }
@@ -403,20 +400,21 @@ static int qxl_framebuffer_surface_dirty(struct drm_framebuffer *fb,
 					 unsigned int num_clips)
 {
 	/* TODO: vmwgfx where this was cribbed from had locking. Why? */
-	struct qxl_device *qdev = to_qxl(fb->dev);
+	struct qxl_device *qdev = fb->dev->dev_private;
 	struct drm_clip_rect norect;
 	struct qxl_bo *qobj;
-	struct drm_modeset_acquire_ctx ctx;
 	bool is_primary;
-	int inc = 1, ret;
+	int inc = 1;
 
-	DRM_MODESET_LOCK_ALL_BEGIN(fb->dev, ctx, DRM_MODESET_ACQUIRE_INTERRUPTIBLE, ret);
+	drm_modeset_lock_all(fb->dev);
 
 	qobj = gem_to_qxl_bo(fb->obj[0]);
 	/* if we aren't primary surface ignore this */
 	is_primary = qobj->shadow ? qobj->shadow->is_primary : qobj->is_primary;
-	if (!is_primary)
-		goto out_lock_end;
+	if (!is_primary) {
+		drm_modeset_unlock_all(fb->dev);
+		return 0;
+	}
 
 	if (!num_clips) {
 		num_clips = 1;
@@ -432,8 +430,7 @@ static int qxl_framebuffer_surface_dirty(struct drm_framebuffer *fb,
 	qxl_draw_dirty_fb(qdev, fb, qobj, flags, color,
 			  clips, num_clips, inc, 0);
 
-out_lock_end:
-	DRM_MODESET_LOCK_ALL_END(fb->dev, ctx, ret);
+	drm_modeset_unlock_all(fb->dev);
 
 	return 0;
 }
@@ -445,13 +442,13 @@ static const struct drm_framebuffer_funcs qxl_fb_funcs = {
 };
 
 static void qxl_crtc_atomic_enable(struct drm_crtc *crtc,
-				   struct drm_atomic_state *state)
+				   struct drm_crtc_state *old_state)
 {
 	qxl_crtc_update_monitors_config(crtc, "enable");
 }
 
 static void qxl_crtc_atomic_disable(struct drm_crtc *crtc,
-				    struct drm_atomic_state *state)
+				    struct drm_crtc_state *old_state)
 {
 	qxl_crtc_update_monitors_config(crtc, "disable");
 }
@@ -465,7 +462,7 @@ static const struct drm_crtc_helper_funcs qxl_crtc_helper_funcs = {
 static int qxl_primary_atomic_check(struct drm_plane *plane,
 				    struct drm_plane_state *state)
 {
-	struct qxl_device *qdev = to_qxl(plane->dev);
+	struct qxl_device *qdev = plane->dev->dev_private;
 	struct qxl_bo *bo;
 
 	if (!state->crtc || !state->fb)
@@ -479,7 +476,7 @@ static int qxl_primary_atomic_check(struct drm_plane *plane,
 static int qxl_primary_apply_cursor(struct drm_plane *plane)
 {
 	struct drm_device *dev = plane->dev;
-	struct qxl_device *qdev = to_qxl(dev);
+	struct qxl_device *qdev = dev->dev_private;
 	struct drm_framebuffer *fb = plane->state->fb;
 	struct qxl_crtc *qcrtc = to_qxl_crtc(plane->state->crtc);
 	struct qxl_cursor_cmd *cmd;
@@ -526,7 +523,7 @@ out_free_release:
 static void qxl_primary_atomic_update(struct drm_plane *plane,
 				      struct drm_plane_state *old_state)
 {
-	struct qxl_device *qdev = to_qxl(plane->dev);
+	struct qxl_device *qdev = plane->dev->dev_private;
 	struct qxl_bo *bo = gem_to_qxl_bo(plane->state->fb->obj[0]);
 	struct qxl_bo *primary;
 	struct drm_clip_rect norect = {
@@ -557,7 +554,7 @@ static void qxl_primary_atomic_update(struct drm_plane *plane,
 static void qxl_primary_atomic_disable(struct drm_plane *plane,
 				       struct drm_plane_state *old_state)
 {
-	struct qxl_device *qdev = to_qxl(plane->dev);
+	struct qxl_device *qdev = plane->dev->dev_private;
 
 	if (old_state->fb) {
 		struct qxl_bo *bo = gem_to_qxl_bo(old_state->fb->obj[0]);
@@ -573,7 +570,7 @@ static void qxl_cursor_atomic_update(struct drm_plane *plane,
 				     struct drm_plane_state *old_state)
 {
 	struct drm_device *dev = plane->dev;
-	struct qxl_device *qdev = to_qxl(dev);
+	struct qxl_device *qdev = dev->dev_private;
 	struct drm_framebuffer *fb = plane->state->fb;
 	struct qxl_crtc *qcrtc = to_qxl_crtc(plane->state->crtc);
 	struct qxl_release *release;
@@ -582,8 +579,6 @@ static void qxl_cursor_atomic_update(struct drm_plane *plane,
 	struct drm_gem_object *obj;
 	struct qxl_bo *cursor_bo = NULL, *user_bo = NULL, *old_cursor_bo = NULL;
 	int ret;
-	struct dma_buf_map user_map;
-	struct dma_buf_map cursor_map;
 	void *user_ptr;
 	int size = 64*64*4;
 
@@ -598,10 +593,9 @@ static void qxl_cursor_atomic_update(struct drm_plane *plane,
 		user_bo = gem_to_qxl_bo(obj);
 
 		/* pinning is done in the prepare/cleanup framevbuffer */
-		ret = qxl_bo_kmap(user_bo, &user_map);
+		ret = qxl_bo_kmap(user_bo, &user_ptr);
 		if (ret)
 			goto out_free_release;
-		user_ptr = user_map.vaddr; /* TODO: Use mapping abstraction properly */
 
 		ret = qxl_alloc_bo_reserved(qdev, release,
 					    sizeof(struct qxl_cursor) + size,
@@ -617,13 +611,9 @@ static void qxl_cursor_atomic_update(struct drm_plane *plane,
 		if (ret)
 			goto out_unpin;
 
-		ret = qxl_bo_kmap(cursor_bo, &cursor_map);
+		ret = qxl_bo_kmap(cursor_bo, (void **)&cursor);
 		if (ret)
 			goto out_backoff;
-		if (cursor_map.is_iomem) /* TODO: Use mapping abstraction properly */
-			cursor = (struct qxl_cursor __force *)cursor_map.vaddr_iomem;
-		else
-			cursor = (struct qxl_cursor *)cursor_map.vaddr;
 
 		cursor->header.unique = 0;
 		cursor->header.type = SPICE_CURSOR_TYPE_ALPHA;
@@ -689,7 +679,7 @@ out_free_release:
 static void qxl_cursor_atomic_disable(struct drm_plane *plane,
 				      struct drm_plane_state *old_state)
 {
-	struct qxl_device *qdev = to_qxl(plane->dev);
+	struct qxl_device *qdev = plane->dev->dev_private;
 	struct qxl_release *release;
 	struct qxl_cursor_cmd *cmd;
 	int ret;
@@ -772,10 +762,11 @@ static void qxl_calc_dumb_shadow(struct qxl_device *qdev,
 static int qxl_plane_prepare_fb(struct drm_plane *plane,
 				struct drm_plane_state *new_state)
 {
-	struct qxl_device *qdev = to_qxl(plane->dev);
+	struct qxl_device *qdev = plane->dev->dev_private;
 	struct drm_gem_object *obj;
 	struct qxl_bo *user_bo;
 	struct qxl_surface surf;
+	int ret;
 
 	if (!new_state->fb)
 		return 0;
@@ -792,7 +783,7 @@ static int qxl_plane_prepare_fb(struct drm_plane *plane,
 		    qdev->dumb_shadow_bo->surf.width  != surf.width ||
 		    qdev->dumb_shadow_bo->surf.height != surf.height) {
 			if (qdev->dumb_shadow_bo) {
-				drm_gem_object_put
+				drm_gem_object_put_unlocked
 					(&qdev->dumb_shadow_bo->tbo.base);
 				qdev->dumb_shadow_bo = NULL;
 			}
@@ -802,7 +793,7 @@ static int qxl_plane_prepare_fb(struct drm_plane *plane,
 		}
 		if (user_bo->shadow != qdev->dumb_shadow_bo) {
 			if (user_bo->shadow) {
-				drm_gem_object_put
+				drm_gem_object_put_unlocked
 					(&user_bo->shadow->tbo.base);
 				user_bo->shadow = NULL;
 			}
@@ -811,7 +802,11 @@ static int qxl_plane_prepare_fb(struct drm_plane *plane,
 		}
 	}
 
-	return qxl_bo_pin(user_bo);
+	ret = qxl_bo_pin(user_bo);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static void qxl_plane_cleanup_fb(struct drm_plane *plane,
@@ -833,7 +828,7 @@ static void qxl_plane_cleanup_fb(struct drm_plane *plane,
 	qxl_bo_unpin(user_bo);
 
 	if (old_state->fb != plane->state->fb && user_bo->shadow) {
-		drm_gem_object_put(&user_bo->shadow->tbo.base);
+		drm_gem_object_put_unlocked(&user_bo->shadow->tbo.base);
 		user_bo->shadow = NULL;
 	}
 }
@@ -928,7 +923,7 @@ static int qdev_crtc_init(struct drm_device *dev, int crtc_id)
 {
 	struct qxl_crtc *qxl_crtc;
 	struct drm_plane *primary, *cursor;
-	struct qxl_device *qdev = to_qxl(dev);
+	struct qxl_device *qdev = dev->dev_private;
 	int r;
 
 	qxl_crtc = kzalloc(sizeof(struct qxl_crtc), GFP_KERNEL);
@@ -970,7 +965,7 @@ free_mem:
 static int qxl_conn_get_modes(struct drm_connector *connector)
 {
 	struct drm_device *dev = connector->dev;
-	struct qxl_device *qdev = to_qxl(dev);
+	struct qxl_device *qdev = dev->dev_private;
 	struct qxl_output *output = drm_connector_to_qxl_output(connector);
 	unsigned int pwidth = 1024;
 	unsigned int pheight = 768;
@@ -996,7 +991,7 @@ static enum drm_mode_status qxl_conn_mode_valid(struct drm_connector *connector,
 			       struct drm_display_mode *mode)
 {
 	struct drm_device *ddev = connector->dev;
-	struct qxl_device *qdev = to_qxl(ddev);
+	struct qxl_device *qdev = ddev->dev_private;
 
 	if (qxl_check_mode(qdev, mode->hdisplay, mode->vdisplay) != 0)
 		return MODE_BAD;
@@ -1026,7 +1021,7 @@ static enum drm_connector_status qxl_conn_detect(
 	struct qxl_output *output =
 		drm_connector_to_qxl_output(connector);
 	struct drm_device *ddev = connector->dev;
-	struct qxl_device *qdev = to_qxl(ddev);
+	struct qxl_device *qdev = ddev->dev_private;
 	bool connected = false;
 
 	/* The first monitor is always connected */
@@ -1076,7 +1071,7 @@ static int qxl_mode_create_hotplug_mode_update_property(struct qxl_device *qdev)
 
 static int qdev_output_init(struct drm_device *dev, int num_output)
 {
-	struct qxl_device *qdev = to_qxl(dev);
+	struct qxl_device *qdev = dev->dev_private;
 	struct qxl_output *qxl_output;
 	struct drm_connector *connector;
 	struct drm_encoder *encoder;
@@ -1141,7 +1136,6 @@ int qxl_create_monitors_object(struct qxl_device *qdev)
 {
 	int ret;
 	struct drm_gem_object *gobj;
-	struct dma_buf_map map;
 	int monitors_config_size = sizeof(struct qxl_monitors_config) +
 		qxl_num_crtc * sizeof(struct qxl_head);
 
@@ -1158,7 +1152,7 @@ int qxl_create_monitors_object(struct qxl_device *qdev)
 	if (ret)
 		return ret;
 
-	qxl_bo_kmap(qdev->monitors_config_bo, &map);
+	qxl_bo_kmap(qdev->monitors_config_bo, NULL);
 
 	qdev->monitors_config = qdev->monitors_config_bo->kptr;
 	qdev->ram_header->monitors_config =

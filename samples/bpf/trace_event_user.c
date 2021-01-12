@@ -16,6 +16,9 @@
 #include "perf-sys.h"
 #include "trace_helpers.h"
 
+#define __must_check
+#include <linux/err.h>
+
 #define SAMPLE_FREQ 50
 
 static int pid;
@@ -156,7 +159,7 @@ static void test_perf_event_all_cpu(struct perf_event_attr *attr)
 			goto all_cpu_err;
 		}
 		links[i] = bpf_program__attach_perf_event(prog, pmu_fd);
-		if (libbpf_get_error(links[i])) {
+		if (IS_ERR(links[i])) {
 			printf("bpf_program__attach_perf_event failed\n");
 			links[i] = NULL;
 			close(pmu_fd);
@@ -195,7 +198,7 @@ static void test_perf_event_task(struct perf_event_attr *attr)
 		goto err;
 	}
 	link = bpf_program__attach_perf_event(prog, pmu_fd);
-	if (libbpf_get_error(link)) {
+	if (IS_ERR(link)) {
 		printf("bpf_program__attach_perf_event failed\n");
 		link = NULL;
 		close(pmu_fd);
@@ -294,11 +297,13 @@ static void test_bpf_perf_event(void)
 
 int main(int argc, char **argv)
 {
+	struct rlimit r = {RLIM_INFINITY, RLIM_INFINITY};
 	struct bpf_object *obj = NULL;
 	char filename[256];
 	int error = 1;
 
 	snprintf(filename, sizeof(filename), "%s_kern.o", argv[0]);
+	setrlimit(RLIMIT_MEMLOCK, &r);
 
 	signal(SIGINT, err_exit);
 	signal(SIGTERM, err_exit);
@@ -309,7 +314,7 @@ int main(int argc, char **argv)
 	}
 
 	obj = bpf_object__open_file(filename, NULL);
-	if (libbpf_get_error(obj)) {
+	if (IS_ERR(obj)) {
 		printf("opening BPF object file failed\n");
 		obj = NULL;
 		goto cleanup;

@@ -45,7 +45,13 @@ static void __init imx6sl_init_late(void)
 
 static void __init imx6sl_init_machine(void)
 {
-	of_platform_default_populate(NULL, NULL, NULL);
+	struct device *parent;
+
+	parent = imx_soc_device_init();
+	if (parent == NULL)
+		pr_warn("failed to initialize soc device\n");
+
+	of_platform_default_populate(NULL, NULL, parent);
 
 	if (cpu_is_imx6sl())
 		imx6sl_fec_init();

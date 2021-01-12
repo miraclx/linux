@@ -76,7 +76,7 @@ Creating HFS filesystems
 
 The hfsutils package from Robert Leslie contains a program called
 hformat that can be used to create HFS filesystem. See
-<https://www.mars.org/home/rob/proj/hfs/> for details.
+<http://www.mars.org/home/rob/proj/hfs/> for details.
 
 
 Credits

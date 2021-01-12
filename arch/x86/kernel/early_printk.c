@@ -8,7 +8,6 @@
 #include <linux/pci_regs.h>
 #include <linux/pci_ids.h>
 #include <linux/errno.h>
-#include <linux/pgtable.h>
 #include <asm/io.h>
 #include <asm/processor.h>
 #include <asm/fcntl.h>
@@ -16,8 +15,12 @@
 #include <xen/hvc-console.h>
 #include <asm/pci-direct.h>
 #include <asm/fixmap.h>
+#include <asm/intel-mid.h>
+#include <asm/pgtable.h>
 #include <linux/usb/ehci_def.h>
 #include <linux/usb/xhci-dbgp.h>
+#include <linux/efi.h>
+#include <asm/efi.h>
 #include <asm/pci_x86.h>
 
 /* Simple VGA output */

@@ -32,6 +32,7 @@
 #include <asm/bootinfo.h>
 #include <asm/bootinfo-vme.h>
 #include <asm/byteorder.h>
+#include <asm/pgtable.h>
 #include <asm/setup.h>
 #include <asm/irq.h>
 #include <asm/traps.h>
@@ -43,7 +44,7 @@ extern t_bdid mvme_bdid;
 static MK48T08ptr_t volatile rtc = (MK48T08ptr_t)MVME_RTC_BASE;
 
 static void mvme16x_get_model(char *model);
-extern void mvme16x_sched_init(void);
+extern void mvme16x_sched_init(irq_handler_t handler);
 extern int mvme16x_hwclk (int, struct rtc_time *);
 extern void mvme16x_reset (void);
 
@@ -268,6 +269,7 @@ void __init config_mvme16x(void)
     char id[40];
     uint16_t brdno = be16_to_cpu(p->brdno);
 
+    mach_max_dma_address = 0xffffffff;
     mach_sched_init      = mvme16x_sched_init;
     mach_init_IRQ        = mvme16x_init_IRQ;
     mach_hwclk           = mvme16x_hwclk;
@@ -371,19 +373,20 @@ static u32 clk_total;
 
 static irqreturn_t mvme16x_timer_int (int irq, void *dev_id)
 {
+	irq_handler_t timer_routine = dev_id;
 	unsigned long flags;
 
 	local_irq_save(flags);
 	out_8(PCCTIC1, in_8(PCCTIC1) | PCCTIC1_INT_CLR);
 	out_8(PCCTOVR1, PCCTOVR1_OVR_CLR);
 	clk_total += PCC_TIMER_CYCLES;
-	legacy_timer_tick(1);
+	timer_routine(0, NULL);
 	local_irq_restore(flags);
 
 	return IRQ_HANDLED;
 }
 
-void mvme16x_sched_init(void)
+void mvme16x_sched_init (irq_handler_t timer_routine)
 {
     uint16_t brdno = be16_to_cpu(mvme_bdid.brdno);
     int irq;
@@ -394,7 +397,7 @@ void mvme16x_sched_init(void)
     out_8(PCCTOVR1, in_8(PCCTOVR1) | PCCTOVR1_TIC_EN | PCCTOVR1_COC_EN);
     out_8(PCCTIC1, PCCTIC1_INT_EN | 6);
     if (request_irq(MVME16x_IRQ_TIMER, mvme16x_timer_int, IRQF_TIMER, "timer",
-                    NULL))
+                    timer_routine))
 	panic ("Couldn't register timer int");
 
     clocksource_register_hz(&mvme16x_clk, PCC_TIMER_CLOCK_FREQ);

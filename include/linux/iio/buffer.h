@@ -11,6 +11,9 @@
 
 struct iio_buffer;
 
+void iio_buffer_set_attrs(struct iio_buffer *buffer,
+			 const struct attribute **attrs);
+
 int iio_push_to_buffers(struct iio_dev *indio_dev, const void *data);
 
 /**

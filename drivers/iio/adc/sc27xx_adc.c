@@ -533,6 +533,7 @@ static int sc27xx_adc_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	indio_dev->dev.parent = dev;
 	indio_dev->name = dev_name(dev);
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->info = &sc27xx_info;

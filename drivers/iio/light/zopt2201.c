@@ -19,8 +19,6 @@
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
 
-#include <asm/unaligned.h>
-
 #define ZOPT2201_DRV_NAME "zopt2201"
 
 /* Registers */
@@ -221,7 +219,7 @@ static int zopt2201_read(struct zopt2201_data *data, u8 reg)
 		goto fail;
 	mutex_unlock(&data->lock);
 
-	return get_unaligned_le24(&buf[0]);
+	return (buf[2] << 16) | (buf[1] << 8) | buf[0];
 
 fail:
 	mutex_unlock(&data->lock);
@@ -527,6 +525,7 @@ static int zopt2201_probe(struct i2c_client *client,
 	data->client = client;
 	mutex_init(&data->lock);
 
+	indio_dev->dev.parent = &client->dev;
 	indio_dev->info = &zopt2201_info;
 	indio_dev->channels = zopt2201_channels;
 	indio_dev->num_channels = ARRAY_SIZE(zopt2201_channels);

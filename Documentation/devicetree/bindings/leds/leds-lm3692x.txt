@@ -62,4 +62,4 @@ led-controller@36 {
 }
 
 For more product information please see the link below:
-https://www.ti.com/lit/ds/snvsa29/snvsa29.pdf
+http://www.ti.com/lit/ds/snvsa29/snvsa29.pdf

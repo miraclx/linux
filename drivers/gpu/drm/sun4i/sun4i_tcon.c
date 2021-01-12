@@ -195,7 +195,7 @@ void sun4i_tcon_set_status(struct sun4i_tcon *tcon,
 	switch (encoder->encoder_type) {
 	case DRM_MODE_ENCODER_LVDS:
 		is_lvds = true;
-		fallthrough;
+		/* Fallthrough */
 	case DRM_MODE_ENCODER_DSI:
 	case DRM_MODE_ENCODER_NONE:
 		channel = 0;
@@ -342,7 +342,7 @@ static void sun4i_tcon0_mode_set_dithering(struct sun4i_tcon *tcon,
 		/* R and B components are only 5 bits deep */
 		val |= SUN4I_TCON0_FRM_CTL_MODE_R;
 		val |= SUN4I_TCON0_FRM_CTL_MODE_B;
-		fallthrough;
+		/* Fall through */
 	case MEDIA_BUS_FMT_RGB666_1X18:
 	case MEDIA_BUS_FMT_RGB666_1X7X3_SPWG:
 		/* Fall through: enable dithering */
@@ -474,7 +474,9 @@ static void sun4i_tcon0_mode_set_lvds(struct sun4i_tcon *tcon,
 		     SUN4I_TCON0_BASIC2_V_TOTAL(mode->crtc_vtotal * 2) |
 		     SUN4I_TCON0_BASIC2_V_BACKPORCH(bp));
 
-	reg = SUN4I_TCON0_LVDS_IF_CLK_SEL_TCON0;
+	reg = SUN4I_TCON0_LVDS_IF_CLK_SEL_TCON0 |
+		SUN4I_TCON0_LVDS_IF_DATA_POL_NORMAL |
+		SUN4I_TCON0_LVDS_IF_CLK_POL_NORMAL;
 	if (sun4i_tcon_get_pixel_depth(encoder) == 24)
 		reg |= SUN4I_TCON0_LVDS_IF_BITWIDTH_24BITS;
 	else
@@ -810,8 +812,10 @@ static int sun4i_tcon_init_irq(struct device *dev,
 	int irq, ret;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(dev, "Couldn't retrieve the TCON interrupt\n");
 		return irq;
+	}
 
 	ret = devm_request_irq(dev, irq, sun4i_tcon_handler, 0,
 			       dev_name(dev), tcon);
@@ -823,7 +827,7 @@ static int sun4i_tcon_init_irq(struct device *dev,
 	return 0;
 }
 
-static const struct regmap_config sun4i_tcon_regmap_config = {
+static struct regmap_config sun4i_tcon_regmap_config = {
 	.reg_bits	= 32,
 	.val_bits	= 32,
 	.reg_stride	= 4,
@@ -1431,18 +1435,14 @@ static int sun8i_r40_tcon_tv_set_mux(struct sun4i_tcon *tcon,
 	if (IS_ENABLED(CONFIG_DRM_SUN8I_TCON_TOP) &&
 	    encoder->encoder_type == DRM_MODE_ENCODER_TMDS) {
 		ret = sun8i_tcon_top_set_hdmi_src(&pdev->dev, id);
-		if (ret) {
-			put_device(&pdev->dev);
+		if (ret)
 			return ret;
-		}
 	}
 
 	if (IS_ENABLED(CONFIG_DRM_SUN8I_TCON_TOP)) {
 		ret = sun8i_tcon_top_de_config(&pdev->dev, tcon->id, id);
-		if (ret) {
-			put_device(&pdev->dev);
+		if (ret)
 			return ret;
-		}
 	}
 
 	return 0;

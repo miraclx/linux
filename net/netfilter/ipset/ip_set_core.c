@@ -250,7 +250,22 @@ EXPORT_SYMBOL_GPL(ip_set_type_unregister);
 void *
 ip_set_alloc(size_t size)
 {
-	return kvzalloc(size, GFP_KERNEL_ACCOUNT);
+	void *members = NULL;
+
+	if (size < KMALLOC_MAX_SIZE)
+		members = kzalloc(size, GFP_KERNEL | __GFP_NOWARN);
+
+	if (members) {
+		pr_debug("%p: allocated with kmalloc\n", members);
+		return members;
+	}
+
+	members = vzalloc(size);
+	if (!members)
+		return NULL;
+	pr_debug("%p: allocated with vmalloc\n", members);
+
+	return members;
 }
 EXPORT_SYMBOL_GPL(ip_set_alloc);
 
@@ -271,7 +286,8 @@ flag_nested(const struct nlattr *nla)
 
 static const struct nla_policy ipaddr_policy[IPSET_ATTR_IPADDR_MAX + 1] = {
 	[IPSET_ATTR_IPADDR_IPV4]	= { .type = NLA_U32 },
-	[IPSET_ATTR_IPADDR_IPV6]	= NLA_POLICY_EXACT_LEN(sizeof(struct in6_addr)),
+	[IPSET_ATTR_IPADDR_IPV6]	= { .type = NLA_BINARY,
+					    .len = sizeof(struct in6_addr) },
 };
 
 int
@@ -444,8 +460,6 @@ ip_set_elem_len(struct ip_set *set, struct nlattr *tb[], size_t len,
 	for (id = 0; id < IPSET_EXT_ID_MAX; id++) {
 		if (!add_extension(id, cadt_flags, tb))
 			continue;
-		if (align < ip_set_extensions[id].align)
-			align = ip_set_extensions[id].align;
 		len = ALIGN(len, ip_set_extensions[id].align);
 		set->offset[id] = len;
 		set->extensions |= ip_set_extensions[id].type;
@@ -636,14 +650,13 @@ ip_set_match_extensions(struct ip_set *set, const struct ip_set_ext *ext,
 	if (SET_WITH_COUNTER(set)) {
 		struct ip_set_counter *counter = ext_counter(data, set);
 
-		ip_set_update_counter(counter, ext, flags);
-
 		if (flags & IPSET_FLAG_MATCH_COUNTERS &&
 		    !(ip_set_match_counter(ip_set_get_packets(counter),
 				mext->packets, mext->packets_op) &&
 		      ip_set_match_counter(ip_set_get_bytes(counter),
 				mext->bytes, mext->bytes_op)))
 			return false;
+		ip_set_update_counter(counter, ext, flags);
 	}
 	if (SET_WITH_SKBINFO(set))
 		ip_set_get_skbinfo(ext_skbinfo(data, set),
@@ -1109,8 +1122,6 @@ static int ip_set_create(struct net *net, struct sock *ctnl,
 		ret = -IPSET_ERR_PROTOCOL;
 		goto put_out;
 	}
-	/* Set create flags depending on the type revision */
-	set->flags |= set->type->create_flags[revision];
 
 	ret = set->type->create(net, set, tb, flags);
 	if (ret != 0)
@@ -1241,12 +1252,10 @@ static int ip_set_destroy(struct net *net, struct sock *ctnl,
 		/* Modified by ip_set_destroy() only, which is serialized */
 		inst->is_destroyed = false;
 	} else {
-		u32 flags = flag_exist(nlh);
 		s = find_set_and_id(inst, nla_data(attr[IPSET_ATTR_SETNAME]),
 				    &i);
 		if (!s) {
-			if (!(flags & IPSET_FLAG_EXIST))
-				ret = -ENOENT;
+			ret = -ENOENT;
 			goto out;
 		} else if (s->ref || s->ref_netlink) {
 			ret = -IPSET_ERR_BUSY;
@@ -1633,7 +1642,7 @@ dump_last:
 				goto next_set;
 			if (set->variant->uref)
 				set->variant->uref(set, cb, true);
-			fallthrough;
+			/* fall through */
 		default:
 			ret = set->variant->list(set, skb, cb);
 			if (!cb->args[IPSET_CB_ARG0])

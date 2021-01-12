@@ -228,7 +228,7 @@ static void bnx2i_setup_cmd_wqe_template(struct bnx2i_cmd *cmd)
 /**
  * bnx2i_bind_conn_to_iscsi_cid - bind conn structure to 'iscsi_cid'
  * @hba:	pointer to adapter instance
- * @bnx2i_conn:	pointer to iscsi connection
+ * @conn:	pointer to iscsi connection
  * @iscsi_cid:	iscsi context ID, range 0 - (MAX_CONN - 1)
  *
  * update iscsi cid table entry with connection pointer. This enables
@@ -463,6 +463,7 @@ static int bnx2i_alloc_bdt(struct bnx2i_hba *hba, struct iscsi_session *session,
  * bnx2i_destroy_cmd_pool - destroys iscsi command pool and release BD table
  * @hba:	adapter instance pointer
  * @session:	iscsi session pointer
+ * @cmd:	iscsi command structure
  */
 static void bnx2i_destroy_cmd_pool(struct bnx2i_hba *hba,
 				   struct iscsi_session *session)
@@ -581,7 +582,8 @@ static void bnx2i_free_mp_bdt(struct bnx2i_hba *hba)
 
 /**
  * bnx2i_drop_session - notifies iscsid of connection error.
- * @cls_session:	iscsi cls session pointer
+ * @hba:	adapter instance pointer
+ * @session:	iscsi session pointer
  *
  * This notifies iscsid that there is a error, so it can initiate
  * recovery.
@@ -1275,8 +1277,7 @@ static int bnx2i_task_xmit(struct iscsi_task *task)
 
 /**
  * bnx2i_session_create - create a new iscsi session
- * @ep:		pointer to iscsi endpoint
- * @cmds_max:		user specified maximum commands
+ * @cmds_max:		max commands supported
  * @qdepth:		scsi queue depth to support
  * @initial_cmdsn:	initial iscsi CMDSN to be used for this session
  *
@@ -1970,7 +1971,7 @@ static int bnx2i_ep_poll(struct iscsi_endpoint *ep, int timeout_ms)
 
 /**
  * bnx2i_ep_tcp_conn_active - check EP state transition
- * @bnx2i_ep:		endpoint pointer
+ * @ep:		endpoint pointer
  *
  * check if underlying TCP connection is active
  */
@@ -2013,9 +2014,9 @@ static int bnx2i_ep_tcp_conn_active(struct bnx2i_endpoint *bnx2i_ep)
 }
 
 
-/**
+/*
  * bnx2i_hw_ep_disconnect - executes TCP connection teardown process in the hw
- * @bnx2i_ep:		TCP connection (bnx2i endpoint) handle
+ * @ep:		TCP connection (bnx2i endpoint) handle
  *
  * executes  TCP connection teardown process
  */
@@ -2170,8 +2171,8 @@ out:
 
 /**
  * bnx2i_nl_set_path - ISCSI_UEVENT_PATH_UPDATE user message handler
- * @shost:	scsi host pointer
- * @params:	pointer to buffer containing iscsi path message
+ * @buf:	pointer to buffer containing iscsi path message
+ *
  */
 static int bnx2i_nl_set_path(struct Scsi_Host *shost, struct iscsi_path *params)
 {

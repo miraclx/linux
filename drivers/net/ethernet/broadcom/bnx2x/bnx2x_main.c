@@ -276,13 +276,6 @@ static const struct pci_device_id bnx2x_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, bnx2x_pci_tbl);
 
-const u32 dmae_reg_go_c[] = {
-	DMAE_REG_GO_C0, DMAE_REG_GO_C1, DMAE_REG_GO_C2, DMAE_REG_GO_C3,
-	DMAE_REG_GO_C4, DMAE_REG_GO_C5, DMAE_REG_GO_C6, DMAE_REG_GO_C7,
-	DMAE_REG_GO_C8, DMAE_REG_GO_C9, DMAE_REG_GO_C10, DMAE_REG_GO_C11,
-	DMAE_REG_GO_C12, DMAE_REG_GO_C13, DMAE_REG_GO_C14, DMAE_REG_GO_C15
-};
-
 /* Global resources for unloading a previously loaded device */
 #define BNX2X_PREV_WAIT_NEEDED 1
 static DEFINE_SEMAPHORE(bnx2x_prev_sem);
@@ -1176,18 +1169,9 @@ void bnx2x_panic_dump(struct bnx2x *bp, bool disable_int)
 	}
 #endif
 	if (IS_PF(bp)) {
-		int tmp_msg_en = bp->msg_enable;
-
 		bnx2x_fw_dump(bp);
-		bp->msg_enable |= NETIF_MSG_HW;
-		BNX2X_ERR("Idle check (1st round) ----------\n");
-		bnx2x_idle_chk(bp);
-		BNX2X_ERR("Idle check (2nd round) ----------\n");
-		bnx2x_idle_chk(bp);
-		bp->msg_enable = tmp_msg_en;
 		bnx2x_mc_assert(bp);
 	}
-
 	BNX2X_ERR("end crash dump -----------------\n");
 }
 
@@ -3086,9 +3070,9 @@ void bnx2x_func_init(struct bnx2x *bp, struct bnx2x_func_init_params *p)
 /**
  * bnx2x_get_common_flags - Return common flags
  *
- * @bp:		device handle
- * @fp:		queue handle
- * @zero_stats:	TRUE if statistics zeroing is needed
+ * @bp		device handle
+ * @fp		queue handle
+ * @zero_stats	TRUE if statistics zeroing is needed
  *
  * Return the flags that are common for the Tx-only and not normal connections.
  */
@@ -6313,11 +6297,11 @@ static void bnx2x_init_internal(struct bnx2x *bp, u32 load_code)
 	case FW_MSG_CODE_DRV_LOAD_COMMON:
 	case FW_MSG_CODE_DRV_LOAD_COMMON_CHIP:
 		bnx2x_init_internal_common(bp);
-		fallthrough;
+		/* no break */
 
 	case FW_MSG_CODE_DRV_LOAD_PORT:
 		/* nothing to do */
-		fallthrough;
+		/* no break */
 
 	case FW_MSG_CODE_DRV_LOAD_FUNCTION:
 		/* internal memory per function is
@@ -8600,11 +8584,11 @@ int bnx2x_set_int_mode(struct bnx2x *bp)
 			       bp->num_queues,
 			       1 + bp->num_cnic_queues);
 
-		fallthrough;
+		/* fall through */
 	case BNX2X_INT_MODE_MSI:
 		bnx2x_enable_msi(bp);
 
-		fallthrough;
+		/* fall through */
 	case BNX2X_INT_MODE_INTX:
 		bp->num_ethernet_queues = 1;
 		bp->num_queues = bp->num_ethernet_queues + bp->num_cnic_queues;
@@ -10152,6 +10136,7 @@ static int bnx2x_udp_port_update(struct bnx2x *bp)
 {
 	struct bnx2x_func_switch_update_params *switch_update_params;
 	struct bnx2x_func_state_params func_params = {NULL};
+	struct bnx2x_udp_tunnel *udp_tunnel;
 	u16 vxlan_port = 0, geneve_port = 0;
 	int rc;
 
@@ -10168,13 +10153,15 @@ static int bnx2x_udp_port_update(struct bnx2x *bp)
 	__set_bit(BNX2X_F_UPDATE_TUNNEL_CFG_CHNG,
 		  &switch_update_params->changes);
 
-	if (bp->udp_tunnel_ports[BNX2X_UDP_PORT_GENEVE]) {
-		geneve_port = bp->udp_tunnel_ports[BNX2X_UDP_PORT_GENEVE];
+	if (bp->udp_tunnel_ports[BNX2X_UDP_PORT_GENEVE].count) {
+		udp_tunnel = &bp->udp_tunnel_ports[BNX2X_UDP_PORT_GENEVE];
+		geneve_port = udp_tunnel->dst_port;
 		switch_update_params->geneve_dst_port = geneve_port;
 	}
 
-	if (bp->udp_tunnel_ports[BNX2X_UDP_PORT_VXLAN]) {
-		vxlan_port = bp->udp_tunnel_ports[BNX2X_UDP_PORT_VXLAN];
+	if (bp->udp_tunnel_ports[BNX2X_UDP_PORT_VXLAN].count) {
+		udp_tunnel = &bp->udp_tunnel_ports[BNX2X_UDP_PORT_VXLAN];
+		vxlan_port = udp_tunnel->dst_port;
 		switch_update_params->vxlan_dst_port = vxlan_port;
 	}
 
@@ -10194,26 +10181,93 @@ static int bnx2x_udp_port_update(struct bnx2x *bp)
 	return rc;
 }
 
-static int bnx2x_udp_tunnel_sync(struct net_device *netdev, unsigned int table)
+static void __bnx2x_add_udp_port(struct bnx2x *bp, u16 port,
+				 enum bnx2x_udp_port_type type)
 {
-	struct bnx2x *bp = netdev_priv(netdev);
-	struct udp_tunnel_info ti;
+	struct bnx2x_udp_tunnel *udp_port = &bp->udp_tunnel_ports[type];
 
-	udp_tunnel_nic_get_port(netdev, table, 0, &ti);
-	bp->udp_tunnel_ports[table] = be16_to_cpu(ti.port);
+	if (!netif_running(bp->dev) || !IS_PF(bp) || CHIP_IS_E1x(bp))
+		return;
 
-	return bnx2x_udp_port_update(bp);
+	if (udp_port->count && udp_port->dst_port == port) {
+		udp_port->count++;
+		return;
+	}
+
+	if (udp_port->count) {
+		DP(BNX2X_MSG_SP,
+		   "UDP tunnel [%d] -  destination port limit reached\n",
+		   type);
+		return;
+	}
+
+	udp_port->dst_port = port;
+	udp_port->count = 1;
+	bnx2x_schedule_sp_rtnl(bp, BNX2X_SP_RTNL_CHANGE_UDP_PORT, 0);
 }
 
-static const struct udp_tunnel_nic_info bnx2x_udp_tunnels = {
-	.sync_table	= bnx2x_udp_tunnel_sync,
-	.flags		= UDP_TUNNEL_NIC_INFO_MAY_SLEEP |
-			  UDP_TUNNEL_NIC_INFO_OPEN_ONLY,
-	.tables		= {
-		{ .n_entries = 1, .tunnel_types = UDP_TUNNEL_TYPE_VXLAN,  },
-		{ .n_entries = 1, .tunnel_types = UDP_TUNNEL_TYPE_GENEVE, },
-	},
-};
+static void __bnx2x_del_udp_port(struct bnx2x *bp, u16 port,
+				 enum bnx2x_udp_port_type type)
+{
+	struct bnx2x_udp_tunnel *udp_port = &bp->udp_tunnel_ports[type];
+
+	if (!IS_PF(bp) || CHIP_IS_E1x(bp))
+		return;
+
+	if (!udp_port->count || udp_port->dst_port != port) {
+		DP(BNX2X_MSG_SP, "Invalid UDP tunnel [%d] port\n",
+		   type);
+		return;
+	}
+
+	/* Remove reference, and make certain it's no longer in use */
+	udp_port->count--;
+	if (udp_port->count)
+		return;
+	udp_port->dst_port = 0;
+
+	if (netif_running(bp->dev))
+		bnx2x_schedule_sp_rtnl(bp, BNX2X_SP_RTNL_CHANGE_UDP_PORT, 0);
+	else
+		DP(BNX2X_MSG_SP, "Deleted UDP tunnel [%d] port %d\n",
+		   type, port);
+}
+
+static void bnx2x_udp_tunnel_add(struct net_device *netdev,
+				 struct udp_tunnel_info *ti)
+{
+	struct bnx2x *bp = netdev_priv(netdev);
+	u16 t_port = ntohs(ti->port);
+
+	switch (ti->type) {
+	case UDP_TUNNEL_TYPE_VXLAN:
+		__bnx2x_add_udp_port(bp, t_port, BNX2X_UDP_PORT_VXLAN);
+		break;
+	case UDP_TUNNEL_TYPE_GENEVE:
+		__bnx2x_add_udp_port(bp, t_port, BNX2X_UDP_PORT_GENEVE);
+		break;
+	default:
+		break;
+	}
+}
+
+static void bnx2x_udp_tunnel_del(struct net_device *netdev,
+				 struct udp_tunnel_info *ti)
+{
+	struct bnx2x *bp = netdev_priv(netdev);
+	u16 t_port = ntohs(ti->port);
+
+	switch (ti->type) {
+	case UDP_TUNNEL_TYPE_VXLAN:
+		__bnx2x_del_udp_port(bp, t_port, BNX2X_UDP_PORT_VXLAN);
+		break;
+	case UDP_TUNNEL_TYPE_GENEVE:
+		__bnx2x_del_udp_port(bp, t_port, BNX2X_UDP_PORT_GENEVE);
+		break;
+	default:
+		break;
+	}
+}
 
 static int bnx2x_close(struct net_device *dev);
 
@@ -10336,6 +10390,24 @@ sp_rtnl_not_reset:
 
 	if (test_and_clear_bit(BNX2X_SP_RTNL_UPDATE_SVID, &bp->sp_rtnl_state))
 		bnx2x_handle_update_svid_cmd(bp);
+
+	if (test_and_clear_bit(BNX2X_SP_RTNL_CHANGE_UDP_PORT,
+			       &bp->sp_rtnl_state)) {
+		if (bnx2x_udp_port_update(bp)) {
+			/* On error, forget configuration */
+			memset(bp->udp_tunnel_ports, 0,
+			       sizeof(struct bnx2x_udp_tunnel) *
+			       BNX2X_UDP_PORT_MAX);
+		} else {
+			/* Since we don't store additional port information,
+			 * if no ports are configured for any feature ask for
+			 * information about currently configured ports.
+			 */
+			if (!bp->udp_tunnel_ports[BNX2X_UDP_PORT_VXLAN].count &&
+			    !bp->udp_tunnel_ports[BNX2X_UDP_PORT_GENEVE].count)
+				udp_tunnel_get_rx_info(bp->dev);
+		}
+	}
 
 	/* work which needs rtnl lock not-taken (as it takes the lock itself and
 	 * can be called from other contexts as well)
@@ -12390,7 +12462,7 @@ static int bnx2x_init_bp(struct bnx2x *bp)
 	}
 
 	if (CHIP_IS_E1(bp))
-		bp->dropless_fc = false;
+		bp->dropless_fc = 0;
 	else
 		bp->dropless_fc = dropless_fc | bnx2x_get_dropless_info(bp);
 
@@ -12531,6 +12603,9 @@ static int bnx2x_open(struct net_device *dev)
 	rc = bnx2x_nic_load(bp, LOAD_OPEN);
 	if (rc)
 		return rc;
+
+	if (IS_PF(bp))
+		udp_tunnel_get_rx_info(dev);
 
 	return 0;
 }
@@ -13071,8 +13146,8 @@ static const struct net_device_ops bnx2x_netdev_ops = {
 	.ndo_get_phys_port_id	= bnx2x_get_phys_port_id,
 	.ndo_set_vf_link_state	= bnx2x_set_vf_link_state,
 	.ndo_features_check	= bnx2x_features_check,
-	.ndo_udp_tunnel_add	= udp_tunnel_nic_add_port,
-	.ndo_udp_tunnel_del	= udp_tunnel_nic_del_port,
+	.ndo_udp_tunnel_add	= bnx2x_udp_tunnel_add,
+	.ndo_udp_tunnel_del	= bnx2x_udp_tunnel_del,
 };
 
 static int bnx2x_set_coherency_mask(struct bnx2x *bp)
@@ -13267,9 +13342,6 @@ static int bnx2x_init_dev(struct bnx2x *bp, struct pci_dev *pdev,
 
 		dev->gso_partial_features = NETIF_F_GSO_GRE_CSUM |
 					    NETIF_F_GSO_UDP_TUNNEL_CSUM;
-
-		if (IS_PF(bp))
-			dev->udp_tunnel_nic_info = &bnx2x_udp_tunnels;
 	}
 
 	dev->vlan_features = NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM |
@@ -13591,8 +13663,8 @@ static int bnx2x_set_qm_cid_count(struct bnx2x *bp)
 
 /**
  * bnx2x_get_num_none_def_sbs - return the number of none default SBs
- * @pdev: pci device
- * @cnic_cnt: count
+ *
+ * @dev:	pci device
  *
  */
 static int bnx2x_get_num_non_def_sbs(struct pci_dev *pdev, int cnic_cnt)
@@ -14390,7 +14462,8 @@ static struct pci_driver bnx2x_pci_driver = {
 	.id_table    = bnx2x_pci_tbl,
 	.probe       = bnx2x_init_one,
 	.remove      = bnx2x_remove_one,
-	.driver.pm   = &bnx2x_pm_ops,
+	.suspend     = bnx2x_suspend,
+	.resume      = bnx2x_resume,
 	.err_handler = &bnx2x_err_handler,
 #ifdef CONFIG_BNX2X_SRIOV
 	.sriov_configure = bnx2x_sriov_configure,
@@ -14451,7 +14524,9 @@ module_exit(bnx2x_cleanup);
 
 /**
  * bnx2x_set_iscsi_eth_mac_addr - set iSCSI MAC(s).
+ *
  * @bp:		driver handle
+ * @set:	set or clear the CAM entry
  *
  * This function will wait until the ramrod completion returns.
  * Return 0 if success, -ENODEV if ramrod doesn't return.
@@ -15410,7 +15485,7 @@ static int bnx2x_hwtstamp_ioctl(struct bnx2x *bp, struct ifreq *ifr)
 		return -EINVAL;
 	}
 
-	bp->hwtstamp_ioctl_called = true;
+	bp->hwtstamp_ioctl_called = 1;
 	bp->tx_type = config.tx_type;
 	bp->rx_filter = config.rx_filter;
 
@@ -15492,7 +15567,7 @@ void bnx2x_init_ptp(struct bnx2x *bp)
 		bnx2x_init_cyclecounter(bp);
 		timecounter_init(&bp->timecounter, &bp->cyclecounter,
 				 ktime_to_ns(ktime_get_real()));
-		bp->timecounter_init_done = true;
+		bp->timecounter_init_done = 1;
 	}
 
 	DP(BNX2X_MSG_PTP, "PTP initialization ended successfully\n");

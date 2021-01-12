@@ -52,7 +52,8 @@ union ieee754dp ieee754dp_sqrt(union ieee754dp x)
 
 	case IEEE754_CLASS_DNORM:
 		DPDNORMX;
-		fallthrough;
+		/* fall through */
+
 	case IEEE754_CLASS_NORM:
 		if (xs) {
 			/* sqrt(-x) = Nan */
@@ -129,7 +130,7 @@ union ieee754dp ieee754dp_sqrt(union ieee754dp x)
 		switch (oldcsr.rm) {
 		case FPU_CSR_RU:
 			y.bits += 1;
-			fallthrough;
+			/* fall through */
 		case FPU_CSR_RN:
 			t.bits += 1;
 			break;

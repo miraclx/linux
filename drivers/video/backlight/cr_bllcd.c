@@ -59,18 +59,26 @@ struct cr_panel {
 
 static int cr_backlight_set_intensity(struct backlight_device *bd)
 {
+	int intensity = bd->props.brightness;
 	u32 addr = gpio_bar + CRVML_PANEL_PORT;
 	u32 cur = inl(addr);
 
-	if (backlight_get_brightness(bd) == 0) {
-		/* OFF */
-		cur |= CRVML_BACKLIGHT_OFF;
-		outl(cur, addr);
-	} else {
-		/* FULL ON */
+	if (bd->props.power == FB_BLANK_UNBLANK)
+		intensity = FB_BLANK_UNBLANK;
+	if (bd->props.fb_blank == FB_BLANK_UNBLANK)
+		intensity = FB_BLANK_UNBLANK;
+	if (bd->props.power == FB_BLANK_POWERDOWN)
+		intensity = FB_BLANK_POWERDOWN;
+	if (bd->props.fb_blank == FB_BLANK_POWERDOWN)
+		intensity = FB_BLANK_POWERDOWN;
+
+	if (intensity == FB_BLANK_UNBLANK) { /* FULL ON */
 		cur &= ~CRVML_BACKLIGHT_OFF;
 		outl(cur, addr);
-	}
+	} else if (intensity == FB_BLANK_POWERDOWN) { /* OFF */
+		cur |= CRVML_BACKLIGHT_OFF;
+		outl(cur, addr);
+	} /* anything else, don't bother */
 
 	return 0;
 }
@@ -82,9 +90,9 @@ static int cr_backlight_get_intensity(struct backlight_device *bd)
 	u8 intensity;
 
 	if (cur & CRVML_BACKLIGHT_OFF)
-		intensity = 0;
+		intensity = FB_BLANK_POWERDOWN;
 	else
-		intensity = 1;
+		intensity = FB_BLANK_UNBLANK;
 
 	return intensity;
 }

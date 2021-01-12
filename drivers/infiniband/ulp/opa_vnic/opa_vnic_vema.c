@@ -113,7 +113,7 @@ struct opa_vnic_vema_port {
 	struct mutex                    lock;
 };
 
-static int opa_vnic_vema_add_one(struct ib_device *device);
+static void opa_vnic_vema_add_one(struct ib_device *device);
 static void opa_vnic_vema_rem_one(struct ib_device *device,
 				  void *client_data);
 
@@ -547,6 +547,7 @@ static void vema_get(struct opa_vnic_vema_port *port,
 		vema_get_mac_entries(port, recvd_mad, rsp_mad);
 		break;
 	case OPA_EM_ATTR_IFACE_UCAST_MACS:
+		/* fall through */
 	case OPA_EM_ATTR_IFACE_MCAST_MACS:
 		vema_get_mac_list(port, recvd_mad, rsp_mad, attr_id);
 		break;
@@ -988,18 +989,18 @@ static void opa_vnic_ctrl_config_dev(struct opa_vnic_ctrl_port *cport, bool en)
  *
  * Allocate the vnic control port and initialize it.
  */
-static int opa_vnic_vema_add_one(struct ib_device *device)
+static void opa_vnic_vema_add_one(struct ib_device *device)
 {
 	struct opa_vnic_ctrl_port *cport;
 	int rc, size = sizeof(*cport);
 
 	if (!rdma_cap_opa_vnic(device))
-		return -EOPNOTSUPP;
+		return;
 
 	size += device->phys_port_cnt * sizeof(struct opa_vnic_vema_port);
 	cport = kzalloc(size, GFP_KERNEL);
 	if (!cport)
-		return -ENOMEM;
+		return;
 
 	cport->num_ports = device->phys_port_cnt;
 	cport->ibdev = device;
@@ -1011,7 +1012,6 @@ static int opa_vnic_vema_add_one(struct ib_device *device)
 
 	ib_set_client_data(device, &opa_vnic_client, cport);
 	opa_vnic_ctrl_config_dev(cport, true);
-	return 0;
 }
 
 /**
@@ -1025,6 +1025,9 @@ static void opa_vnic_vema_rem_one(struct ib_device *device,
 				  void *client_data)
 {
 	struct opa_vnic_ctrl_port *cport = client_data;
+
+	if (!cport)
+		return;
 
 	c_info("removing VNIC client\n");
 	opa_vnic_ctrl_config_dev(cport, false);

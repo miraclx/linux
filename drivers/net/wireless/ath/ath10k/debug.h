@@ -65,7 +65,7 @@ struct ath10k_pktlog_hdr {
 	__le16 log_type; /* Type of log information foll this header */
 	__le16 size; /* Size of variable length log information in bytes */
 	__le32 timestamp;
-	u8 payload[];
+	u8 payload[0];
 } __packed;
 
 /* FIXME: How to calculate the buffer size sanely? */
@@ -125,9 +125,6 @@ static inline int ath10k_debug_is_extd_tx_stats_enabled(struct ath10k *ar)
 {
 	return ar->debug.enable_extd_tx_stats;
 }
-
-int ath10k_debug_fw_stats_request(struct ath10k *ar);
-
 #else
 
 static inline int ath10k_debug_start(struct ath10k *ar)
@@ -191,11 +188,6 @@ static inline u32 ath10k_debug_get_fw_dbglog_level(struct ath10k *ar)
 }
 
 static inline int ath10k_debug_is_extd_tx_stats_enabled(struct ath10k *ar)
-{
-	return 0;
-}
-
-static inline int ath10k_debug_fw_stats_request(struct ath10k *ar)
 {
 	return 0;
 }

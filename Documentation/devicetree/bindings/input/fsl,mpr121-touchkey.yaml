@@ -31,7 +31,8 @@ properties:
   interrupts:
     maxItems: 1
 
-  vdd-supply: true
+  vdd-supply:
+    maxItems: 1
 
   linux,keycodes:
     minItems: 1
@@ -46,8 +47,6 @@ required:
   - reg
   - vdd-supply
   - linux,keycodes
-
-unevaluatedProperties: false
 
 examples:
   - |

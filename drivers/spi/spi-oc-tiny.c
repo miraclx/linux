@@ -2,7 +2,7 @@
 /*
  * OpenCores tiny SPI master driver
  *
- * https://opencores.org/project,tiny_spi
+ * http://opencores.org/project,tiny_spi
  *
  * Copyright (C) 2011 Thomas Chou <thomas@wytron.com.tw>
  *

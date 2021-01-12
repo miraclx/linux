@@ -212,12 +212,16 @@ EXPORT_SYMBOL(__scm_send);
 
 int put_cmsg(struct msghdr * msg, int level, int type, int len, void *data)
 {
+	struct cmsghdr __user *cm
+		= (__force struct cmsghdr __user *)msg->msg_control;
+	struct cmsghdr cmhdr;
 	int cmlen = CMSG_LEN(len);
+	int err;
 
-	if (msg->msg_flags & MSG_CMSG_COMPAT)
+	if (MSG_CMSG_COMPAT & msg->msg_flags)
 		return put_cmsg_compat(msg, level, type, len, data);
 
-	if (!msg->msg_control || msg->msg_controllen < sizeof(struct cmsghdr)) {
+	if (cm==NULL || msg->msg_controllen < sizeof(*cm)) {
 		msg->msg_flags |= MSG_CTRUNC;
 		return 0; /* XXX: return error? check spec. */
 	}
@@ -225,30 +229,23 @@ int put_cmsg(struct msghdr * msg, int level, int type, int len, void *data)
 		msg->msg_flags |= MSG_CTRUNC;
 		cmlen = msg->msg_controllen;
 	}
+	cmhdr.cmsg_level = level;
+	cmhdr.cmsg_type = type;
+	cmhdr.cmsg_len = cmlen;
 
-	if (msg->msg_control_is_user) {
-		struct cmsghdr __user *cm = msg->msg_control_user;
-		struct cmsghdr cmhdr;
-
-		cmhdr.cmsg_level = level;
-		cmhdr.cmsg_type = type;
-		cmhdr.cmsg_len = cmlen;
-		if (copy_to_user(cm, &cmhdr, sizeof cmhdr) ||
-		    copy_to_user(CMSG_USER_DATA(cm), data, cmlen - sizeof(*cm)))
-			return -EFAULT;
-	} else {
-		struct cmsghdr *cm = msg->msg_control;
-
-		cm->cmsg_level = level;
-		cm->cmsg_type = type;
-		cm->cmsg_len = cmlen;
-		memcpy(CMSG_DATA(cm), data, cmlen - sizeof(*cm));
-	}
-
-	cmlen = min(CMSG_SPACE(len), msg->msg_controllen);
+	err = -EFAULT;
+	if (copy_to_user(cm, &cmhdr, sizeof cmhdr))
+		goto out;
+	if (copy_to_user(CMSG_DATA(cm), data, cmlen - sizeof(struct cmsghdr)))
+		goto out;
+	cmlen = CMSG_SPACE(len);
+	if (msg->msg_controllen < cmlen)
+		cmlen = msg->msg_controllen;
 	msg->msg_control += cmlen;
 	msg->msg_controllen -= cmlen;
-	return 0;
+	err = 0;
+out:
+	return err;
 }
 EXPORT_SYMBOL(put_cmsg);
 
@@ -280,60 +277,78 @@ void put_cmsg_scm_timestamping(struct msghdr *msg, struct scm_timestamping_inter
 }
 EXPORT_SYMBOL(put_cmsg_scm_timestamping);
 
-static int scm_max_fds(struct msghdr *msg)
-{
-	if (msg->msg_controllen <= sizeof(struct cmsghdr))
-		return 0;
-	return (msg->msg_controllen - sizeof(struct cmsghdr)) / sizeof(int);
-}
-
 void scm_detach_fds(struct msghdr *msg, struct scm_cookie *scm)
 {
-	struct cmsghdr __user *cm =
-		(__force struct cmsghdr __user *)msg->msg_control;
-	unsigned int o_flags = (msg->msg_flags & MSG_CMSG_CLOEXEC) ? O_CLOEXEC : 0;
-	int fdmax = min_t(int, scm_max_fds(msg), scm->fp->count);
-	int __user *cmsg_data = CMSG_USER_DATA(cm);
+	struct cmsghdr __user *cm
+		= (__force struct cmsghdr __user*)msg->msg_control;
+
+	int fdmax = 0;
+	int fdnum = scm->fp->count;
+	struct file **fp = scm->fp->fp;
+	int __user *cmfptr;
 	int err = 0, i;
 
-	/* no use for FD passing from kernel space callers */
-	if (WARN_ON_ONCE(!msg->msg_control_is_user))
-		return;
-
-	if (msg->msg_flags & MSG_CMSG_COMPAT) {
+	if (MSG_CMSG_COMPAT & msg->msg_flags) {
 		scm_detach_fds_compat(msg, scm);
 		return;
 	}
 
-	for (i = 0; i < fdmax; i++) {
-		err = receive_fd_user(scm->fp->fp[i], cmsg_data + i, o_flags);
+	if (msg->msg_controllen > sizeof(struct cmsghdr))
+		fdmax = ((msg->msg_controllen - sizeof(struct cmsghdr))
+			 / sizeof(int));
+
+	if (fdnum < fdmax)
+		fdmax = fdnum;
+
+	for (i=0, cmfptr=(__force int __user *)CMSG_DATA(cm); i<fdmax;
+	     i++, cmfptr++)
+	{
+		struct socket *sock;
+		int new_fd;
+		err = security_file_receive(fp[i]);
+		if (err)
+			break;
+		err = get_unused_fd_flags(MSG_CMSG_CLOEXEC & msg->msg_flags
+					  ? O_CLOEXEC : 0);
 		if (err < 0)
 			break;
+		new_fd = err;
+		err = put_user(new_fd, cmfptr);
+		if (err) {
+			put_unused_fd(new_fd);
+			break;
+		}
+		/* Bump the usage count and install the file. */
+		sock = sock_from_file(fp[i], &err);
+		if (sock) {
+			sock_update_netprioidx(&sock->sk->sk_cgrp_data);
+			sock_update_classid(&sock->sk->sk_cgrp_data);
+		}
+		fd_install(new_fd, get_file(fp[i]));
 	}
 
-	if (i > 0) {
-		int cmlen = CMSG_LEN(i * sizeof(int));
-
+	if (i > 0)
+	{
+		int cmlen = CMSG_LEN(i*sizeof(int));
 		err = put_user(SOL_SOCKET, &cm->cmsg_level);
 		if (!err)
 			err = put_user(SCM_RIGHTS, &cm->cmsg_type);
 		if (!err)
 			err = put_user(cmlen, &cm->cmsg_len);
 		if (!err) {
-			cmlen = CMSG_SPACE(i * sizeof(int));
+			cmlen = CMSG_SPACE(i*sizeof(int));
 			if (msg->msg_controllen < cmlen)
 				cmlen = msg->msg_controllen;
 			msg->msg_control += cmlen;
 			msg->msg_controllen -= cmlen;
 		}
 	}
-
-	if (i < scm->fp->count || (scm->fp->count && fdmax <= 0))
+	if (i < fdnum || (fdnum && fdmax <= 0))
 		msg->msg_flags |= MSG_CTRUNC;
 
 	/*
-	 * All of the files that fit in the message have had their usage counts
-	 * incremented, so we just free the list.
+	 * All of the files that fit in the message have had their
+	 * usage counts incremented, so we just free the list.
 	 */
 	__scm_destroy(scm);
 }

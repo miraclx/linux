@@ -395,7 +395,6 @@ END_MMU_FTR_SECTION_IFSET(MMU_FTR_USE_HIGH_BATS)
 
 	li	r3,0
 	blr
-_ASM_NOKPROBE_SYMBOL(swsusp_arch_resume)
 
 /* FIXME:This construct is actually not useful since we don't shut
  * down the instruction MMU, we could just flip back MSR-DR on.
@@ -407,5 +406,4 @@ turn_on_mmu:
 	sync
 	isync
 	rfi
-_ASM_NOKPROBE_SYMBOL(turn_on_mmu)
 

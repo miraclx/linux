@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 Nuvoton Technology corporation.
 
-#include <linux/bits.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/device.h>
@@ -178,6 +177,7 @@ enum {
 #define MAP_SIZE_16MB			0x1000000
 #define MAP_SIZE_8MB			0x800000
 
+#define NUM_BITS_IN_BYTE		8
 #define FIU_DRD_MAX_DUMMY_NUMBER	3
 #define NPCM_MAX_CHIP_NUM		4
 #define CHUNK_SIZE			16
@@ -252,8 +252,8 @@ static void npcm_fiu_set_drd(struct npcm_fiu_spi *fiu,
 	fiu->drd_op.addr.buswidth = op->addr.buswidth;
 	regmap_update_bits(fiu->regmap, NPCM_FIU_DRD_CFG,
 			   NPCM_FIU_DRD_CFG_DBW,
-			   ((op->dummy.nbytes * ilog2(op->addr.buswidth)) / BITS_PER_BYTE)
-			   << NPCM_FIU_DRD_DBW_SHIFT);
+			   ((op->dummy.nbytes * ilog2(op->addr.buswidth))
+			    / NUM_BITS_IN_BYTE) << NPCM_FIU_DRD_DBW_SHIFT);
 	fiu->drd_op.dummy.nbytes = op->dummy.nbytes;
 	regmap_update_bits(fiu->regmap, NPCM_FIU_DRD_CFG,
 			   NPCM_FIU_DRD_CFG_RDCMD, op->cmd.opcode);
@@ -677,9 +677,10 @@ static int npcm_fiu_probe(struct platform_device *pdev)
 	struct npcm_fiu_spi *fiu;
 	void __iomem *regbase;
 	struct resource *res;
-	int id, ret;
+	int ret;
+	int id;
 
-	ctrl = devm_spi_alloc_master(dev, sizeof(*fiu));
+	ctrl = spi_alloc_master(dev, sizeof(*fiu));
 	if (!ctrl)
 		return -ENOMEM;
 
@@ -737,9 +738,9 @@ static int npcm_fiu_probe(struct platform_device *pdev)
 
 	ret = devm_spi_register_master(dev, ctrl);
 	if (ret)
-		clk_disable_unprepare(fiu->clk);
+		return ret;
 
-	return ret;
+	return 0;
 }
 
 static int npcm_fiu_remove(struct platform_device *pdev)

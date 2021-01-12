@@ -87,19 +87,19 @@ struct virtio_net_config {
 	/* The config defining mac address (if VIRTIO_NET_F_MAC) */
 	__u8 mac[ETH_ALEN];
 	/* See VIRTIO_NET_F_STATUS and VIRTIO_NET_S_* above */
-	__virtio16 status;
+	__u16 status;
 	/* Maximum number of each of transmit and receive queues;
 	 * see VIRTIO_NET_F_MQ and VIRTIO_NET_CTRL_MQ.
 	 * Legal values are between 1 and 0x8000
 	 */
-	__virtio16 max_virtqueue_pairs;
+	__u16 max_virtqueue_pairs;
 	/* Default maximum transmit unit advice */
-	__virtio16 mtu;
+	__u16 mtu;
 	/*
 	 * speed, in units of 1Mb. All values 0 to INT_MAX are legal.
 	 * Any other value stands for unknown.
 	 */
-	__le32 speed;
+	__u32 speed;
 	/*
 	 * 0x00 - half duplex
 	 * 0x01 - full duplex

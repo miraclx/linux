@@ -134,7 +134,8 @@ extern void rtw_free_cmd_priv(struct cmd_priv *pcmdpriv);
 extern void rtw_free_evt_priv(struct evt_priv *pevtpriv);
 extern void rtw_evt_notify_isr(struct evt_priv *pevtpriv);
 
-enum rtw_drvextra_cmd_id {
+enum rtw_drvextra_cmd_id
+{
 	NONE_WK_CID,
 	DYNAMIC_CHK_WK_CID,
 	DM_CTRL_WK_CID,
@@ -158,7 +159,8 @@ enum rtw_drvextra_cmd_id {
 	MAX_WK_CID
 };
 
-enum LPS_CTRL_TYPE {
+enum LPS_CTRL_TYPE
+{
 	LPS_CTRL_SCAN = 0,
 	LPS_CTRL_JOINBSS = 1,
 	LPS_CTRL_CONNECT = 2,
@@ -528,7 +530,8 @@ struct getrfintfs_parm {
 };
 
 
-struct Tx_Beacon_param {
+struct Tx_Beacon_param
+{
 	struct wlan_bssid_ex network;
 };
 
@@ -751,7 +754,8 @@ struct setassocrspextraie_parm {
 };
 
 
-struct addBaReq_parm {
+struct addBaReq_parm
+{
 	unsigned int tid;
 	u8 addr[ETH_ALEN];
 };
@@ -764,28 +768,33 @@ struct set_ch_parm {
 };
 
 /*H2C Handler index: 59 */
-struct SetChannelPlan_param {
+struct SetChannelPlan_param
+{
 	u8 channel_plan;
 };
 
 /*H2C Handler index: 60 */
-struct LedBlink_param {
+struct LedBlink_param
+{
 	void *pLed;
 };
 
 /*H2C Handler index: 61 */
-struct SetChannelSwitch_param {
+struct SetChannelSwitch_param
+{
 	u8 new_ch_no;
 };
 
 /*H2C Handler index: 62 */
-struct TDLSoption_param {
+struct TDLSoption_param
+{
 	u8 addr[ETH_ALEN];
 	u8 option;
 };
 
 /*H2C Handler index: 64 */
-struct RunInThread_param {
+struct RunInThread_param
+{
 	void (*func)(void*);
 	void *context;
 };
@@ -872,7 +881,8 @@ struct _cmd_callback {
 	void (*callback)(struct adapter  *padapter, struct cmd_obj *cmd);
 };
 
-enum rtw_h2c_cmd {
+enum rtw_h2c_cmd
+{
 	GEN_CMD_CODE(_Read_MACREG),	/*0*/
 	GEN_CMD_CODE(_Write_MACREG),
 	GEN_CMD_CODE(_Read_BBREG),

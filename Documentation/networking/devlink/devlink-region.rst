@@ -14,10 +14,6 @@ Region snapshots are collected by the driver, and can be accessed via read
 or dump commands. This allows future analysis on the created snapshots.
 Regions may optionally support triggering snapshots on demand.
 
-Snapshot identifiers are scoped to the devlink instance, not a region.
-All snapshots with the same snapshot id within a devlink instance
-correspond to the same event.
-
 The major benefit to creating a region is to provide access to internal
 address regions that are otherwise inaccessible to the user.
 
@@ -27,9 +23,7 @@ states, but see also :doc:`devlink-health`
 Regions may optionally support capturing a snapshot on demand via the
 ``DEVLINK_CMD_REGION_NEW`` netlink message. A driver wishing to allow
 requested snapshots must implement the ``.snapshot`` callback for the region
-in its ``devlink_region_ops`` structure. If snapshot id is not set in
-the ``DEVLINK_CMD_REGION_NEW`` request kernel will allocate one and send
-the snapshot information to user space.
+in its ``devlink_region_ops`` structure.
 
 example usage
 -------------
@@ -51,8 +45,7 @@ example usage
     $ devlink region del pci/0000:00:05.0/cr-space snapshot 1
 
     # Request an immediate snapshot, if supported by the region
-    $ devlink region new pci/0000:00:05.0/cr-space
-    pci/0000:00:05.0/cr-space: snapshot 5
+    $ devlink region new pci/0000:00:05.0/cr-space snapshot 5
 
     # Dump a snapshot:
     $ devlink region dump pci/0000:00:05.0/fw-health snapshot 1

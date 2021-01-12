@@ -145,6 +145,7 @@
 };
 
 &emmc {
+	bus-width = <8>;
 	cap-mmc-highspeed;
 	mmc-hs200-1_8v;
 	non-removable;
@@ -498,6 +499,7 @@
 };
 
 &sdmmc {
+	bus-width = <4>;
 	cap-mmc-highspeed;
 	cap-sd-highspeed;
 	card-detect-delay = <800>;
@@ -511,6 +513,7 @@
 };
 
 &sdio {
+	bus-width = <4>;
 	cap-sd-highspeed;
 	keep-power-in-suspend;
 	non-removable;

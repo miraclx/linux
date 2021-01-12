@@ -112,12 +112,9 @@ uint8_t mod_vmid_get_for_ptb(struct mod_vmid *mod_vmid, uint64_t ptb)
 			evict_vmids(core_vmid);
 
 		vmid = get_next_available_vmid(core_vmid);
-		if (vmid != -1) {
-			add_ptb_to_table(core_vmid, vmid, ptb);
+		add_ptb_to_table(core_vmid, vmid, ptb);
 
-			dc_setup_vm_context(core_vmid->dc, &va_config, vmid);
-		} else
-			ASSERT(0);
+		dc_setup_vm_context(core_vmid->dc, &va_config, vmid);
 	}
 
 	return vmid;

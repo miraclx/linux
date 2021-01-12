@@ -45,8 +45,7 @@ static struct dmaengine_buffer *iio_buffer_to_dmaengine_buffer(
 	return container_of(buffer, struct dmaengine_buffer, queue.buffer);
 }
 
-static void iio_dmaengine_buffer_block_done(void *data,
-		const struct dmaengine_result *result)
+static void iio_dmaengine_buffer_block_done(void *data)
 {
 	struct iio_dma_buffer_block *block = data;
 	unsigned long flags;
@@ -54,7 +53,6 @@ static void iio_dmaengine_buffer_block_done(void *data,
 	spin_lock_irqsave(&block->queue->list_lock, flags);
 	list_del(&block->head);
 	spin_unlock_irqrestore(&block->queue->list_lock, flags);
-	block->bytes_used -= result->residue;
 	iio_dma_buffer_block_done(block);
 }
 
@@ -76,7 +74,7 @@ static int iio_dmaengine_buffer_submit_block(struct iio_dma_buffer_queue *queue,
 	if (!desc)
 		return -ENOMEM;
 
-	desc->callback_result = iio_dmaengine_buffer_block_done;
+	desc->callback = iio_dmaengine_buffer_block_done;
 	desc->callback_param = block;
 
 	cookie = dmaengine_submit(desc);
@@ -136,7 +134,7 @@ static ssize_t iio_dmaengine_buffer_get_length_align(struct device *dev,
 	struct dmaengine_buffer *dmaengine_buffer =
 		iio_buffer_to_dmaengine_buffer(indio_dev->buffer);
 
-	return sprintf(buf, "%zu\n", dmaengine_buffer->align);
+	return sprintf(buf, "%u\n", dmaengine_buffer->align);
 }
 
 static IIO_DEVICE_ATTR(length_align_bytes, 0444,
@@ -159,7 +157,7 @@ static const struct attribute *iio_dmaengine_buffer_attrs[] = {
  * Once done using the buffer iio_dmaengine_buffer_free() should be used to
  * release it.
  */
-static struct iio_buffer *iio_dmaengine_buffer_alloc(struct device *dev,
+struct iio_buffer *iio_dmaengine_buffer_alloc(struct device *dev,
 	const char *channel)
 {
 	struct dmaengine_buffer *dmaengine_buffer;
@@ -200,8 +198,9 @@ static struct iio_buffer *iio_dmaengine_buffer_alloc(struct device *dev,
 
 	iio_dma_buffer_init(&dmaengine_buffer->queue, chan->device->dev,
 		&iio_dmaengine_default_ops);
+	iio_buffer_set_attrs(&dmaengine_buffer->queue.buffer,
+		iio_dmaengine_buffer_attrs);
 
-	dmaengine_buffer->queue.buffer.attrs = iio_dmaengine_buffer_attrs;
 	dmaengine_buffer->queue.buffer.access = &iio_dmaengine_buffer_ops;
 
 	return &dmaengine_buffer->queue.buffer;
@@ -210,6 +209,7 @@ err_free:
 	kfree(dmaengine_buffer);
 	return ERR_PTR(ret);
 }
+EXPORT_SYMBOL(iio_dmaengine_buffer_alloc);
 
 /**
  * iio_dmaengine_buffer_free() - Free dmaengine buffer
@@ -217,7 +217,7 @@ err_free:
  *
  * Frees a buffer previously allocated with iio_dmaengine_buffer_alloc().
  */
-static void iio_dmaengine_buffer_free(struct iio_buffer *buffer)
+void iio_dmaengine_buffer_free(struct iio_buffer *buffer)
 {
 	struct dmaengine_buffer *dmaengine_buffer =
 		iio_buffer_to_dmaengine_buffer(buffer);
@@ -227,45 +227,7 @@ static void iio_dmaengine_buffer_free(struct iio_buffer *buffer)
 
 	iio_buffer_put(buffer);
 }
-
-static void __devm_iio_dmaengine_buffer_free(struct device *dev, void *res)
-{
-	iio_dmaengine_buffer_free(*(struct iio_buffer **)res);
-}
-
-/**
- * devm_iio_dmaengine_buffer_alloc() - Resource-managed iio_dmaengine_buffer_alloc()
- * @dev: Parent device for the buffer
- * @channel: DMA channel name, typically "rx".
- *
- * This allocates a new IIO buffer which internally uses the DMAengine framework
- * to perform its transfers. The parent device will be used to request the DMA
- * channel.
- *
- * The buffer will be automatically de-allocated once the device gets destroyed.
- */
-struct iio_buffer *devm_iio_dmaengine_buffer_alloc(struct device *dev,
-	const char *channel)
-{
-	struct iio_buffer **bufferp, *buffer;
-
-	bufferp = devres_alloc(__devm_iio_dmaengine_buffer_free,
-			       sizeof(*bufferp), GFP_KERNEL);
-	if (!bufferp)
-		return ERR_PTR(-ENOMEM);
-
-	buffer = iio_dmaengine_buffer_alloc(dev, channel);
-	if (IS_ERR(buffer)) {
-		devres_free(bufferp);
-		return buffer;
-	}
-
-	*bufferp = buffer;
-	devres_add(dev, bufferp);
-
-	return buffer;
-}
-EXPORT_SYMBOL_GPL(devm_iio_dmaengine_buffer_alloc);
+EXPORT_SYMBOL_GPL(iio_dmaengine_buffer_free);
 
 MODULE_AUTHOR("Lars-Peter Clausen <lars@metafoo.de>");
 MODULE_DESCRIPTION("DMA buffer for the IIO framework");

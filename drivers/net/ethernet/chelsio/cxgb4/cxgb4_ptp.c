@@ -194,7 +194,6 @@ int cxgb4_ptp_redirect_rx_packet(struct adapter *adapter, struct port_info *pi)
 }
 
 /**
- * cxgb4_ptp_adjfreq - Adjust frequency of PHC cycle counter
  * @ptp: ptp clock structure
  * @ppb: Desired frequency change in parts per billion
  *
@@ -230,7 +229,7 @@ static int cxgb4_ptp_adjfreq(struct ptp_clock_info *ptp, s32 ppb)
 
 /**
  * cxgb4_ptp_fineadjtime - Shift the time of the hardware clock
- * @adapter: board private structure
+ * @ptp: ptp clock structure
  * @delta: Desired change in nanoseconds
  *
  * Adjust the timer by resetting the timecounter structure.

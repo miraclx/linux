@@ -67,7 +67,8 @@ properties:
               otherwise it's continuous.
 
           link-frequencies:
-            $ref: /schemas/types.yaml#/definitions/uint64-array
+            allOf:
+              - $ref: /schemas/types.yaml#/definitions/uint64-array
             description:
               Allowed data bus frequencies.
 

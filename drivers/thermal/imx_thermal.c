@@ -197,6 +197,7 @@ struct imx_thermal_data {
 	struct cpufreq_policy *policy;
 	struct thermal_zone_device *tz;
 	struct thermal_cooling_device *cdev;
+	enum thermal_device_mode mode;
 	struct regmap *tempmon;
 	u32 c1, c2; /* See formula in imx_init_calib() */
 	int temp_passive;
@@ -252,11 +253,10 @@ static int imx_get_temp(struct thermal_zone_device *tz, int *temp)
 	const struct thermal_soc_data *soc_data = data->socdata;
 	struct regmap *map = data->tempmon;
 	unsigned int n_meas;
-	bool wait, run_measurement;
+	bool wait;
 	u32 val;
 
-	run_measurement = !data->irq_enabled;
-	if (!run_measurement) {
+	if (data->mode == THERMAL_DEVICE_ENABLED) {
 		/* Check if a measurement is currently in progress */
 		regmap_read(map, soc_data->temp_data, &val);
 		wait = !(val & soc_data->temp_valid_mask);
@@ -283,7 +283,7 @@ static int imx_get_temp(struct thermal_zone_device *tz, int *temp)
 
 	regmap_read(map, soc_data->temp_data, &val);
 
-	if (run_measurement) {
+	if (data->mode != THERMAL_DEVICE_ENABLED) {
 		regmap_write(map, soc_data->sensor_ctrl + REG_CLR,
 			     soc_data->measure_temp_mask);
 		regmap_write(map, soc_data->sensor_ctrl + REG_SET,
@@ -331,14 +331,27 @@ static int imx_get_temp(struct thermal_zone_device *tz, int *temp)
 	return 0;
 }
 
-static int imx_change_mode(struct thermal_zone_device *tz,
-			   enum thermal_device_mode mode)
+static int imx_get_mode(struct thermal_zone_device *tz,
+			enum thermal_device_mode *mode)
+{
+	struct imx_thermal_data *data = tz->devdata;
+
+	*mode = data->mode;
+
+	return 0;
+}
+
+static int imx_set_mode(struct thermal_zone_device *tz,
+			enum thermal_device_mode mode)
 {
 	struct imx_thermal_data *data = tz->devdata;
 	struct regmap *map = data->tempmon;
 	const struct thermal_soc_data *soc_data = data->socdata;
 
 	if (mode == THERMAL_DEVICE_ENABLED) {
+		tz->polling_delay = IMX_POLLING_DELAY;
+		tz->passive_delay = IMX_PASSIVE_DELAY;
+
 		regmap_write(map, soc_data->sensor_ctrl + REG_CLR,
 			     soc_data->power_down_mask);
 		regmap_write(map, soc_data->sensor_ctrl + REG_SET,
@@ -354,11 +367,17 @@ static int imx_change_mode(struct thermal_zone_device *tz,
 		regmap_write(map, soc_data->sensor_ctrl + REG_SET,
 			     soc_data->power_down_mask);
 
+		tz->polling_delay = 0;
+		tz->passive_delay = 0;
+
 		if (data->irq_enabled) {
 			disable_irq(data->irq);
 			data->irq_enabled = false;
 		}
 	}
+
+	data->mode = mode;
+	thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
 
 	return 0;
 }
@@ -448,7 +467,8 @@ static struct thermal_zone_device_ops imx_tz_ops = {
 	.bind = imx_bind,
 	.unbind = imx_unbind,
 	.get_temp = imx_get_temp,
-	.change_mode = imx_change_mode,
+	.get_mode = imx_get_mode,
+	.set_mode = imx_set_mode,
 	.get_trip_type = imx_get_trip_type,
 	.get_trip_temp = imx_get_trip_temp,
 	.get_crit_temp = imx_get_crit_temp,
@@ -629,7 +649,7 @@ MODULE_DEVICE_TABLE(of, of_imx_thermal_match);
 static int imx_thermal_register_legacy_cooling(struct imx_thermal_data *data)
 {
 	struct device_node *np;
-	int ret = 0;
+	int ret;
 
 	data->policy = cpufreq_cpu_get(0);
 	if (!data->policy) {
@@ -644,12 +664,11 @@ static int imx_thermal_register_legacy_cooling(struct imx_thermal_data *data)
 		if (IS_ERR(data->cdev)) {
 			ret = PTR_ERR(data->cdev);
 			cpufreq_cpu_put(data->policy);
+			return ret;
 		}
 	}
 
-	of_node_put(np);
-
-	return ret;
+	return 0;
 }
 
 static void imx_thermal_unregister_legacy_cooling(struct imx_thermal_data *data)
@@ -716,9 +735,14 @@ static int imx_thermal_probe(struct platform_device *pdev)
 
 	if (of_find_property(pdev->dev.of_node, "nvmem-cells", NULL)) {
 		ret = imx_init_from_nvmem_cells(pdev);
-		if (ret)
-			return dev_err_probe(&pdev->dev, ret,
-					     "failed to init from nvmem\n");
+		if (ret) {
+			if (ret == -EPROBE_DEFER)
+				return ret;
+
+			dev_err(&pdev->dev, "failed to init from nvmem: %d\n",
+				ret);
+			return ret;
+		}
 	} else {
 		ret = imx_init_from_tempmon_data(pdev);
 		if (ret) {
@@ -741,9 +765,14 @@ static int imx_thermal_probe(struct platform_device *pdev)
 		     data->socdata->power_down_mask);
 
 	ret = imx_thermal_register_legacy_cooling(data);
-	if (ret)
-		return dev_err_probe(&pdev->dev, ret,
-				     "failed to register cpufreq cooling device\n");
+	if (ret) {
+		if (ret == -EPROBE_DEFER)
+			return ret;
+
+		dev_err(&pdev->dev,
+			"failed to register cpufreq cooling device: %d\n", ret);
+		return ret;
+	}
 
 	data->thermal_clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(data->thermal_clk)) {
@@ -802,9 +831,7 @@ static int imx_thermal_probe(struct platform_device *pdev)
 		     data->socdata->measure_temp_mask);
 
 	data->irq_enabled = true;
-	ret = thermal_zone_device_enable(data->tz);
-	if (ret)
-		goto thermal_zone_unregister;
+	data->mode = THERMAL_DEVICE_ENABLED;
 
 	ret = devm_request_threaded_irq(&pdev->dev, data->irq,
 			imx_thermal_alarm_irq, imx_thermal_alarm_irq_thread,
@@ -846,18 +873,19 @@ static int imx_thermal_remove(struct platform_device *pdev)
 static int __maybe_unused imx_thermal_suspend(struct device *dev)
 {
 	struct imx_thermal_data *data = dev_get_drvdata(dev);
-	int ret;
+	struct regmap *map = data->tempmon;
 
 	/*
 	 * Need to disable thermal sensor, otherwise, when thermal core
 	 * try to get temperature before thermal sensor resume, a wrong
 	 * temperature will be read as the thermal sensor is powered
-	 * down. This is done in change_mode() operation called from
-	 * thermal_zone_device_disable()
+	 * down.
 	 */
-	ret = thermal_zone_device_disable(data->tz);
-	if (ret)
-		return ret;
+	regmap_write(map, data->socdata->sensor_ctrl + REG_CLR,
+		     data->socdata->measure_temp_mask);
+	regmap_write(map, data->socdata->sensor_ctrl + REG_SET,
+		     data->socdata->power_down_mask);
+	data->mode = THERMAL_DEVICE_DISABLED;
 	clk_disable_unprepare(data->thermal_clk);
 
 	return 0;
@@ -866,15 +894,18 @@ static int __maybe_unused imx_thermal_suspend(struct device *dev)
 static int __maybe_unused imx_thermal_resume(struct device *dev)
 {
 	struct imx_thermal_data *data = dev_get_drvdata(dev);
+	struct regmap *map = data->tempmon;
 	int ret;
 
 	ret = clk_prepare_enable(data->thermal_clk);
 	if (ret)
 		return ret;
 	/* Enabled thermal sensor after resume */
-	ret = thermal_zone_device_enable(data->tz);
-	if (ret)
-		return ret;
+	regmap_write(map, data->socdata->sensor_ctrl + REG_CLR,
+		     data->socdata->power_down_mask);
+	regmap_write(map, data->socdata->sensor_ctrl + REG_SET,
+		     data->socdata->measure_temp_mask);
+	data->mode = THERMAL_DEVICE_ENABLED;
 
 	return 0;
 }

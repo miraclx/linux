@@ -6,7 +6,6 @@
 #include <linux/clk/tegra.h>
 #include <linux/genalloc.h>
 #include <linux/mailbox_client.h>
-#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
@@ -515,10 +514,10 @@ bool tegra_bpmp_mrq_is_supported(struct tegra_bpmp *bpmp, unsigned int mrq)
 			.size = sizeof(resp),
 		},
 	};
-	int err;
+	int ret;
 
-	err = tegra_bpmp_transfer(bpmp, &msg);
-	if (err || msg.rx.ret)
+	ret = tegra_bpmp_transfer(bpmp, &msg);
+	if (ret || msg.rx.ret)
 		return false;
 
 	return resp.status == 0;
@@ -856,8 +855,7 @@ static const struct tegra_bpmp_soc tegra210_soc = {
 
 static const struct of_device_id tegra_bpmp_match[] = {
 #if IS_ENABLED(CONFIG_ARCH_TEGRA_186_SOC) || \
-    IS_ENABLED(CONFIG_ARCH_TEGRA_194_SOC) || \
-    IS_ENABLED(CONFIG_ARCH_TEGRA_234_SOC)
+    IS_ENABLED(CONFIG_ARCH_TEGRA_194_SOC)
 	{ .compatible = "nvidia,tegra186-bpmp", .data = &tegra186_soc },
 #endif
 #if IS_ENABLED(CONFIG_ARCH_TEGRA_210_SOC)
@@ -871,8 +869,12 @@ static struct platform_driver tegra_bpmp_driver = {
 		.name = "tegra-bpmp",
 		.of_match_table = tegra_bpmp_match,
 		.pm = &tegra_bpmp_pm_ops,
-		.suppress_bind_attrs = true,
 	},
 	.probe = tegra_bpmp_probe,
 };
-builtin_platform_driver(tegra_bpmp_driver);
+
+static int __init tegra_bpmp_init(void)
+{
+	return platform_driver_register(&tegra_bpmp_driver);
+}
+core_initcall(tegra_bpmp_init);

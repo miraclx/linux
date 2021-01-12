@@ -607,7 +607,7 @@ static void pvscsi_complete_request(struct pvscsi_adapter *adapter,
 		case BTSTAT_TAGREJECT:
 		case BTSTAT_BADMSG:
 			cmd->result = (DRIVER_INVALID << 24);
-			fallthrough;
+			/* fall through */
 
 		case BTSTAT_HAHARDWARE:
 		case BTSTAT_INVPHASE:
@@ -908,7 +908,7 @@ static int pvscsi_host_reset(struct scsi_cmnd *cmd)
 	use_msg = adapter->use_msg;
 
 	if (use_msg) {
-		adapter->use_msg = false;
+		adapter->use_msg = 0;
 		spin_unlock_irqrestore(&adapter->hw_lock, flags);
 
 		/*

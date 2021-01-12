@@ -647,7 +647,7 @@ static int doc_ecc_bch_fix_data(struct docg3 *docg3, void *buf, u8 *hwecc)
 
 	for (i = 0; i < DOC_ECC_BCH_SIZE; i++)
 		ecc[i] = bitrev8(hwecc[i]);
-	numerrs = bch_decode(docg3->cascade->bch, NULL,
+	numerrs = decode_bch(docg3->cascade->bch, NULL,
 			     DOC_ECC_BCH_COVERED_BYTES,
 			     NULL, ecc, NULL, errorpos);
 	BUG_ON(numerrs == -EINVAL);
@@ -816,7 +816,7 @@ static void doc_read_page_finish(struct docg3 *docg3)
 
 /**
  * calc_block_sector - Calculate blocks, pages and ofs.
- *
+
  * @from: offset in flash
  * @block0: first plane block index calculated
  * @block1: second plane block index calculated
@@ -1783,9 +1783,10 @@ static int __init doc_set_driver_info(int chip_id, struct mtd_info *mtd)
 
 /**
  * doc_probe_device - Check if a device is available
- * @cascade: the cascade of chips this devices will belong to
+ * @base: the io space where the device is probed
  * @floor: the floor of the probed device
  * @dev: the device
+ * @cascade: the cascade of chips this devices will belong to
  *
  * Checks whether a device at the specified IO range, and floor is available.
  *
@@ -1983,8 +1984,8 @@ static int __init docg3_probe(struct platform_device *pdev)
 		return ret;
 	cascade->base = base;
 	mutex_init(&cascade->lock);
-	cascade->bch = bch_init(DOC_ECC_BCH_M, DOC_ECC_BCH_T,
-				DOC_ECC_BCH_PRIMPOLY, false);
+	cascade->bch = init_bch(DOC_ECC_BCH_M, DOC_ECC_BCH_T,
+			     DOC_ECC_BCH_PRIMPOLY);
 	if (!cascade->bch)
 		return ret;
 
@@ -2020,7 +2021,7 @@ notfound:
 	ret = -ENODEV;
 	dev_info(dev, "No supported DiskOnChip found\n");
 err_probe:
-	bch_free(cascade->bch);
+	free_bch(cascade->bch);
 	for (floor = 0; floor < DOC_MAX_NBFLOORS; floor++)
 		if (cascade->floors[floor])
 			doc_release_device(cascade->floors[floor]);
@@ -2044,7 +2045,7 @@ static int docg3_release(struct platform_device *pdev)
 		if (cascade->floors[floor])
 			doc_release_device(cascade->floors[floor]);
 
-	bch_free(docg3->cascade->bch);
+	free_bch(docg3->cascade->bch);
 	return 0;
 }
 

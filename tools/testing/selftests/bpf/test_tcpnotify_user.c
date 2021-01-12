@@ -86,8 +86,14 @@ int main(int argc, char **argv)
 	CPU_SET(0, &cpuset);
 	pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 
-	cg_fd = cgroup_setup_and_join(cg_path);
+	if (setup_cgroup_environment())
+		goto err;
+
+	cg_fd = create_and_get_cgroup(cg_path);
 	if (cg_fd < 0)
+		goto err;
+
+	if (join_cgroup(cg_path))
 		goto err;
 
 	if (bpf_prog_load(file, BPF_PROG_TYPE_SOCK_OPS, &obj, &prog_fd)) {
@@ -124,24 +130,17 @@ int main(int argc, char **argv)
 	sprintf(test_script,
 		"iptables -A INPUT -p tcp --dport %d -j DROP",
 		TESTPORT);
-	if (system(test_script)) {
-		printf("FAILED: execute command: %s, err %d\n", test_script, -errno);
-		goto err;
-	}
+	system(test_script);
 
 	sprintf(test_script,
 		"nc 127.0.0.1 %d < /etc/passwd > /dev/null 2>&1 ",
 		TESTPORT);
-	if (system(test_script))
-		printf("execute command: %s, err %d\n", test_script, -errno);
+	system(test_script);
 
 	sprintf(test_script,
 		"iptables -D INPUT -p tcp --dport %d -j DROP",
 		TESTPORT);
-	if (system(test_script)) {
-		printf("FAILED: execute command: %s, err %d\n", test_script, -errno);
-		goto err;
-	}
+	system(test_script);
 
 	rv = bpf_map_lookup_elem(bpf_map__fd(global_map), &key, &g);
 	if (rv != 0) {

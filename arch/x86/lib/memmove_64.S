@@ -24,7 +24,9 @@
  * Output:
  * rax: dest
  */
-SYM_FUNC_START_WEAK(memmove)
+.weak memmove
+
+SYM_FUNC_START_ALIAS(memmove)
 SYM_FUNC_START(__memmove)
 
 	mov %rdi, %rax

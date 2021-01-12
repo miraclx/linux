@@ -15,7 +15,6 @@
 
 #include <asm/debugfs.h>
 #include <asm/powernv.h>
-#include <asm/ppc-pci.h>
 #include <asm/opal.h>
 
 #include "pci.h"
@@ -385,8 +384,7 @@ static void pnv_npu_peers_take_ownership(struct iommu_table_group *table_group)
 	for (i = 0; i < npucomp->pe_num; ++i) {
 		struct pnv_ioda_pe *pe = npucomp->pe[i];
 
-		if (!pe->table_group.ops ||
-		    !pe->table_group.ops->take_ownership)
+		if (!pe->table_group.ops->take_ownership)
 			continue;
 		pe->table_group.ops->take_ownership(&pe->table_group);
 	}
@@ -402,8 +400,7 @@ static void pnv_npu_peers_release_ownership(
 	for (i = 0; i < npucomp->pe_num; ++i) {
 		struct pnv_ioda_pe *pe = npucomp->pe[i];
 
-		if (!pe->table_group.ops ||
-		    !pe->table_group.ops->release_ownership)
+		if (!pe->table_group.ops->release_ownership)
 			continue;
 		pe->table_group.ops->release_ownership(&pe->table_group);
 	}
@@ -428,10 +425,9 @@ static void pnv_comp_attach_table_group(struct npu_comp *npucomp,
 	++npucomp->pe_num;
 }
 
-static struct iommu_table_group *
-	pnv_try_setup_npu_table_group(struct pnv_ioda_pe *pe)
+struct iommu_table_group *pnv_try_setup_npu_table_group(struct pnv_ioda_pe *pe)
 {
-	struct iommu_table_group *compound_group;
+	struct iommu_table_group *table_group;
 	struct npu_comp *npucomp;
 	struct pci_dev *gpdev = NULL;
 	struct pci_controller *hose;
@@ -450,52 +446,39 @@ static struct iommu_table_group *
 	hose = pci_bus_to_host(npdev->bus);
 
 	if (hose->npu) {
-		/* P9 case: compound group is per-NPU (all gpus, all links) */
-		npucomp = &hose->npu->npucomp;
+		table_group = &hose->npu->npucomp.table_group;
+
+		if (!table_group->group) {
+			table_group->ops = &pnv_npu_peers_ops;
+			iommu_register_group(table_group,
+					hose->global_number,
+					pe->pe_number);
+		}
 	} else {
-		/* P8 case: Compound group is per-GPU (1 gpu, 2 links) */
-		npucomp = pe->npucomp = kzalloc(sizeof(*npucomp), GFP_KERNEL);
-	}
-
-	compound_group = &npucomp->table_group;
-	if (!compound_group->group) {
-		compound_group->ops = &pnv_npu_peers_ops;
-		iommu_register_group(compound_group, hose->global_number,
+		/* Create a group for 1 GPU and attached NPUs for POWER8 */
+		pe->npucomp = kzalloc(sizeof(*pe->npucomp), GFP_KERNEL);
+		table_group = &pe->npucomp->table_group;
+		table_group->ops = &pnv_npu_peers_ops;
+		iommu_register_group(table_group, hose->global_number,
 				pe->pe_number);
-
-		/* Steal capabilities from a GPU PE */
-		compound_group->max_dynamic_windows_supported =
-			pe->table_group.max_dynamic_windows_supported;
-		compound_group->tce32_start = pe->table_group.tce32_start;
-		compound_group->tce32_size = pe->table_group.tce32_size;
-		compound_group->max_levels = pe->table_group.max_levels;
-		if (!compound_group->pgsizes)
-			compound_group->pgsizes = pe->table_group.pgsizes;
 	}
 
-	/*
-	 * The gpu would have been added to the iommu group that's created
-	 * for the PE. Pull it out now.
-	 */
-	iommu_del_device(&gpdev->dev);
+	/* Steal capabilities from a GPU PE */
+	table_group->max_dynamic_windows_supported =
+		pe->table_group.max_dynamic_windows_supported;
+	table_group->tce32_start = pe->table_group.tce32_start;
+	table_group->tce32_size = pe->table_group.tce32_size;
+	table_group->max_levels = pe->table_group.max_levels;
+	if (!table_group->pgsizes)
+		table_group->pgsizes = pe->table_group.pgsizes;
 
-       /*
-	* I'm not sure this is strictly required, but it's probably a good idea
-	* since the table_group for the PE is going to be attached to the
-	* compound table group. If we leave the PE's iommu group active then
-	* we might have the same table_group being modifiable via two sepeate
-	* iommu groups.
-	*/
-	iommu_group_put(pe->table_group.group);
-
-	/* now put the GPU into the compound group */
+	npucomp = container_of(table_group, struct npu_comp, table_group);
 	pnv_comp_attach_table_group(npucomp, pe);
-	iommu_add_device(compound_group, &gpdev->dev);
 
-	return compound_group;
+	return table_group;
 }
 
-static struct iommu_table_group *pnv_npu_compound_attach(struct pnv_ioda_pe *pe)
+struct iommu_table_group *pnv_npu_compound_attach(struct pnv_ioda_pe *pe)
 {
 	struct iommu_table_group *table_group;
 	struct npu_comp *npucomp;
@@ -538,54 +521,6 @@ static struct iommu_table_group *pnv_npu_compound_attach(struct pnv_ioda_pe *pe)
 
 	return table_group;
 }
-
-void pnv_pci_npu_setup_iommu_groups(void)
-{
-	struct pci_controller *hose;
-	struct pnv_phb *phb;
-	struct pnv_ioda_pe *pe;
-
-	/*
-	 * For non-nvlink devices the IOMMU group is registered when the PE is
-	 * configured and devices are added to the group when the per-device
-	 * DMA setup is run. That's done in hose->ops.dma_dev_setup() which is
-	 * only initialise for "normal" IODA PHBs.
-	 *
-	 * For NVLink devices we need to ensure the NVLinks and the GPU end up
-	 * in the same IOMMU group, so that's handled here.
-	 */
-	list_for_each_entry(hose, &hose_list, list_node) {
-		phb = hose->private_data;
-
-		if (phb->type == PNV_PHB_IODA2)
-			list_for_each_entry(pe, &phb->ioda.pe_list, list)
-				pnv_try_setup_npu_table_group(pe);
-	}
-
-	/*
-	 * Now we have all PHBs discovered, time to add NPU devices to
-	 * the corresponding IOMMU groups.
-	 */
-	list_for_each_entry(hose, &hose_list, list_node) {
-		unsigned long  pgsizes;
-
-		phb = hose->private_data;
-
-		if (phb->type != PNV_PHB_NPU_NVLINK)
-			continue;
-
-		pgsizes = pnv_ioda_parse_tce_sizes(phb);
-		list_for_each_entry(pe, &phb->ioda.pe_list, list) {
-			/*
-			 * IODA2 bridges get this set up from
-			 * pci_controller_ops::setup_bridge but NPU bridges
-			 * do not have this hook defined so we do it here.
-			 */
-			pe->table_group.pgsizes = pgsizes;
-			pnv_npu_compound_attach(pe);
-		}
-	}
-}
 #endif /* CONFIG_IOMMU_API */
 
 int pnv_npu2_init(struct pci_controller *hose)
@@ -625,11 +560,6 @@ int pnv_npu2_map_lpar_dev(struct pci_dev *gpdev, unsigned int lparid,
 		return -ENODEV;
 
 	hose = pci_bus_to_host(npdev->bus);
-	if (hose->npu == NULL) {
-		dev_info_once(&npdev->dev, "Nvlink1 does not support contexts");
-		return 0;
-	}
-
 	nphb = hose->private_data;
 
 	dev_dbg(&gpdev->dev, "Map LPAR opalid=%llu lparid=%u\n",
@@ -677,11 +607,6 @@ int pnv_npu2_unmap_lpar_dev(struct pci_dev *gpdev)
 		return -ENODEV;
 
 	hose = pci_bus_to_host(npdev->bus);
-	if (hose->npu == NULL) {
-		dev_info_once(&npdev->dev, "Nvlink1 does not support contexts");
-		return 0;
-	}
-
 	nphb = hose->private_data;
 
 	dev_dbg(&gpdev->dev, "destroy context opalid=%llu\n",

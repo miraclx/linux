@@ -7,8 +7,6 @@
 
 #include "pmc.h"
 
-static DEFINE_SPINLOCK(rm9200_mck_lock);
-
 struct sck {
 	char *n;
 	char *p;
@@ -100,9 +98,9 @@ static void __init at91rm9200_pmc_setup(struct device_node *np)
 	if (IS_ERR(regmap))
 		return;
 
-	at91rm9200_pmc = pmc_data_allocate(PMC_PLLBCK + 1,
+	at91rm9200_pmc = pmc_data_allocate(PMC_MAIN + 1,
 					    nck(at91rm9200_systemck),
-					    nck(at91rm9200_periphck), 0, 4);
+					    nck(at91rm9200_periphck), 0);
 	if (!at91rm9200_pmc)
 		return;
 
@@ -125,34 +123,19 @@ static void __init at91rm9200_pmc_setup(struct device_node *np)
 	if (IS_ERR(hw))
 		goto err_free;
 
-	at91rm9200_pmc->chws[PMC_PLLACK] = hw;
-
 	hw = at91_clk_register_pll(regmap, "pllbck", "mainck", 1,
 				   &at91rm9200_pll_layout,
 				   &rm9200_pll_characteristics);
 	if (IS_ERR(hw))
 		goto err_free;
 
-	at91rm9200_pmc->chws[PMC_PLLBCK] = hw;
-
 	parent_names[0] = slowxtal_name;
 	parent_names[1] = "mainck";
 	parent_names[2] = "pllack";
 	parent_names[3] = "pllbck";
-	hw = at91_clk_register_master_pres(regmap, "masterck_pres", 4,
-					   parent_names,
-					   &at91rm9200_master_layout,
-					   &rm9200_mck_characteristics,
-					   &rm9200_mck_lock, CLK_SET_RATE_GATE,
-					   INT_MIN);
-	if (IS_ERR(hw))
-		goto err_free;
-
-	hw = at91_clk_register_master_div(regmap, "masterck_div",
-					  "masterck_pres",
-					  &at91rm9200_master_layout,
-					  &rm9200_mck_characteristics,
-					  &rm9200_mck_lock, CLK_SET_RATE_GATE);
+	hw = at91_clk_register_master(regmap, "masterck", 4, parent_names,
+				      &at91rm9200_master_layout,
+				      &rm9200_mck_characteristics);
 	if (IS_ERR(hw))
 		goto err_free;
 
@@ -173,12 +156,9 @@ static void __init at91rm9200_pmc_setup(struct device_node *np)
 
 		hw = at91_clk_register_programmable(regmap, name,
 						    parent_names, 4, i,
-						    &at91rm9200_programmable_layout,
-						    NULL);
+						    &at91rm9200_programmable_layout);
 		if (IS_ERR(hw))
 			goto err_free;
-
-		at91rm9200_pmc->pchws[i] = hw;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(at91rm9200_systemck); i++) {
@@ -194,7 +174,7 @@ static void __init at91rm9200_pmc_setup(struct device_node *np)
 	for (i = 0; i < ARRAY_SIZE(at91rm9200_periphck); i++) {
 		hw = at91_clk_register_peripheral(regmap,
 						  at91rm9200_periphck[i].n,
-						  "masterck_div",
+						  "masterck",
 						  at91rm9200_periphck[i].id);
 		if (IS_ERR(hw))
 			goto err_free;
@@ -207,7 +187,7 @@ static void __init at91rm9200_pmc_setup(struct device_node *np)
 	return;
 
 err_free:
-	kfree(at91rm9200_pmc);
+	pmc_data_free(at91rm9200_pmc);
 }
 /*
  * While the TCB can be used as the clocksource, the system timer is most likely

@@ -16,13 +16,11 @@
 #include <linux/uuid.h>
 #include <linux/wait.h>
 
-#include "gt/intel_sseu.h"
 #include "i915_reg.h"
 #include "intel_wakeref.h"
 
 struct drm_i915_private;
 struct file;
-struct i915_active;
 struct i915_gem_context;
 struct i915_perf;
 struct i915_vma;
@@ -274,10 +272,21 @@ struct i915_perf_stream {
 		spinlock_t ptr_lock;
 
 		/**
-		 * @aging_tail: The last HW tail reported by HW. The data
-		 * might not have made it to memory yet though.
+		 * @tails: One 'aging' tail pointer and one 'aged' tail pointer ready to
+		 * used for reading.
+		 *
+		 * Initial values of 0xffffffff are invalid and imply that an
+		 * update is required (and should be ignored by an attempted
+		 * read)
 		 */
-		u32 aging_tail;
+		struct {
+			u32 offset;
+		} tails[2];
+
+		/**
+		 * @aged_tail_idx: Index for the aged tail ready to read() data up to.
+		 */
+		unsigned int aged_tail_idx;
 
 		/**
 		 * @aging_timestamp: A monotonic timestamp for when the current aging tail pointer
@@ -293,11 +302,6 @@ struct i915_perf_stream {
 		 * OA buffer data to userspace.
 		 */
 		u32 head;
-
-		/**
-		 * @tail: The last verified tail that can be read by userspace.
-		 */
-		u32 tail;
 	} oa_buffer;
 
 	/**
@@ -305,12 +309,6 @@ struct i915_perf_stream {
 	 * reprogrammed.
 	 */
 	struct i915_vma *noa_wait;
-
-	/**
-	 * @poll_oa_period: The period in nanoseconds at which the OA
-	 * buffer should be checked for available data.
-	 */
-	u64 poll_oa_period;
 };
 
 /**
@@ -341,8 +339,8 @@ struct i915_oa_ops {
 	 * counter reports being sampled. May apply system constraints such as
 	 * disabling EU clock gating as required.
 	 */
-	int (*enable_metric_set)(struct i915_perf_stream *stream,
-				 struct i915_active *active);
+	struct i915_request *
+		(*enable_metric_set)(struct i915_perf_stream *stream);
 
 	/**
 	 * @disable_metric_set: Remove system constraints associated with using
@@ -410,22 +408,12 @@ struct i915_perf {
 	struct i915_perf_stream *exclusive_stream;
 
 	/**
-	 * @sseu: sseu configuration selected to run while perf is active,
-	 * applies to all contexts.
-	 */
-	struct intel_sseu sseu;
-
-	/**
 	 * For rate limiting any notifications of spurious
 	 * invalid OA reports
 	 */
 	struct ratelimit_state spurious_report_rs;
 
-	/**
-	 * For rate limiting any notifications of tail pointer
-	 * race.
-	 */
-	struct ratelimit_state tail_pointer_race;
+	struct i915_oa_config test_config;
 
 	u32 gen7_latched_oastatus1;
 	u32 ctx_oactxctrl_offset;

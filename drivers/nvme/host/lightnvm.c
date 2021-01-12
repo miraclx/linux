@@ -171,7 +171,7 @@ struct nvme_nvm_bb_tbl {
 	__le32	tdresv;
 	__le32	thresv;
 	__le32	rsvd2[8];
-	__u8	blk[];
+	__u8	blk[0];
 };
 
 struct nvme_nvm_id20_addrf {
@@ -593,8 +593,8 @@ static int nvme_nvm_get_chk_meta(struct nvm_dev *ndev,
 		dev_meta_off = dev_meta;
 
 		ret = nvme_get_log(ctrl, ns->head->ns_id,
-				NVME_NVM_LOG_REPORT_CHUNK, 0, NVME_CSI_NVM,
-				dev_meta, len, offset);
+				NVME_NVM_LOG_REPORT_CHUNK, 0, dev_meta, len,
+				offset);
 		if (ret) {
 			dev_err(ctrl->device, "Get REPORT CHUNK log error\n");
 			break;
@@ -653,7 +653,7 @@ static struct request *nvme_nvm_alloc_request(struct request_queue *q,
 
 	nvme_nvm_rqtocmd(rqd, ns, cmd);
 
-	rq = nvme_alloc_request(q, (struct nvme_command *)cmd, 0);
+	rq = nvme_alloc_request(q, (struct nvme_command *)cmd, 0, NVME_QID_ANY);
 	if (IS_ERR(rq))
 		return rq;
 
@@ -767,14 +767,14 @@ static int nvme_nvm_submit_user_cmd(struct request_queue *q,
 	DECLARE_COMPLETION_ONSTACK(wait);
 	int ret = 0;
 
-	rq = nvme_alloc_request(q, (struct nvme_command *)vcmd, 0);
+	rq = nvme_alloc_request(q, (struct nvme_command *)vcmd, 0,
+			NVME_QID_ANY);
 	if (IS_ERR(rq)) {
 		ret = -ENOMEM;
 		goto err_cmd;
 	}
 
-	if (timeout)
-		rq->timeout = timeout;
+	rq->timeout = timeout ? timeout : ADMIN_TIMEOUT;
 
 	if (ppa_buf && ppa_len) {
 		ppa_list = dma_pool_alloc(dev->dma_pool, GFP_KERNEL, &ppa_dma);
@@ -961,10 +961,7 @@ int nvme_nvm_register(struct nvme_ns *ns, char *disk_name, int node)
 	geo = &dev->geo;
 	geo->csecs = 1 << ns->lba_shift;
 	geo->sos = ns->ms;
-	if (ns->features & NVME_NS_EXT_LBAS)
-		geo->ext = true;
-	else
-		geo->ext = false;
+	geo->ext = ns->ext;
 	geo->mdts = ns->ctrl->max_hw_sectors;
 
 	dev->q = q;

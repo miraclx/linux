@@ -47,6 +47,11 @@ inline struct sk_buff *_rtw_skb_copy(const struct sk_buff *skb)
 	return skb_copy(skb, in_interrupt() ? GFP_ATOMIC : GFP_KERNEL);
 }
 
+inline struct sk_buff *_rtw_skb_clone(struct sk_buff *skb)
+{
+	return skb_clone(skb, in_interrupt() ? GFP_ATOMIC : GFP_KERNEL);
+}
+
 inline int _rtw_netif_rx(_nic_hdl ndev, struct sk_buff *skb)
 {
 	skb->dev = ndev;
@@ -146,8 +151,10 @@ int rtw_change_ifname(struct adapter *padapter, const char *ifname)
 	rereg_priv->old_pnetdev = cur_pnetdev;
 
 	pnetdev = rtw_init_netdev(padapter);
-	if (!pnetdev)
+	if (!pnetdev)  {
+		ret = -1;
 		goto error;
+	}
 
 	SET_NETDEV_DEV(pnetdev, dvobj_to_dev(adapter_to_dvobj(padapter)));
 
@@ -168,7 +175,9 @@ int rtw_change_ifname(struct adapter *padapter, const char *ifname)
 	return 0;
 
 error:
+
 	return -1;
+
 }
 
 void rtw_buf_free(u8 **buf, u32 *buf_len)
@@ -272,7 +281,7 @@ void *rtw_cbuf_pop(struct rtw_cbuf *cbuf)
 	if (rtw_cbuf_empty(cbuf))
 		return NULL;
 
-	DBG_871X("%s on %u\n", __func__, cbuf->read);
+        DBG_871X("%s on %u\n", __func__, cbuf->read);
 	buf = cbuf->bufs[cbuf->read];
 	cbuf->read = (cbuf->read + 1) % cbuf->size;
 

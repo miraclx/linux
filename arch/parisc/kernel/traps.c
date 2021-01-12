@@ -49,7 +49,7 @@
 #include "../math-emu/math-emu.h"	/* for handle_fpe() */
 
 static void parisc_show_stack(struct task_struct *task,
-	struct pt_regs *regs, const char *loglvl);
+	struct pt_regs *regs);
 
 static int printbinary(char *buf, unsigned long x, int nbits)
 {
@@ -75,7 +75,7 @@ static int printbinary(char *buf, unsigned long x, int nbits)
 		lvl, f, (x), (x+3), (r)[(x)+0], (r)[(x)+1],		\
 		(r)[(x)+2], (r)[(x)+3])
 
-static void print_gr(const char *level, struct pt_regs *regs)
+static void print_gr(char *level, struct pt_regs *regs)
 {
 	int i;
 	char buf[64];
@@ -89,7 +89,7 @@ static void print_gr(const char *level, struct pt_regs *regs)
 		PRINTREGS(level, regs->gr, "r", RFMT, i);
 }
 
-static void print_fr(const char *level, struct pt_regs *regs)
+static void print_fr(char *level, struct pt_regs *regs)
 {
 	int i;
 	char buf[64];
@@ -119,7 +119,7 @@ static void print_fr(const char *level, struct pt_regs *regs)
 void show_regs(struct pt_regs *regs)
 {
 	int i, user;
-	const char *level;
+	char *level;
 	unsigned long cr30, cr31;
 
 	user = user_mode(regs);
@@ -155,7 +155,7 @@ void show_regs(struct pt_regs *regs)
 		printk("%s IAOQ[1]: %pS\n", level, (void *) regs->iaoq[1]);
 		printk("%s RP(r2): %pS\n", level, (void *) regs->gr[2]);
 
-		parisc_show_stack(current, regs, KERN_DEFAULT);
+		parisc_show_stack(current, regs);
 	}
 }
 
@@ -170,37 +170,37 @@ static DEFINE_RATELIMIT_STATE(_hppa_rs,
 }
 
 
-static void do_show_stack(struct unwind_frame_info *info, const char *loglvl)
+static void do_show_stack(struct unwind_frame_info *info)
 {
 	int i = 1;
 
-	printk("%sBacktrace:\n", loglvl);
+	printk(KERN_CRIT "Backtrace:\n");
 	while (i <= MAX_UNWIND_ENTRIES) {
 		if (unwind_once(info) < 0 || info->ip == 0)
 			break;
 
 		if (__kernel_text_address(info->ip)) {
-			printk("%s [<" RFMT ">] %pS\n",
-				loglvl, info->ip, (void *) info->ip);
+			printk(KERN_CRIT " [<" RFMT ">] %pS\n",
+				info->ip, (void *) info->ip);
 			i++;
 		}
 	}
-	printk("%s\n", loglvl);
+	printk(KERN_CRIT "\n");
 }
 
 static void parisc_show_stack(struct task_struct *task,
-	struct pt_regs *regs, const char *loglvl)
+	struct pt_regs *regs)
 {
 	struct unwind_frame_info info;
 
 	unwind_frame_init_task(&info, task, regs);
 
-	do_show_stack(&info, loglvl);
+	do_show_stack(&info);
 }
 
-void show_stack(struct task_struct *t, unsigned long *sp, const char *loglvl)
+void show_stack(struct task_struct *t, unsigned long *sp)
 {
-	parisc_show_stack(t, NULL, loglvl);
+	parisc_show_stack(t, NULL);
 }
 
 int is_valid_bugaddr(unsigned long iaoq)
@@ -437,6 +437,7 @@ void parisc_terminate(char *msg, struct pt_regs *regs, int code, unsigned long o
 		break;
 
 	default:
+		/* Fall through */
 		break;
 
 	}
@@ -445,7 +446,7 @@ void parisc_terminate(char *msg, struct pt_regs *regs, int code, unsigned long o
 		/* show_stack(NULL, (unsigned long *)regs->gr[30]); */
 		struct unwind_frame_info info;
 		unwind_frame_init(&info, current, regs);
-		do_show_stack(&info, KERN_CRIT);
+		do_show_stack(&info);
 	}
 
 	printk("\n");
@@ -643,12 +644,12 @@ void notrace handle_interruption(int code, struct pt_regs *regs)
 
 	case 15:
 		/* Data TLB miss fault/Data page fault */
-		fallthrough;
+		/* Fall through */
 	case 16:
 		/* Non-access instruction TLB miss fault */
 		/* The instruction TLB entry needed for the target address of the FIC
 		   is absent, and hardware can't find it, so we get to cleanup */
-		fallthrough;
+		/* Fall through */
 	case 17:
 		/* Non-access data TLB miss fault/Non-access data page fault */
 		/* FIXME: 
@@ -672,7 +673,7 @@ void notrace handle_interruption(int code, struct pt_regs *regs)
 			handle_unaligned(regs);
 			return;
 		}
-		fallthrough;
+		/* Fall Through */
 	case 26: 
 		/* PCXL: Data memory access rights trap */
 		fault_address = regs->ior;
@@ -682,7 +683,7 @@ void notrace handle_interruption(int code, struct pt_regs *regs)
 	case 19:
 		/* Data memory break trap */
 		regs->gr[0] |= PSW_X; /* So we can single-step over the trap */
-		fallthrough;
+		/* fall thru */
 	case 21:
 		/* Page reference trap */
 		handle_gdb_break(regs, TRAP_HWBKPT);
@@ -716,7 +717,7 @@ void notrace handle_interruption(int code, struct pt_regs *regs)
 		if (user_mode(regs)) {
 			struct vm_area_struct *vma;
 
-			mmap_read_lock(current->mm);
+			down_read(&current->mm->mmap_sem);
 			vma = find_vma(current->mm,regs->iaoq[0]);
 			if (vma && (regs->iaoq[0] >= vma->vm_start)
 				&& (vma->vm_flags & VM_EXEC)) {
@@ -724,12 +725,12 @@ void notrace handle_interruption(int code, struct pt_regs *regs)
 				fault_address = regs->iaoq[0];
 				fault_space = regs->iasq[0];
 
-				mmap_read_unlock(current->mm);
+				up_read(&current->mm->mmap_sem);
 				break; /* call do_page_fault() */
 			}
-			mmap_read_unlock(current->mm);
+			up_read(&current->mm->mmap_sem);
 		}
-		fallthrough;
+		/* Fall Through */
 	case 27: 
 		/* Data memory protection ID trap */
 		if (code == 27 && !user_mode(regs) &&

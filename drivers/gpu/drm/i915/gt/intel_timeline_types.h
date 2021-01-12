@@ -94,8 +94,6 @@ struct intel_timeline_cacheline {
 	struct intel_timeline_hwsp *hwsp;
 	void *vaddr;
 
-	u32 ggtt_offset;
-
 	struct rcu_head rcu;
 };
 

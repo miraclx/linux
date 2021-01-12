@@ -11,7 +11,8 @@
 
 /*  Some variables can't get from outsrc BT-Coex, */
 /*  so we need to save here */
-typedef struct _BT_COEXIST {
+typedef struct _BT_COEXIST
+{
 	u8 bBtExist;
 	u8 btTotalAntNum;
 	u8 btChipType;

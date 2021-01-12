@@ -192,8 +192,7 @@ MODULE_FIRMWARE("nvidia/tu116/gr/sw_method_init.bin");
 
 static const struct gf100_gr_fwif
 tu102_gr_fwif[] = {
-	{  0, gm200_gr_load, &tu102_gr, &gp108_gr_fecs_acr, &gp108_gr_gpccs_acr },
-	{ -1, gm200_gr_nofw },
+	{ 0, gm200_gr_load, &tu102_gr, &gp108_gr_fecs_acr, &gp108_gr_gpccs_acr },
 	{}
 };
 

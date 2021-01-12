@@ -144,7 +144,7 @@ static void cqhci_dumpregs(struct cqhci_host *cq_host)
 		CQHCI_DUMP(": ===========================================\n");
 }
 
-/*
+/**
  * The allocated descriptor table for task, link & transfer descritors
  * looks like:
  * |----------|
@@ -376,9 +376,6 @@ static void cqhci_off(struct mmc_host *mmc)
 	else
 		pr_debug("%s: cqhci: CQE off\n", mmc_hostname(mmc));
 
-	if (cq_host->ops->post_disable)
-		cq_host->ops->post_disable(mmc);
-
 	mmc->cqe_on = false;
 }
 
@@ -425,7 +422,7 @@ static void cqhci_prep_task_desc(struct mmc_request *mrq,
 		CQHCI_BLK_COUNT(mrq->data->blocks) |
 		CQHCI_BLK_ADDR((u64)mrq->data->blk_addr);
 
-	pr_debug("%s: cqhci: tag %d task descriptor 0x%016llx\n",
+	pr_debug("%s: cqhci: tag %d task descriptor 0x016%llx\n",
 		 mmc_hostname(mrq->host), mrq->tag, (unsigned long long)*data);
 }
 
@@ -583,9 +580,6 @@ static int cqhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		__cqhci_enable(cq_host);
 
 	if (!mmc->cqe_on) {
-		if (cq_host->ops->pre_enable)
-			cq_host->ops->pre_enable(mmc);
-
 		cqhci_writel(cq_host, 0, CQHCI_CTL);
 		mmc->cqe_on = true;
 		pr_debug("%s: cqhci: CQE on\n", mmc_hostname(mmc));

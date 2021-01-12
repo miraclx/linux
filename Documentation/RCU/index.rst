@@ -1,5 +1,3 @@
-.. SPDX-License-Identifier: GPL-2.0
-
 .. _rcu_concepts:
 
 ============
@@ -10,17 +8,10 @@ RCU concepts
    :maxdepth: 3
 
    arrayRCU
-   checklist
-   lockdep
-   lockdep-splat
    rcubarrier
    rcu_dereference
    whatisRCU
    rcu
-   rculist_nulls
-   rcuref
-   torture
-   stallwarn
    listRCU
    NMI-RCU
    UP

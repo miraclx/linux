@@ -6,7 +6,7 @@
  *           Jamal Hadi Salim
  *           Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
  *
- * See Documentation/networking/gen_stats.rst
+ * See Documentation/networking/gen_stats.txt
  */
 
 #include <linux/types.h>

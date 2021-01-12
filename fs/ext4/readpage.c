@@ -7,8 +7,8 @@
  *
  * This was originally taken from fs/mpage.c
  *
- * The ext4_mpage_readpages() function here is intended to
- * replace mpage_readahead() in the general case, not just for
+ * The intent is the ext4_mpage_readpages() function here is intended
+ * to replace mpage_readpages() in the general case, not just for
  * encrypted files.  It has some limitations (see below), where it
  * will fall back to read_block_full_page(), but these limitations
  * should only be hit when page_size != block_size.
@@ -140,7 +140,7 @@ static void bio_post_read_processing(struct bio_post_read_ctx *ctx)
 			return;
 		}
 		ctx->cur_step++;
-		fallthrough;
+		/* fall-through */
 	case STEP_VERITY:
 		if (ctx->enabled_steps & (1 << STEP_VERITY)) {
 			INIT_WORK(&ctx->work, verity_work);
@@ -148,7 +148,7 @@ static void bio_post_read_processing(struct bio_post_read_ctx *ctx)
 			return;
 		}
 		ctx->cur_step++;
-		fallthrough;
+		/* fall-through */
 	default:
 		__read_end_io(ctx->bio);
 	}
@@ -195,7 +195,7 @@ static void ext4_set_bio_post_read_ctx(struct bio *bio,
 {
 	unsigned int post_read_steps = 0;
 
-	if (fscrypt_inode_uses_fs_layer_crypto(inode))
+	if (IS_ENCRYPTED(inode) && S_ISREG(inode->i_mode))
 		post_read_steps |= 1 << STEP_DECRYPT;
 
 	if (ext4_need_verity(inode, first_idx))
@@ -221,16 +221,17 @@ static inline loff_t ext4_readpage_limit(struct inode *inode)
 	return i_size_read(inode);
 }
 
-int ext4_mpage_readpages(struct inode *inode,
-		struct readahead_control *rac, struct page *page)
+int ext4_mpage_readpages(struct address_space *mapping,
+			 struct list_head *pages, struct page *page,
+			 unsigned nr_pages, bool is_readahead)
 {
 	struct bio *bio = NULL;
 	sector_t last_block_in_bio = 0;
 
+	struct inode *inode = mapping->host;
 	const unsigned blkbits = inode->i_blkbits;
 	const unsigned blocks_per_page = PAGE_SIZE >> blkbits;
 	const unsigned blocksize = 1 << blkbits;
-	sector_t next_block;
 	sector_t block_in_file;
 	sector_t last_block;
 	sector_t last_block_in_file;
@@ -240,7 +241,6 @@ int ext4_mpage_readpages(struct inode *inode,
 	int length;
 	unsigned relative_block = 0;
 	struct ext4_map_blocks map;
-	unsigned int nr_pages = rac ? readahead_count(rac) : 1;
 
 	map.m_pblk = 0;
 	map.m_lblk = 0;
@@ -251,16 +251,20 @@ int ext4_mpage_readpages(struct inode *inode,
 		int fully_mapped = 1;
 		unsigned first_hole = blocks_per_page;
 
-		if (rac) {
-			page = readahead_page(rac);
+		if (pages) {
+			page = lru_to_page(pages);
+
 			prefetchw(&page->flags);
+			list_del(&page->lru);
+			if (add_to_page_cache_lru(page, mapping, page->index,
+				  readahead_gfp_mask(mapping)))
+				goto next_page;
 		}
 
 		if (page_has_buffers(page))
 			goto confused;
 
-		block_in_file = next_block =
-			(sector_t)page->index << (PAGE_SHIFT - blkbits);
+		block_in_file = (sector_t)page->index << (PAGE_SHIFT - blkbits);
 		last_block = block_in_file + nr_pages * blocks_per_page;
 		last_block_in_file = (ext4_readpage_limit(inode) +
 				      blocksize - 1) >> blkbits;
@@ -360,8 +364,7 @@ int ext4_mpage_readpages(struct inode *inode,
 		 * This page will go to BIO.  Do we need to send this
 		 * BIO off first?
 		 */
-		if (bio && (last_block_in_bio != blocks[0] - 1 ||
-			    !fscrypt_mergeable_bio(bio, inode, next_block))) {
+		if (bio && (last_block_in_bio != blocks[0] - 1)) {
 		submit_and_realloc:
 			submit_bio(bio);
 			bio = NULL;
@@ -373,14 +376,12 @@ int ext4_mpage_readpages(struct inode *inode,
 			 */
 			bio = bio_alloc(GFP_KERNEL,
 				min_t(int, nr_pages, BIO_MAX_PAGES));
-			fscrypt_set_bio_crypt_ctx(bio, inode, next_block,
-						  GFP_KERNEL);
 			ext4_set_bio_post_read_ctx(bio, inode, page->index);
 			bio_set_dev(bio, bdev);
 			bio->bi_iter.bi_sector = blocks[0] << (blkbits - 9);
 			bio->bi_end_io = mpage_end_io;
 			bio_set_op_attrs(bio, REQ_OP_READ,
-						rac ? REQ_RAHEAD : 0);
+						is_readahead ? REQ_RAHEAD : 0);
 		}
 
 		length = first_hole << blkbits;
@@ -405,9 +406,10 @@ int ext4_mpage_readpages(struct inode *inode,
 		else
 			unlock_page(page);
 	next_page:
-		if (rac)
+		if (pages)
 			put_page(page);
 	}
+	BUG_ON(pages && !list_empty(pages));
 	if (bio)
 		submit_bio(bio);
 	return 0;

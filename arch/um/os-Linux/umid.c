@@ -97,7 +97,7 @@ static int remove_files_and_dir(char *dir)
 	while ((ent = readdir(directory)) != NULL) {
 		if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, ".."))
 			continue;
-		len = strlen(dir) + strlen("/") + strlen(ent->d_name) + 1;
+		len = strlen(dir) + sizeof("/") + strlen(ent->d_name) + 1;
 		if (len > sizeof(file)) {
 			ret = -E2BIG;
 			goto out;
@@ -135,15 +135,22 @@ out:
  */
 static inline int is_umdir_used(char *dir)
 {
-	char pid[sizeof("nnnnnnnnn")], *end, *file;
+	char pid[sizeof("nnnnn\0")], *end, *file;
 	int dead, fd, p, n, err;
-	size_t filelen = strlen(dir) + sizeof("/pid") + 1;
+	size_t filelen;
 
-	file = malloc(filelen);
-	if (!file)
-		return -ENOMEM;
+	err = asprintf(&file, "%s/pid", dir);
+	if (err < 0)
+		return 0;
 
-	snprintf(file, filelen, "%s/pid", dir);
+	filelen = strlen(file);
+
+	n = snprintf(file, filelen, "%s/pid", dir);
+	if (n >= filelen) {
+		printk(UM_KERN_ERR "is_umdir_used - pid filename too long\n");
+		err = -E2BIG;
+		goto out;
+	}
 
 	dead = 0;
 	fd = open(file, O_RDONLY);
@@ -210,10 +217,10 @@ static int umdir_take_if_dead(char *dir)
 
 static void __init create_pid_file(void)
 {
-	char pid[sizeof("nnnnnnnnn")], *file;
+	char pid[sizeof("nnnnn\0")], *file;
 	int fd, n;
 
-	n = strlen(uml_dir) + UMID_LEN + sizeof("/pid");
+	n = strlen(uml_dir) + UMID_LEN + sizeof("/pid\0");
 	file = malloc(n);
 	if (!file)
 		return;

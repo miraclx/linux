@@ -421,6 +421,8 @@ struct cache {
 
 	struct rw_semaphore quiesce_lock;
 
+	struct dm_target_callbacks callbacks;
+
 	/*
 	 * origin_blocks entries, discarded if set.
 	 */
@@ -712,6 +714,10 @@ static bool block_size_is_power_of_two(struct cache *cache)
 	return cache->sectors_per_block_shift >= 0;
 }
 
+/* gcc on ARM generates spurious references to __udivdi3 and __umoddi3 */
+#if defined(CONFIG_ARM) && __GNUC__ == 4 && __GNUC_MINOR__ <= 6
+__always_inline
+#endif
 static dm_block_t block_div(dm_block_t b, uint32_t n)
 {
 	do_div(b, n);
@@ -880,7 +886,7 @@ static void accounted_complete(struct cache *cache, struct bio *bio)
 static void accounted_request(struct cache *cache, struct bio *bio)
 {
 	accounted_begin(cache, bio);
-	submit_bio_noacct(bio);
+	generic_make_request(bio);
 }
 
 static void issue_op(struct bio *bio, void *context)
@@ -921,7 +927,7 @@ static enum cache_metadata_mode get_cache_mode(struct cache *cache)
 
 static const char *cache_device_name(struct cache *cache)
 {
-	return dm_table_device_name(cache->ti->table);
+	return dm_device_name(dm_table_get_md(cache->ti->table));
 }
 
 static void notify_mode_switch(struct cache *cache, enum cache_metadata_mode mode)
@@ -1786,7 +1792,7 @@ static bool process_bio(struct cache *cache, struct bio *bio)
 	bool commit_needed;
 
 	if (map_bio(cache, bio, get_bio_block(cache, bio), &commit_needed) == DM_MAPIO_REMAPPED)
-		submit_bio_noacct(bio);
+		generic_make_request(bio);
 
 	return commit_needed;
 }
@@ -1852,7 +1858,7 @@ static bool process_discard_bio(struct cache *cache, struct bio *bio)
 
 	if (cache->features.discard_passdown) {
 		remap_to_origin(cache, bio);
-		submit_bio_noacct(bio);
+		generic_make_request(bio);
 	} else
 		bio_endio(bio);
 
@@ -2417,6 +2423,20 @@ static void set_cache_size(struct cache *cache, dm_cblock_t size)
 	cache->cache_size = size;
 }
 
+static int is_congested(struct dm_dev *dev, int bdi_bits)
+{
+	struct request_queue *q = bdev_get_queue(dev->bdev);
+	return bdi_congested(q->backing_dev_info, bdi_bits);
+}
+
+static int cache_is_congested(struct dm_target_callbacks *cb, int bdi_bits)
+{
+	struct cache *cache = container_of(cb, struct cache, callbacks);
+
+	return is_congested(cache->origin_dev, bdi_bits) ||
+		is_congested(cache->cache_dev, bdi_bits);
+}
+
 #define DEFAULT_MIGRATION_THRESHOLD 2048
 
 static int cache_create(struct cache_args *ca, struct cache **result)
@@ -2450,6 +2470,9 @@ static int cache_create(struct cache_args *ca, struct cache **result)
 		if (r)
 			goto bad;
 	}
+
+	cache->callbacks.congested_fn = cache_is_congested;
+	dm_table_add_target_callbacks(ti->table, &cache->callbacks);
 
 	cache->metadata_dev = ca->metadata_dev;
 	cache->origin_dev = ca->origin_dev;
@@ -2840,6 +2863,7 @@ static void cache_postsuspend(struct dm_target *ti)
 static int load_mapping(void *context, dm_oblock_t oblock, dm_cblock_t cblock,
 			bool dirty, uint32_t hint, bool hint_valid)
 {
+	int r;
 	struct cache *cache = context;
 
 	if (dirty) {
@@ -2848,7 +2872,11 @@ static int load_mapping(void *context, dm_oblock_t oblock, dm_cblock_t cblock,
 	} else
 		clear_bit(from_cblock(cblock), cache->dirty_bitset);
 
-	return policy_load_mapping(cache->policy, oblock, cblock, dirty, hint, hint_valid);
+	r = policy_load_mapping(cache->policy, oblock, cblock, dirty, hint, hint_valid);
+	if (r)
+		return r;
+
+	return 0;
 }
 
 /*

@@ -24,6 +24,7 @@
 #include <linux/of.h>
 #include <linux/sched/task_stack.h>
 #include <linux/sched/mm.h>
+#include <asm/clint.h>
 #include <asm/cpu_ops.h>
 #include <asm/irq.h>
 #include <asm/mmu_context.h>
@@ -105,7 +106,7 @@ void __init setup_smp(void)
 	}
 }
 
-static int start_secondary_cpu(int cpu, struct task_struct *tidle)
+int start_secondary_cpu(int cpu, struct task_struct *tidle)
 {
 	if (cpu_ops[cpu]->cpu_start)
 		return cpu_ops[cpu]->cpu_start(cpu, tidle);
@@ -120,6 +121,7 @@ int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 
 	ret = start_secondary_cpu(cpu, tidle);
 	if (!ret) {
+		lockdep_assert_held(&cpu_running);
 		wait_for_completion_timeout(&cpu_running,
 					    msecs_to_jiffies(1000));
 
@@ -144,18 +146,18 @@ void __init smp_cpus_done(unsigned int max_cpus)
 asmlinkage __visible void smp_callin(void)
 {
 	struct mm_struct *mm = &init_mm;
-	unsigned int curr_cpuid = smp_processor_id();
 
-	riscv_clear_ipi();
+	if (!IS_ENABLED(CONFIG_RISCV_SBI))
+		clint_clear_ipi(cpuid_to_hartid_map(smp_processor_id()));
 
 	/* All kernel threads share the same mm context.  */
 	mmgrab(mm);
 	current->active_mm = mm;
 
-	notify_cpu_starting(curr_cpuid);
-	update_siblings_masks(curr_cpuid);
-	set_cpu_online(curr_cpuid, 1);
-
+	trap_init();
+	notify_cpu_starting(smp_processor_id());
+	update_siblings_masks(smp_processor_id());
+	set_cpu_online(smp_processor_id(), 1);
 	/*
 	 * Remote TLB flushes are ignored while the CPU is offline, so emit
 	 * a local TLB flush right now just in case.

@@ -226,19 +226,14 @@ found:
 
 	while (ret == 0 && (node = drm_mm_scan_color_evict(&scan))) {
 		vma = container_of(node, struct i915_vma, node);
-
-		/* If we find any non-objects (!vma), we cannot evict them */
-		if (vma->node.color != I915_COLOR_UNEVICTABLE)
-			ret = __i915_vma_unbind(vma);
-		else
-			ret = -ENOSPC; /* XXX search failed, try again? */
+		ret = __i915_vma_unbind(vma);
 	}
 
 	return ret;
 }
 
 /**
- * i915_gem_evict_for_node - Evict vmas to make room for binding a new one
+ * i915_gem_evict_for_vma - Evict vmas to make room for binding a new one
  * @vm: address space to evict from
  * @target: range (and color) to evict for
  * @flags: additional flags to control the eviction algorithm

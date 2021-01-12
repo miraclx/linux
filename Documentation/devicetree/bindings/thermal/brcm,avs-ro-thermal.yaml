@@ -23,7 +23,7 @@ properties:
   compatible:
     const: brcm,bcm2711-thermal
 
-  # See Documentation/devicetree/bindings/thermal/thermal-sensor.yaml for details
+  # See ./thermal.txt for details
   "#thermal-sensor-cells":
     const: 0
 

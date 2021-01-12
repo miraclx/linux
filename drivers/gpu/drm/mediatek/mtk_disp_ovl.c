@@ -65,9 +65,8 @@ struct mtk_disp_ovl_data {
 
 /**
  * struct mtk_disp_ovl - DISP_OVL driver structure
- * @ddp_comp: structure containing type enum and hardware resources
- * @crtc: associated crtc to report vblank events to
- * @data: platform data
+ * @ddp_comp - structure containing type enum and hardware resources
+ * @crtc - associated crtc to report vblank events to
  */
 struct mtk_disp_ovl {
 	struct mtk_ddp_comp		ddp_comp;
@@ -387,10 +386,7 @@ static int mtk_disp_ovl_probe(struct platform_device *pdev)
 	ret = mtk_ddp_comp_init(dev, dev->of_node, &priv->ddp_comp, comp_id,
 				&mtk_disp_ovl_funcs);
 	if (ret) {
-		if (ret != -EPROBE_DEFER)
-			dev_err(dev, "Failed to initialize component: %d\n",
-				ret);
-
+		dev_err(dev, "Failed to initialize component: %d\n", ret);
 		return ret;
 	}
 

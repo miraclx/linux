@@ -92,10 +92,11 @@ int main(int argc, char *argv[])
 	/* Create VM */
 	vm = vm_create_default(VCPU_ID, 0, guest_code);
 
-	if (!nested_vmx_supported() ||
-	    !kvm_check_cap(KVM_CAP_NESTED_STATE) ||
+	vcpu_set_cpuid(vm, VCPU_ID, kvm_get_supported_cpuid());
+
+	if (!kvm_check_cap(KVM_CAP_NESTED_STATE) ||
 	    !kvm_check_cap(KVM_CAP_HYPERV_ENLIGHTENED_VMCS)) {
-		print_skip("Enlightened VMCS is unsupported");
+		print_skip("capabilities not available");
 		exit(KSFT_SKIP);
 	}
 

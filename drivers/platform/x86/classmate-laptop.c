@@ -1023,8 +1023,6 @@ static int cmpc_keys_codes[] = {
 	KEY_CAMERA,
 	KEY_BACK,
 	KEY_FORWARD,
-	KEY_UNKNOWN,
-	KEY_WLAN, /* NL3: 0x8b (press), 0x9b (release) */
 	KEY_MAX
 };
 

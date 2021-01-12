@@ -16,7 +16,6 @@
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/irqchip/chained_irq.h>
-#include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/gpio/driver.h>
 #include <linux/device.h>
@@ -409,7 +408,6 @@ static const struct amba_id pl061_ids[] = {
 	},
 	{ 0, 0 },
 };
-MODULE_DEVICE_TABLE(amba, pl061_ids);
 
 static struct amba_driver pl061_gpio_driver = {
 	.drv = {
@@ -421,6 +419,9 @@ static struct amba_driver pl061_gpio_driver = {
 	.id_table	= pl061_ids,
 	.probe		= pl061_probe,
 };
-module_amba_driver(pl061_gpio_driver);
 
-MODULE_LICENSE("GPL v2");
+static int __init pl061_gpio_init(void)
+{
+	return amba_driver_register(&pl061_gpio_driver);
+}
+device_initcall(pl061_gpio_init);

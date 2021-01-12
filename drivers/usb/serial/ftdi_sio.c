@@ -713,7 +713,6 @@ static const struct usb_device_id id_table_combined[] = {
 	{ USB_DEVICE(XSENS_VID, XSENS_AWINDA_STATION_PID) },
 	{ USB_DEVICE(XSENS_VID, XSENS_CONVERTER_PID) },
 	{ USB_DEVICE(XSENS_VID, XSENS_MTDEVBOARD_PID) },
-	{ USB_DEVICE(XSENS_VID, XSENS_MTIUSBCONVERTER_PID) },
 	{ USB_DEVICE(XSENS_VID, XSENS_MTW_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_OMNI1509) },
 	{ USB_DEVICE(MOBILITY_VID, MOBILITY_USB_SERIAL_PID) },
@@ -1037,11 +1036,6 @@ static const struct usb_device_id id_table_combined[] = {
 	/* U-Blox devices */
 	{ USB_DEVICE(UBLOX_VID, UBLOX_C099F9P_ZED_PID) },
 	{ USB_DEVICE(UBLOX_VID, UBLOX_C099F9P_ODIN_PID) },
-	/* FreeCalypso USB adapters */
-	{ USB_DEVICE(FTDI_VID, FTDI_FALCONIA_JTAG_BUF_PID),
-		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },
-	{ USB_DEVICE(FTDI_VID, FTDI_FALCONIA_JTAG_UNBUF_PID),
-		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },
 	{ }					/* Terminating entry */
 };
 
@@ -1571,8 +1565,7 @@ static void ftdi_determine_type(struct usb_serial_port *port)
 	dev_dbg(&port->dev, "%s: bcdDevice = 0x%x, bNumInterfaces = %u\n", __func__,
 		version, interfaces);
 	if (interfaces > 1) {
-		struct usb_interface *intf = serial->interface;
-		int ifnum = intf->cur_altsetting->desc.bInterfaceNumber;
+		int inter;
 
 		/* Multiple interfaces.*/
 		if (version == 0x0800) {
@@ -1587,15 +1580,16 @@ static void ftdi_determine_type(struct usb_serial_port *port)
 			priv->chip_type = FT2232C;
 
 		/* Determine interface code. */
-		if (ifnum == 0)
+		inter = serial->interface->altsetting->desc.bInterfaceNumber;
+		if (inter == 0) {
 			priv->interface = INTERFACE_A;
-		else if (ifnum == 1)
+		} else  if (inter == 1) {
 			priv->interface = INTERFACE_B;
-		else if (ifnum == 2)
+		} else  if (inter == 2) {
 			priv->interface = INTERFACE_C;
-		else if (ifnum == 3)
+		} else  if (inter == 3) {
 			priv->interface = INTERFACE_D;
-
+		}
 		/* BM-type devices have a bug where bcdDevice gets set
 		 * to 0x200 when iSerialNumber is 0.  */
 		if (version < 0x500) {
@@ -1841,6 +1835,9 @@ static int ftdi_gpio_request(struct gpio_chip *gc, unsigned int offset)
 	struct ftdi_private *priv = usb_get_serial_port_data(port);
 	int result;
 
+	if (priv->gpio_altfunc & BIT(offset))
+		return -ENODEV;
+
 	mutex_lock(&priv->gpio_lock);
 	if (!priv->gpio_used) {
 		/* Set default pin states, as we cannot get them from device */
@@ -1997,25 +1994,6 @@ static int ftdi_gpio_direction_output(struct gpio_chip *gc, unsigned int gpio,
 	mutex_unlock(&priv->gpio_lock);
 
 	return result;
-}
-
-static int ftdi_gpio_init_valid_mask(struct gpio_chip *gc,
-				     unsigned long *valid_mask,
-				     unsigned int ngpios)
-{
-	struct usb_serial_port *port = gpiochip_get_data(gc);
-	struct ftdi_private *priv = usb_get_serial_port_data(port);
-	unsigned long map = priv->gpio_altfunc;
-
-	bitmap_complement(valid_mask, &map, ngpios);
-
-	if (bitmap_empty(valid_mask, ngpios))
-		dev_dbg(&port->dev, "no CBUS pin configured for GPIO\n");
-	else
-		dev_dbg(&port->dev, "CBUS%*pbl configured for GPIO\n", ngpios,
-			valid_mask);
-
-	return 0;
 }
 
 static int ftdi_read_eeprom(struct usb_serial *serial, void *dst, u16 addr,
@@ -2189,7 +2167,6 @@ static int ftdi_gpio_init(struct usb_serial_port *port)
 	priv->gc.get_direction = ftdi_gpio_direction_get;
 	priv->gc.direction_input = ftdi_gpio_direction_input;
 	priv->gc.direction_output = ftdi_gpio_direction_output;
-	priv->gc.init_valid_mask = ftdi_gpio_init_valid_mask;
 	priv->gc.get = ftdi_gpio_get;
 	priv->gc.set = ftdi_gpio_set;
 	priv->gc.get_multiple = ftdi_gpio_get_multiple;
@@ -2352,11 +2329,12 @@ static int ftdi_NDI_device_setup(struct usb_serial *serial)
  */
 static int ftdi_jtag_probe(struct usb_serial *serial)
 {
-	struct usb_interface *intf = serial->interface;
-	int ifnum = intf->cur_altsetting->desc.bInterfaceNumber;
+	struct usb_device *udev = serial->dev;
+	struct usb_interface *interface = serial->interface;
 
-	if (ifnum == 0) {
-		dev_info(&intf->dev, "Ignoring interface reserved for JTAG\n");
+	if (interface == udev->actconfig->interface[0]) {
+		dev_info(&udev->dev,
+			 "Ignoring serial port reserved for JTAG\n");
 		return -ENODEV;
 	}
 
@@ -2388,11 +2366,12 @@ static int ftdi_8u2232c_probe(struct usb_serial *serial)
  */
 static int ftdi_stmclite_probe(struct usb_serial *serial)
 {
-	struct usb_interface *intf = serial->interface;
-	int ifnum = intf->cur_altsetting->desc.bInterfaceNumber;
+	struct usb_device *udev = serial->dev;
+	struct usb_interface *interface = serial->interface;
 
-	if (ifnum < 2) {
-		dev_info(&intf->dev, "Ignoring interface reserved for JTAG\n");
+	if (interface == udev->actconfig->interface[0] ||
+	    interface == udev->actconfig->interface[1]) {
+		dev_info(&udev->dev, "Ignoring serial port reserved for JTAG\n");
 		return -ENODEV;
 	}
 
@@ -2501,12 +2480,12 @@ static int ftdi_prepare_write_buffer(struct usb_serial_port *port,
 #define FTDI_RS_ERR_MASK (FTDI_RS_BI | FTDI_RS_PE | FTDI_RS_FE | FTDI_RS_OE)
 
 static int ftdi_process_packet(struct usb_serial_port *port,
-		struct ftdi_private *priv, unsigned char *buf, int len)
+		struct ftdi_private *priv, char *packet, int len)
 {
-	unsigned char status;
-	bool brkint = false;
 	int i;
+	char status;
 	char flag;
+	char *ch;
 
 	if (len < 2) {
 		dev_dbg(&port->dev, "malformed packet\n");
@@ -2516,7 +2495,7 @@ static int ftdi_process_packet(struct usb_serial_port *port,
 	/* Compare new line status to the old one, signal if different/
 	   N.B. packet may be processed more than once, but differences
 	   are only processed once.  */
-	status = buf[0] & FTDI_STATUS_B0_MASK;
+	status = packet[0] & FTDI_STATUS_B0_MASK;
 	if (status != priv->prev_status) {
 		char diff_status = status ^ priv->prev_status;
 
@@ -2542,12 +2521,13 @@ static int ftdi_process_packet(struct usb_serial_port *port,
 	}
 
 	/* save if the transmitter is empty or not */
-	if (buf[1] & FTDI_RS_TEMT)
+	if (packet[1] & FTDI_RS_TEMT)
 		priv->transmit_empty = 1;
 	else
 		priv->transmit_empty = 0;
 
-	if (len == 2)
+	len -= 2;
+	if (!len)
 		return 0;	/* status only */
 
 	/*
@@ -2555,57 +2535,47 @@ static int ftdi_process_packet(struct usb_serial_port *port,
 	 * data payload to avoid over-reporting.
 	 */
 	flag = TTY_NORMAL;
-	if (buf[1] & FTDI_RS_ERR_MASK) {
-		/*
-		 * Break takes precedence over parity, which takes precedence
-		 * over framing errors. Note that break is only associated
-		 * with the last character in the buffer and only when it's a
-		 * NUL.
-		 */
-		if (buf[1] & FTDI_RS_BI && buf[len - 1] == '\0') {
+	if (packet[1] & FTDI_RS_ERR_MASK) {
+		/* Break takes precedence over parity, which takes precedence
+		 * over framing errors */
+		if (packet[1] & FTDI_RS_BI) {
+			flag = TTY_BREAK;
 			port->icount.brk++;
-			brkint = true;
-		}
-		if (buf[1] & FTDI_RS_PE) {
+			usb_serial_handle_break(port);
+		} else if (packet[1] & FTDI_RS_PE) {
 			flag = TTY_PARITY;
 			port->icount.parity++;
-		} else if (buf[1] & FTDI_RS_FE) {
+		} else if (packet[1] & FTDI_RS_FE) {
 			flag = TTY_FRAME;
 			port->icount.frame++;
 		}
 		/* Overrun is special, not associated with a char */
-		if (buf[1] & FTDI_RS_OE) {
+		if (packet[1] & FTDI_RS_OE) {
 			port->icount.overrun++;
 			tty_insert_flip_char(&port->port, 0, TTY_OVERRUN);
 		}
 	}
 
-	port->icount.rx += len - 2;
+	port->icount.rx += len;
+	ch = packet + 2;
 
-	if (brkint || port->sysrq) {
-		for (i = 2; i < len; i++) {
-			if (brkint && i == len - 1) {
-				if (usb_serial_handle_break(port))
-					return len - 3;
-				flag = TTY_BREAK;
-			}
-			if (usb_serial_handle_sysrq_char(port, buf[i]))
-				continue;
-			tty_insert_flip_char(&port->port, buf[i], flag);
+	if (port->port.console && port->sysrq) {
+		for (i = 0; i < len; i++, ch++) {
+			if (!usb_serial_handle_sysrq_char(port, *ch))
+				tty_insert_flip_char(&port->port, *ch, flag);
 		}
 	} else {
-		tty_insert_flip_string_fixed_flag(&port->port, buf + 2, flag,
-				len - 2);
+		tty_insert_flip_string_fixed_flag(&port->port, ch, flag, len);
 	}
 
-	return len - 2;
+	return len;
 }
 
 static void ftdi_process_read_urb(struct urb *urb)
 {
 	struct usb_serial_port *port = urb->context;
 	struct ftdi_private *priv = usb_get_serial_port_data(port);
-	char *data = urb->transfer_buffer;
+	char *data = (char *)urb->transfer_buffer;
 	int i;
 	int len;
 	int count = 0;

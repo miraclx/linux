@@ -18,7 +18,6 @@ kafs-y := \
 	file.o \
 	flock.o \
 	fsclient.o \
-	fs_operation.o \
 	fs_probe.o \
 	inode.o \
 	main.o \
@@ -31,7 +30,6 @@ kafs-y := \
 	server_list.o \
 	super.o \
 	vlclient.o \
-	vl_alias.o \
 	vl_list.o \
 	vl_probe.o \
 	vl_rotate.o \

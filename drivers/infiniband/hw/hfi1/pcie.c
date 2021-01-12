@@ -306,7 +306,7 @@ int pcie_speeds(struct hfi1_devdata *dd)
 	ret = pcie_capability_read_dword(dd->pcidev, PCI_EXP_LNKCAP, &linkcap);
 	if (ret) {
 		dd_dev_err(dd, "Unable to read from PCI config\n");
-		return pcibios_err_to_errno(ret);
+		return ret;
 	}
 
 	if ((linkcap & PCI_EXP_LNKCAP_SLS) != PCI_EXP_LNKCAP_SLS_8_0GB) {
@@ -334,14 +334,10 @@ int pcie_speeds(struct hfi1_devdata *dd)
 	return 0;
 }
 
-/**
- * Restore command and BARs after a reset has wiped them out
- *
- * Returns 0 on success, otherwise a negative error value
- */
+/* restore command and BARs after a reset has wiped them out */
 int restore_pci_variables(struct hfi1_devdata *dd)
 {
-	int ret;
+	int ret = 0;
 
 	ret = pci_write_config_word(dd->pcidev, PCI_COMMAND, dd->pci_command);
 	if (ret)
@@ -390,17 +386,13 @@ int restore_pci_variables(struct hfi1_devdata *dd)
 
 error:
 	dd_dev_err(dd, "Unable to write to PCI config\n");
-	return pcibios_err_to_errno(ret);
+	return ret;
 }
 
-/**
- * Save BARs and command to rewrite after device reset
- *
- * Returns 0 on success, otherwise a negative error value
- */
+/* Save BARs and command to rewrite after device reset */
 int save_pci_variables(struct hfi1_devdata *dd)
 {
-	int ret;
+	int ret = 0;
 
 	ret = pci_read_config_dword(dd->pcidev, PCI_BASE_ADDRESS_0,
 				    &dd->pcibar0);
@@ -449,7 +441,7 @@ int save_pci_variables(struct hfi1_devdata *dd)
 
 error:
 	dd_dev_err(dd, "Unable to read from PCI config\n");
-	return pcibios_err_to_errno(ret);
+	return ret;
 }
 
 /*

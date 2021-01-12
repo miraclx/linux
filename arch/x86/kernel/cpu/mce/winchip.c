@@ -6,7 +6,6 @@
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
-#include <linux/hardirq.h>
 
 #include <asm/processor.h>
 #include <asm/traps.h>
@@ -17,12 +16,14 @@
 #include "internal.h"
 
 /* Machine check handler for WinChip C6: */
-static noinstr void winchip_machine_check(struct pt_regs *regs)
+static void winchip_machine_check(struct pt_regs *regs, long error_code)
 {
-	instrumentation_begin();
+	ist_enter(regs);
+
 	pr_emerg("CPU0: Machine Check Exception.\n");
 	add_taint(TAINT_MACHINE_CHECK, LOCKDEP_NOW_UNRELIABLE);
-	instrumentation_end();
+
+	ist_exit(regs);
 }
 
 /* Set up machine check reporting on the Winchip C6 series */
